@@ -8,3 +8,4 @@ description = "Main binary crate for the Sprite Normal Studio application"
 
 [dependencies]
 eframe = "0.36.2"
+rfd = "0.17.2"
