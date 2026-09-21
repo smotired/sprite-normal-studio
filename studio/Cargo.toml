@@ -1,0 +1,9 @@
+[package]
+name = "studio"
+version = "0.1.0"
+edition = "2024"
+publish = false
+authors = ["Sam Hill <smotired@gmail.com>"]
+description = "Main binary crate for the Sprite Normal Studio application"
+
+[dependencies]
