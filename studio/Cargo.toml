@@ -7,3 +7,4 @@ authors = ["Sam Hill <smotired@gmail.com>"]
 description = "Main binary crate for the Sprite Normal Studio application"
 
 [dependencies]
+eframe = "0.36.2"
