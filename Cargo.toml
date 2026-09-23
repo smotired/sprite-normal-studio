@@ -1,4 +1,4 @@
 [workspace]
 resolver = "3"
-members = ["studio"]
+members = ["rendering","studio"]
 default-members = ["studio"]
