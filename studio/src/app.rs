@@ -3,6 +3,7 @@ mod editor;
 
 use std::path::{Path, PathBuf};
 use eframe::egui;
+use rendering::device::RendererDevice;
 
 /// Defines application state
 pub struct StudioApp {
@@ -10,6 +11,9 @@ pub struct StudioApp {
     sprite_path: Option<PathBuf>,
     /// Path to the current normal map file which is not modified
     normal_path: Option<PathBuf>,
+
+    /// Renderer device
+    device: RendererDevice,
 }
 
 /// Default initializer for application state
@@ -18,6 +22,7 @@ impl Default for StudioApp {
         Self {
             sprite_path: None,
             normal_path: None,
+            device: RendererDevice::new(),
         }
     }
 }
@@ -43,7 +48,7 @@ impl eframe::App for StudioApp {
                 columns[0].add(file::SpriteFileSelect::new(&mut self.normal_path, "Normal map file path"));
 
                 // Main content editor
-                columns[1].add(editor::Editor::new());
+                columns[1].add(editor::Editor::new(&mut self.device));
             });
         });
     }

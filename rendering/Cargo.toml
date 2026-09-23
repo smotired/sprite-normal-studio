@@ -7,5 +7,8 @@ authors = ["Sam Hill <smotired@gmail.com>"]
 description = "Library crate for rendering the sprite, normal map, and UI tools"
 
 [dependencies]
+anyhow = "1.0.104"
+egui = "0.36.2"
+pollster = "1.0.1"
 vecmath = "1.0.0"
-vulkano = "0.35.2"
+wgpu = "30.0.1"
