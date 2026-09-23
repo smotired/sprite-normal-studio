@@ -16,8 +16,10 @@ impl<'a> Editor<'a> {
 
 impl Widget for Editor<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
-        // TODO: Find size somehow
-        let tex = &self.device.render((240, 240), ui.ctx());
+        let ctx = ui.ctx();
+        let avail = ui.available_size() * ctx.pixels_per_point();
+        let size = (avail.x.clamp(1.0, 256.0) as usize, avail.y.clamp(1.0, 256.0) as usize);
+        let tex = &self.device.render(size, ctx);
         ui.image((tex.id(), tex.size_vec2()))
     }
 }

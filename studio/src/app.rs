@@ -30,12 +30,13 @@ impl Default for StudioApp {
 /// Root app UI
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.columns(2, |columns|{
-                // Left sidebar
-                columns[0].heading("Sprite Normal Studio");
+        egui::Panel::left("sidebar")
+            .exact_size(300.0)
+            .resizable(false)
+            .show(ui, |ui| {
+                ui.heading("Sprite Normal Studio");
                 
-                columns[0].add(
+                ui.add(
                     file::SpriteFileSelect::new(
                         &mut self.sprite_path,
                         "Sprite file path",
@@ -45,11 +46,11 @@ impl eframe::App for StudioApp {
                     })
                 );
                 
-                columns[0].add(file::SpriteFileSelect::new(&mut self.normal_path, "Normal map file path"));
-
-                // Main content editor
-                columns[1].add(editor::Editor::new(&mut self.device));
+                ui.add(file::SpriteFileSelect::new(&mut self.normal_path, "Normal map file path"));
             });
+
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+            ui.add(editor::Editor::new(&mut self.device));
         });
     }
 }
