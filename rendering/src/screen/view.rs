@@ -6,26 +6,19 @@ use wgpu::{Device, util::DeviceExt};
 // Needed for storing into a buffer
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
-    // Width and height of the actual screen texture
-    screen: [u32; 2],
-    // Buffer width in pixels for scanline wrapping
-    buffer_width: u32,
-
-    _pad: u32, // pad to power of 2 bytes
+    blue: u32, // we just need something to pass to the buffer
 }
 
 impl CameraUniform {
-    pub fn new((width, height): (usize, usize), buffer_width: usize) -> Self {
+    pub fn new(blue: u32) -> Self {
         Self {
-            screen: [width as u32, height as u32],
-            buffer_width: buffer_width as u32,
-            _pad: 0,
+            blue,
         }
     }
 
-    pub fn buffer(size: usize, device: &Device) -> wgpu::Buffer {
+    pub fn buffer(device: &Device) -> wgpu::Buffer {
         // Create initial contents
-        let camera = Self::new((size, size), size);
+        let camera = Self::new(0);
 
         // Create and return the buffer
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

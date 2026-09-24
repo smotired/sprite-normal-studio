@@ -2593,6 +2593,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "egui",
+ "egui-wgpu",
  "pollster 1.0.1",
  "vecmath",
  "wgpu",

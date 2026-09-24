@@ -8,6 +8,7 @@ fn main() -> eframe::Result {
 
     // Set up the viewport
     let options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 540.0]),
         ..Default::default()
     };
@@ -16,11 +17,12 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Sprite Normal Studio",
         options,
-        Box::new(|_cc| {
+        Box::new(|cc| {
             // Add any extra packages here
+            let render_state = cc.wgpu_render_state.clone().expect("wgpu renderer required");
 
             // Create the application for the window
-            Ok(Box::<StudioApp>::default())
+            Ok(Box::new(StudioApp::new(render_state)))
         })
     )
 }
