@@ -31,7 +31,7 @@ impl Default for StudioApp {
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Panel::left("sidebar")
-            .exact_size(300.0)
+            .exact_size(240.0)
             .resizable(false)
             .show(ui, |ui| {
                 ui.heading("Sprite Normal Studio");
