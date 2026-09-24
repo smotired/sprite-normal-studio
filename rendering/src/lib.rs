@@ -1,52 +1,27 @@
 mod screen;
 
-use egui::{Context, TextureHandle};
-use pollster::FutureExt;
-use wgpu::{Device, Instance, Queue};
+// TODO: May make this crate just for rendering the screen and have another crate for compute shaders for the actual like images
 
 use crate::screen::ScreenRenderer;
 
 // Contains methods for initializing a renderer with a device
 pub struct Renderer {
-    device: Device,
-    queue: Queue,
     screen: ScreenRenderer,
-    texture: Option<TextureHandle>,
 }
 
 impl Renderer {
-    pub fn new() -> Renderer {
-        // Create the WGPU instance and adapter as a handle to the GPU
-        let instance = Instance::default();
-        let adapter = instance.request_adapter(&Default::default()).block_on().unwrap();
-
-        // Create the device and queue
-        let (device, queue) = adapter.request_device(&Default::default()).block_on().unwrap();
-
+    pub fn new(render_state: &egui_wgpu::RenderState) -> Renderer {
         // Create renderers
-        let screen = ScreenRenderer::new(&device);
+        let screen = ScreenRenderer::new(&render_state);
 
         // Return final struct
         Renderer {
-            device,
-            queue,
-            screen,
-            texture: None,
+            screen
         }
     }
 
-    pub fn render(self: &mut Self, size: (usize, usize), ctx: &Context) -> (&TextureHandle, usize) {
+    pub fn render(self: &mut Self, render_state: &egui_wgpu::RenderState, size: (usize, usize)) -> egui::TextureId {
         // Render the editor
-        let (image, image_size) = self.screen.render(size, &self.device, &self.queue).expect("Rendering failed");
-
-        // Create or update the texture
-        match &mut self.texture {
-            Some(tex) => tex.set(image, egui::TextureOptions::NEAREST),
-            None => {
-                self.texture = Some(ctx.load_texture("editor", image, egui::TextureOptions::NEAREST));
-            }
-        };
-
-        (self.texture.as_ref().unwrap(), image_size)
+        self.screen.render(render_state, size)
     }
 }

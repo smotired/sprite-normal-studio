@@ -13,16 +13,19 @@ pub struct StudioApp {
     normal_path: Option<PathBuf>,
 
     /// Renderer device
-    device: Renderer,
+    renderer: Renderer,
+    /// Render state
+    render_state: eframe::egui_wgpu::RenderState,
 }
 
 /// Default initializer for application state
-impl Default for StudioApp {
-    fn default() -> Self {
+impl StudioApp {
+    pub fn new(render_state: eframe::egui_wgpu::RenderState) -> Self {
         Self {
             sprite_path: None,
             normal_path: None,
-            device: Renderer::new(),
+            renderer: Renderer::new(&render_state),
+            render_state,
         }
     }
 }
@@ -50,7 +53,7 @@ impl eframe::App for StudioApp {
             });
 
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-            ui.add(editor::Editor::new(&mut self.device));
+            ui.add(editor::Editor::new(&mut self.renderer, &self.render_state));
         });
     }
 }
