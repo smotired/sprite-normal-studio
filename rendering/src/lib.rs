@@ -35,9 +35,9 @@ impl Renderer {
         }
     }
 
-    pub fn render(self: &mut Self, size: (usize, usize), ctx: &Context) -> &TextureHandle {
+    pub fn render(self: &mut Self, size: (usize, usize), ctx: &Context) -> (&TextureHandle, usize) {
         // Render the editor
-        let image = self.screen.render(size, &self.device, &self.queue).expect("Rendering failed");
+        let (image, image_size) = self.screen.render(size, &self.device, &self.queue).expect("Rendering failed");
 
         // Create or update the texture
         match &mut self.texture {
@@ -47,6 +47,6 @@ impl Renderer {
             }
         };
 
-        self.texture.as_ref().unwrap()
+        (self.texture.as_ref().unwrap(), image_size)
     }
 }
