@@ -3,7 +3,7 @@ mod editor;
 
 use std::path::{Path, PathBuf};
 use eframe::egui;
-use rendering::device::RendererDevice;
+use rendering::Renderer;
 
 /// Defines application state
 pub struct StudioApp {
@@ -13,7 +13,7 @@ pub struct StudioApp {
     normal_path: Option<PathBuf>,
 
     /// Renderer device
-    device: RendererDevice,
+    device: Renderer,
 }
 
 /// Default initializer for application state
@@ -22,7 +22,7 @@ impl Default for StudioApp {
         Self {
             sprite_path: None,
             normal_path: None,
-            device: RendererDevice::new(),
+            device: Renderer::new(),
         }
     }
 }

@@ -2,17 +2,17 @@ use std::sync::mpsc::channel;
 use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue};
 use egui::ColorImage;
 
-pub struct NormalsRenderer {
+pub struct ScreenRenderer {
     pipeline: ComputePipeline,
     output_buffer: Buffer,
     bind_group: BindGroup,
     temp_buffer: Buffer,
 }
 
-impl NormalsRenderer {
+impl ScreenRenderer {
     pub fn new(device: &Device) -> Self {
         // Load the shader
-        let shader = device.create_shader_module(wgpu::include_wgsl!("normals/helloworld.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/helloworld.wgsl"));
 
         // Create the pipeline for the shader
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
