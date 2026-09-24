@@ -1,15 +1,15 @@
 use eframe::egui::{
     Response, Ui, Widget,
 };
-use rendering::{device::RendererDevice};
+use rendering::Renderer;
 
 /// Widget for the main editor
 pub struct Editor<'a> {
-    device: &'a mut RendererDevice,
+    device: &'a mut Renderer,
 }
 
 impl<'a> Editor<'a> {
-    pub fn new(device: &'a mut RendererDevice) -> Self {
+    pub fn new(device: &'a mut Renderer) -> Self {
         Self { device }
     }
 }
