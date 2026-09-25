@@ -1,23 +1,24 @@
 use wgpu::{Device, util::DeviceExt};
 
-// Needed for Rust to store data correctly for shaders
-#[repr(C)]
-// Needed for storing into a buffer
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+/// Formats data used for the actual rendering process.
+#[repr(C)] // Needed for Rust to pass to shaders correctly
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)] // Needed to store into a buffer below
 pub struct ViewportDataUniform {
     blue: u32, // we just need something to pass to the buffer
 }
 
 impl ViewportDataUniform {
-    pub fn new(blue: u32) -> Self {
+    /// Create viewport data from some parameters
+    pub fn new() -> Self {
         Self {
-            blue,
+            blue: 63, // we just need something to pass to the buffer
         }
     }
 
+    /// Create a buffer that can be used to store this uniform data.
     pub fn buffer(device: &Device) -> wgpu::Buffer {
         // Create initial contents
-        let data = Self::new(0);
+        let data = Self::new();
 
         // Create and return the buffer
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

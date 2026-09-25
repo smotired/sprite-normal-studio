@@ -148,8 +148,8 @@ impl Renderer {
         }
 
         // Write uniforms
-        let camera = ViewportDataUniform::new(63);
-        rs.queue.write_buffer(&self.control.uniform_buffer, 0, bytemuck::bytes_of(&camera));
+        let uniform = ViewportDataUniform::new();
+        rs.queue.write_buffer(&self.control.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
 
         // Submit workload
         rs.queue.submit([encoder.finish()]);
