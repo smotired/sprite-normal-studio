@@ -12,7 +12,7 @@ pub struct Renderer {
 impl Renderer {
     pub fn new(render_state: &egui_wgpu::RenderState) -> Renderer {
         // Create renderers
-        let screen = ScreenRenderer::new(&render_state);
+        let screen = ScreenRenderer::new(render_state);
 
         // Return final struct
         Renderer {
@@ -20,7 +20,7 @@ impl Renderer {
         }
     }
 
-    pub fn render(self: &mut Self, render_state: &egui_wgpu::RenderState, size: (usize, usize)) -> egui::TextureId {
+    pub fn render(&mut self, render_state: &egui_wgpu::RenderState, size: (usize, usize)) -> egui::TextureId {
         // Render the editor
         self.screen.render(render_state, size)
     }

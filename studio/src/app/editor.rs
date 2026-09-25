@@ -20,7 +20,7 @@ impl Widget for Editor<'_> {
         let ppp = ui.ctx().pixels_per_point();
         let px = (((points.x * ppp) as usize).max(16), ((points.y * ppp) as usize).max(16));
 
-        let id = self.renderer.render(&self.render_state, px);
+        let id = self.renderer.render(self.render_state, px);
         ui.add(Image::new(SizedTexture::new(id, points)))
     }
 }

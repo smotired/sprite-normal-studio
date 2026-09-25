@@ -85,7 +85,7 @@ impl ScreenRenderer {
         (texture, view, bind_group)
     }
 
-    pub fn render(self: &mut Self, rs: &egui_wgpu::RenderState, (width, height): (usize, usize)) -> TextureId {
+    pub fn render(&mut self, rs: &egui_wgpu::RenderState, (width, height): (usize, usize)) -> TextureId {
         // Ensure we aren't rendering too small
         let width = width.max(16);
         let height = height.max(16);
