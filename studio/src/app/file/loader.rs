@@ -40,7 +40,7 @@ impl SpriteFileSelection {
             size: (width, height),
         };
 
-        // Try to select the image
+        // Try to select the image, or just leave it as empty
         if let Some(path) = path {
             selection.select(path, rs);
         }
@@ -48,17 +48,75 @@ impl SpriteFileSelection {
         selection
     }
 
-    /// Select a file and put it into the texture.
-    /// If selection fails, leave the selection unmodified.
-    pub fn select(&mut self, path: PathBuf, rs: &RenderState) {
-        // Try to open the image file
-        if let Ok(image) = image::open(&path) {
-            let image = image.to_rgba8();
-            self.path = Some(path); // image exists so we can set path
+    /// Attempt to select a file and put it into the texture.
+    /// On failure, return an Err and leave the selection unmodified.
+    fn try_select(&mut self, path: PathBuf, rs: &RenderState) -> anyhow::Result<(u32, u32)> {
+        // Try to open the image file or return the error
+        let image = image::open(&path)?.to_rgba8();
 
-            // Get image dimensions 
-            self.size = image.dimensions();
-            let (width, height) = self.size;
+        // No failures beyond this point
+        self.path = Some(path); // image exists so we can set path
+
+        // Get image dimensions 
+        self.size = image.dimensions();
+        let (width, height) = self.size;
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+
+        // Create a new texture
+        let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&self.label),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage:
+                wgpu::TextureUsages::COPY_DST |       // we need this to write to it below
+                wgpu::TextureUsages::TEXTURE_BINDING, // it is a texture
+            view_formats: &[],
+        });
+
+        // Write to the texture
+        rs.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &image,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width), // RGBA8 = 4 bytes per pixel
+                rows_per_image: Some(height),
+            },
+            size,
+        );
+
+        // Update the texture ID
+        let view = texture.create_view(&Default::default());
+        rs.renderer.write().update_egui_texture_from_wgpu_texture(
+            &rs.device, &view, wgpu::FilterMode::Nearest, self.texture_id,
+        );
+
+        Ok((width, height))
+    }
+
+    /// Attempt to select a file and load it into the texture.
+    /// If selection fails, leave the selection unmodified.
+    pub fn select(&mut self, path: PathBuf, rs: &RenderState) -> (u32, u32) {
+        if let Ok(size) = self.try_select(path, rs) {
+            size
+        } else { self.size }
+    }
+
+    /// Attempt to select a file and load it into the texture.
+    /// If selection fails, creates an image with the same size as the reference, but filled with a color.
+    pub fn select_or_fill(&mut self, path: PathBuf, rs: &RenderState, size: (u32, u32), color: [u8; 4]) {
+        if let Err(_err) = self.try_select(path.clone(), rs) {
+            let (width, height) = size;
+            self.size = (width, height);
+            self.path = Some(path); // Keep invalid path, we will save to it.
             let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
 
             // Create a new texture
@@ -74,6 +132,9 @@ impl SpriteFileSelection {
                     wgpu::TextureUsages::TEXTURE_BINDING, // it is a texture
                 view_formats: &[],
             });
+
+            // Create the data for the texture, which should all be the u32 color
+            let image = image::RgbaImage::from_pixel(width, height, image::Rgba(color));
 
             // Write to the texture
             rs.queue.write_texture(

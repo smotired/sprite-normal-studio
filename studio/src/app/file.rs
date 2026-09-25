@@ -8,7 +8,7 @@ use loader::SpriteFileSelection;
 use crate::app::file::loader::SpriteFileSelectionDisplay;
 
 /// Event handler type triggered when a sprite file is selected
-type FileSelectEventHandler<'a> = Box<dyn FnOnce(&PathBuf) + 'a>;
+type FileSelectEventHandler<'a> = Box<dyn FnOnce(PathBuf, (u32, u32)) + 'a>;
 
 /// Widget for a file selector widget
 pub struct SpriteFileSelect<'a> {
@@ -33,7 +33,7 @@ impl<'a> SpriteFileSelect<'a> {
     #[inline]
     /// Set the on_select event for the box
     pub fn on_select<F>(mut self, event: F) -> Self
-        where F: FnOnce(&PathBuf) + 'a
+        where F: FnOnce(PathBuf, (u32, u32)) + 'a
     {
         self.fn_select = Some(Box::new(event));
         self
@@ -61,8 +61,8 @@ impl Widget for SpriteFileSelect<'_> {
                             .set_directory("/")
                             .pick_file()
                     {
-                        if let Some(event) = self.fn_select { event(&path); }
-                        self.value.select(path, self.render_state);
+                        let size = self.value.select(path.clone(), self.render_state);
+                        if let Some(event) = self.fn_select { event(path, size); }
                     }
                 });
             });
