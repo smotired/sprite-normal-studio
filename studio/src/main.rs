@@ -37,8 +37,11 @@ fn main() -> eframe::Result {
         "Sprite Normal Studio",
         options,
         Box::new(|cc| {
-            // Add any extra packages here
+            // Ensure we are rendering with wgpu
             let render_state = cc.wgpu_render_state.clone().expect("wgpu renderer required");
+
+            // Ensure we have image support
+            egui_extras::install_image_loaders(&cc.egui_ctx);
 
             // Create the application for the window
             Ok(Box::new(StudioApp::new(render_state)))

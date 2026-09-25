@@ -1,7 +1,11 @@
+pub mod loader;
+
 use std::path::PathBuf;
-use eframe::egui::{
-    Align, Layout, Response, Ui, Widget,
-};
+use eframe::egui::{Align, Layout, Response, Ui, Widget};
+
+use loader::SpriteFileSelection;
+
+use crate::app::file::loader::SpriteFileSelectionDisplay;
 
 /// Event handler type triggered when a sprite file is selected
 type FileSelectEventHandler<'a> = Box<dyn FnOnce(&PathBuf) + 'a>;
@@ -10,17 +14,19 @@ type FileSelectEventHandler<'a> = Box<dyn FnOnce(&PathBuf) + 'a>;
 pub struct SpriteFileSelect<'a> {
     /// Method to run when a new file name is selected.
     fn_select: Option<FileSelectEventHandler<'a>>,
-    value: &'a mut Option<PathBuf>,
+    value: &'a mut SpriteFileSelection,
     label: &'a str,
+    render_state: &'a eframe::egui_wgpu::RenderState,
 }
 
 impl<'a> SpriteFileSelect<'a> {
     /// Create a SpriteFileSelect widget
-    pub fn new(value: &'a mut Option<PathBuf>, label: &'a str) -> Self {
+    pub fn new(value: &'a mut SpriteFileSelection, label: &'a str, render_state: &'a eframe::egui_wgpu::RenderState) -> Self {
         Self {
             fn_select: None,
             value,
             label,
+            render_state,
         }
     }
 
@@ -56,17 +62,13 @@ impl Widget for SpriteFileSelect<'_> {
                             .pick_file()
                     {
                         if let Some(event) = self.fn_select { event(&path); }
-                        *self.value = Some(path);
+                        self.value.select(path, self.render_state);
                     }
                 });
             });
 
-            // Add the path label
-            ui.label(if let Some(path) = self.value {
-                path.as_path().file_name().unwrap().to_str().unwrap().to_string()
-            } else {
-                format!("No {} selected.", String::from(self.label).to_lowercase())
-            });
+            // Add the image widget or default label
+            ui.add(SpriteFileSelectionDisplay::new(self.value))
         }).response
     }
 }

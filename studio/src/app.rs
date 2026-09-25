@@ -5,12 +5,14 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use rendering::Renderer;
 
+use crate::app::file::loader::SpriteFileSelection;
+
 /// Defines application state
 pub struct StudioApp {
     /// Path to the current sprite file which is not modified
-    sprite_path: Option<PathBuf>,
+    sprite_path: SpriteFileSelection,
     /// Path to the current normal map file which is not modified
-    normal_path: Option<PathBuf>,
+    normal_path: SpriteFileSelection,
 
     /// Renderer device
     renderer: Renderer,
@@ -22,8 +24,8 @@ pub struct StudioApp {
 impl StudioApp {
     pub fn new(render_state: eframe::egui_wgpu::RenderState) -> Self {
         Self {
-            sprite_path: None,
-            normal_path: None,
+            sprite_path: SpriteFileSelection::new("spritesheet".to_owned(), &render_state, None),
+            normal_path: SpriteFileSelection::new("normal_map".to_owned(), &render_state, None),
             renderer: Renderer::new(&render_state),
             render_state,
         }
@@ -43,13 +45,21 @@ impl eframe::App for StudioApp {
                     file::SpriteFileSelect::new(
                         &mut self.sprite_path,
                         "Sprite file path",
+                        &self.render_state,
                     )
                     .on_select(|path| {
-                        self.normal_path = Some(generate_normal_map_filename(path.as_path()));
+                        // Also reselect the normal map file when selecting a new sprite
+                        self.normal_path.select(generate_normal_map_filename(path.as_path()), &self.render_state);
                     })
                 );
                 
-                ui.add(file::SpriteFileSelect::new(&mut self.normal_path, "Normal map file path"));
+                ui.add(
+                    file::SpriteFileSelect::new(
+                        &mut self.normal_path,
+                        "Normal map file path",
+                        &self.render_state,
+                    )
+                );
             });
 
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {

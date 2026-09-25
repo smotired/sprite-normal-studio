@@ -11,3 +11,5 @@ rendering = { path = "../rendering" }
 eframe = { version = "0.36.2", features = ["wgpu"] }
 rfd = "0.17.2"
 env_logger = "0.11.11"
+egui_extras = { version = "0.36.2", features = ["all_loaders"] }
+image = "0.25.10"
