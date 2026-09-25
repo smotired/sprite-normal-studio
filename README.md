@@ -34,8 +34,8 @@ Basically, other software is to Photoshop what this is to Illustrator.
 
 ```
 [x] Allow selecting files for sprite and normal map
-[ ] Previews for sprite and normal map
-[ ] Create a default normal map in memory if selected path does not exist
+[x] Previews for sprite and normal map
+[x] Create a default normal map in memory if selected path does not exist
 [ ] Pass sprite and normal map to compute shader and render the sprite
 [ ] Add a light source to shader as if it had a flat normal map
 [ ] Render with the normal map
