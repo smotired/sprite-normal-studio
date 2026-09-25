@@ -3975,6 +3975,7 @@ dependencies = [
 name = "studio"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "eframe",
  "egui_extras",
  "env_logger",

@@ -44,19 +44,24 @@ impl eframe::App for StudioApp {
                 ui.add(
                     file::SpriteFileSelect::new(
                         &mut self.sprite_path,
-                        "Sprite file path",
+                        "Spritesheet",
                         &self.render_state,
                     )
-                    .on_select(|path| {
+                    .on_select(|path, size| {
                         // Also reselect the normal map file when selecting a new sprite
-                        self.normal_path.select(generate_normal_map_filename(path.as_path()), &self.render_state);
+                        self.normal_path.select_or_fill(
+                            generate_normal_map_filename(path.as_path()), 
+                            &self.render_state,
+                            size,
+                            [128, 128, 255, 255],
+                        );
                     })
                 );
                 
                 ui.add(
                     file::SpriteFileSelect::new(
                         &mut self.normal_path,
-                        "Normal map file path",
+                        "Normal Map",
                         &self.render_state,
                     )
                 );
