@@ -39,8 +39,10 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Pass sprite and normal map to compute shader and render the sprite
 [x] Add a light source to shader as if it had a flat normal map
 [x] Render with the normal map
-[ ] Add camera controls
-[ ] Add controls for the light source
+[x] Add camera controls
+[ ] Add controls for the light source and a widget to show where it is.
+    This will require setting up the Overlay pipeline
+[ ] Allow toggling overlay
 ```
 
 ### Phase III
@@ -48,7 +50,6 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 [ ] Create a Zone struct
 [ ] Render Zone boundaries
-[ ] Controls to show/hide zone paths
 [ ] Assign pixels to zones in compute shader
 [ ] Allow creating zones with bezier paths
 [ ] Modify zone paths, at path and vertex level, including deletion and
@@ -57,7 +58,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
     when manipulated
 [ ] Selecting and manipulating multiple zones/vertices at once
 [ ] Set base normal for a zone, which will be applied after all shapes.
-    Set up compute shader pipeline for this.
+    Set up compute shader pipeline for normal map generation.
 [ ] Window preview mode for working normal map
 ```
 

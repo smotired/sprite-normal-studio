@@ -1,10 +1,12 @@
 mod generator;
 mod camera;
+mod input;
 
 use wgpu::{Device, Queue, Texture};
 
 use crate::generator::Generator;
 use crate::camera::Camera;
+pub use crate::input::{Input, Axis};
 
 pub type ViewportState = (Camera, ());
 
