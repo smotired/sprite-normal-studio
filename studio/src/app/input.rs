@@ -22,20 +22,20 @@ impl StudioApp {
         // Handle specific events
         Box::new(i.events.clone().into_iter().map(move |event| {
             match event {
-                // Mouse wheel event: Handles move or zoom depending on if ctrl is held
+                // Mouse wheel event: Handles move or zoom depending on if shift is held
                 Event::MouseWheel { delta, modifiers, .. } => {
-                    if modifiers.ctrl {
-                        let scale = scale(modifiers.shift);
+                    if modifiers.shift {
+                        let scale = scale(modifiers.ctrl);
                         if delta.y > 0.0 {
                             Input::CameraScale(scale, mouse_world)
                         } else if delta.y < 0.0 {
                             Input::CameraScale(1f32 / scale, mouse_world)
                         } else { Input::NoInput }
                     } else {
-                        if modifiers.shift && delta.y != 0.0 {
-                            Input::CameraMove(Axis::Horizontal, delta.y * 5.0)
-                        } else if !modifiers.shift && delta.y != 0.0 {
-                            Input::CameraMove(Axis::Vertical, -delta.y * 5.0)
+                        if modifiers.ctrl && delta.y != 0.0 {
+                            Input::CameraMove(Axis::Horizontal, delta.y * 8.0)
+                        } else if !modifiers.ctrl && delta.y != 0.0 {
+                            Input::CameraMove(Axis::Vertical, -delta.y * 8.0)
                         } else { Input::NoInput }
                     }
                 },
