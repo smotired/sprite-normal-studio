@@ -1,6 +1,6 @@
 mod viewport;
 
-use wgpu::{BindGroup, Buffer, ComputePipeline, Device, TextureView};
+use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Texture, TextureView};
 use egui::{TextureId};
 
 use crate::viewport::ViewportDataUniform;
@@ -27,6 +27,12 @@ struct RenderControl {
 
     /// Bind group for sending the textures and uniforms to the GPU.
     bind_group: BindGroup,
+
+    /// TextureView for the spritesheet, passed to the renderer
+    sprite_view: TextureView,
+
+    /// TextureView for the working normal map, passed to the renderer
+    normal_view: TextureView,
 }
 
 /// Primary struct for rendering the viewport.
@@ -47,7 +53,7 @@ impl Renderer {
 
         // Create the pipeline for the shader
         let pipeline = rs.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Introduction Compute Pipeline"),
+            label: Some("Viewport Rendering Pipeline"),
             layout: None,
             module: &shader,
             entry_point: None,
@@ -61,50 +67,29 @@ impl Renderer {
         let uniform_buffer = ViewportDataUniform::buffer(&rs.device);
         
         // Create texture data
-        let (view, bind_group) = Self::create_texture(&rs.device, &pipeline, &uniform_buffer, size);
+        let view = create_texture(&rs.device, size);
 
         // Get the initial ID
         let texture_id = rs.renderer.write().register_native_texture(&rs.device, &view, wgpu::FilterMode::Nearest);
 
+        // Create initial input textures
+        let sprite_view = create_texture(&rs.device, (16, 16));
+        let normal_view = create_texture(&rs.device, (16, 16));
+
+        // Create the bind group
+        let bind_group = create_bind_group(
+            &rs.device,
+            &pipeline,
+            &view,
+            &sprite_view,
+            &normal_view,
+            &uniform_buffer
+        );
+
         // Set up
-        let control = RenderControl { pipeline, uniform_buffer, bind_group };
-        let texture = ViewportTexture { size, view, id: texture_id };
+        let control = RenderControl { pipeline, uniform_buffer, bind_group, sprite_view, normal_view  };
+        let texture = ViewportTexture { size, view, id: texture_id};
         Self { control, texture }
-    }
-    
-    /// Create a texture, view, and bindgroup for a pipeline. Should be called when the target render size changes.
-    fn create_texture(device: &Device, pipeline: &ComputePipeline, uniform_buffer: &Buffer, (width, height): (usize, usize)) -> (TextureView, BindGroup) {
-        // Create a new texture and texture view when resizing
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("output"),
-            size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        
-        let view = texture.create_view(&Default::default());
-
-        // Must recreate the bind group.
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-            ]
-        });
-
-        (view, bind_group)
     }
 
     /// Render the editor UI. Runs the shader and updates the texture, and returns the texture ID for use in egui.
@@ -115,20 +100,23 @@ impl Renderer {
 
         // Recreate texture if needed
         if (width, height) != self.texture.size {
-            let (view, bind_group) = Self::create_texture(
-                &rs.device,
-                &self.control.pipeline,
-                &self.control.uniform_buffer,
-                (width, height)
-            );
+            let view = create_texture(&rs.device, (width, height));
 
             rs.renderer.write().update_egui_texture_from_wgpu_texture(
                 &rs.device, &view, wgpu::FilterMode::Nearest, self.texture.id,
             );
 
             self.texture.view = view;
-            self.control.bind_group = bind_group;
             self.texture.size = (width, height);
+
+            self.control.bind_group = create_bind_group(
+                &rs.device,
+                &self.control.pipeline,
+                &self.texture.view,
+                &self.control.sprite_view,
+                &self.control.normal_view,
+                &self.control.uniform_buffer
+            );
         }
 
         // Create a command encoder
@@ -157,4 +145,66 @@ impl Renderer {
         // Return the texture ID
         self.texture.id
     }
+
+    /// Set the input textures for the viewport
+    pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
+    {
+        // Get views for the textures
+        self.control.sprite_view = sprite.create_view(&Default::default());
+        self.control.normal_view = normal.create_view(&Default::default());
+
+        // Must recreate the bind group
+        self.control.bind_group = create_bind_group(
+            device,
+            &self.control.pipeline,
+            &self.texture.view,
+            &self.control.sprite_view,
+            &self.control.normal_view,
+            &self.control.uniform_buffer
+        );
+    }
+}
+    
+/// Create a texture and view bindgroup for a pipeline. Should be called when the target render size changes.
+fn create_texture(device: &Device, (width, height): (usize, usize)) -> TextureView {
+    // Create a new texture and texture view when resizing
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("output"),
+        size: wgpu::Extent3d { width: width as u32, height: height as u32, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    
+    texture.create_view(&Default::default())
+}
+
+/// Create a new bind group for a pipeline. Should be called whenever the viewport is resized or texture references are changed
+/// (Not just whenever the input textures are written to)
+fn create_bind_group(device: &Device, pipeline: &ComputePipeline, output: &TextureView, sprite: &TextureView, normal: &TextureView, uniform: &Buffer) -> BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&output),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&sprite),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&normal),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: uniform.as_entire_binding(),
+            },
+        ]
+    })
 }

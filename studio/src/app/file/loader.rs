@@ -6,11 +6,15 @@ use eframe::egui_wgpu::{RenderState, wgpu};
 pub struct SpriteFileSelection {
     label: String,
     path: Option<PathBuf>,
+    texture: wgpu::Texture,
     texture_id: TextureId,
     size: (u32, u32),
 }
 
 impl SpriteFileSelection {
+    /// Clone the saved texture
+    pub fn texture(&self) -> &wgpu::Texture { &self.texture }
+
     /// Create a new SpriteFileSelection with nothing selected.
     /// label: The label for the texture itself
     pub fn new(label: String, rs: &RenderState, path: Option<PathBuf>) -> Self {
@@ -36,6 +40,7 @@ impl SpriteFileSelection {
         let mut selection = Self {
             label,
             path: None,
+            texture,
             texture_id,
             size: (width, height),
         };
@@ -99,6 +104,7 @@ impl SpriteFileSelection {
             &rs.device, &view, wgpu::FilterMode::Nearest, self.texture_id,
         );
 
+        self.texture = texture;
         Ok((width, height))
     }
 
@@ -158,6 +164,8 @@ impl SpriteFileSelection {
             rs.renderer.write().update_egui_texture_from_wgpu_texture(
                 &rs.device, &view, wgpu::FilterMode::Nearest, self.texture_id,
             );
+
+            self.texture = texture;
         }
     }
 }

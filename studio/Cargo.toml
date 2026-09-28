@@ -8,6 +8,7 @@ description = "Main binary crate for the Sprite Normal Studio application"
 
 [dependencies]
 rendering = { path = "../rendering" }
+controller = { path = "../controller" }
 eframe = { version = "0.36.2", features = ["wgpu"] }
 rfd = "0.17.2"
 env_logger = "0.11.11"
