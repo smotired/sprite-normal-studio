@@ -54,7 +54,7 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Call the controller's update method to regenerate any textures as needed
-        self.controller.update(&self.render_state.device, &self.render_state.queue);
+        let viewport_state = self.controller.update(&self.render_state.device, &self.render_state.queue);
 
         egui::Panel::left("sidebar")
             .exact_size(240.0)
@@ -103,7 +103,12 @@ impl eframe::App for StudioApp {
             });
 
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-            ui.add(editor::Editor::new(&mut self.renderer, &self.render_state, self.viewport_texture_id));
+            ui.add(editor::Editor::new(
+                &mut self.renderer,
+                &self.render_state,
+                self.viewport_texture_id,
+                viewport_state,
+            ));
         });
     }
 }

@@ -7,5 +7,6 @@ authors = ["Sam Hill <smotired@gmail.com>"]
 description = "Library crate for rendering the sprite, normal map, and UI tools"
 
 [dependencies]
+controller = { workspace = true }
 wgpu = { workspace = true }
 bytemuck = { version = "1.25.2", features = ["derive"] }
