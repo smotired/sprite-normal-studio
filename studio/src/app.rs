@@ -1,7 +1,8 @@
 mod file;
 mod editor;
+mod input;
+mod render;
 
-use std::path::{Path, PathBuf};
 use controller::Controller;
 use eframe::egui;
 use eframe::wgpu::FilterMode;
@@ -53,70 +54,17 @@ impl StudioApp {
 /// Root app UI
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Handle input events
+        ui.input_mut(|i| {
+            for event in self.handle_input(i) {
+                self.controller.handle_input(event);
+            }
+        });
+
         // Call the controller's update method to regenerate any textures as needed
         let viewport_state = self.controller.update(&self.render_state.device, &self.render_state.queue);
 
-        egui::Panel::left("sidebar")
-            .exact_size(240.0)
-            .resizable(false)
-            .show(ui, |ui| {
-                ui.heading("Sprite Normal Studio");
-
-                let mut must_update_textures = false;
-                
-                // Spritesheet selector button
-                ui.add(
-                    file::SpriteFileSelect::new(
-                        &mut self.sprite_path,
-                        "Spritesheet",
-                        &self.render_state,
-                    )
-                    .on_select(|path, size| {
-                        // Also reselect the normal map file when selecting a new sprite
-                        self.normal_path.select_or_fill(
-                            generate_normal_map_filename(path.as_path()), 
-                            &self.render_state,
-                            size,
-                            [128, 128, 255, 255],
-                        );
-
-                        must_update_textures = true;
-                    })
-                );
-                
-                // Normal map selector button
-                ui.add(
-                    file::SpriteFileSelect::new(
-                        &mut self.normal_path,
-                        "Normal Map",
-                        &self.render_state,
-                    )
-                    .on_select(|_path, _size| {
-                        must_update_textures = true;
-                    })
-                );
-
-                // Regenerate the normal map and viewport if selections changed
-                if must_update_textures {
-                    self.update_input_textures();
-                }
-            });
-
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-            ui.add(editor::Editor::new(
-                &mut self.renderer,
-                &self.render_state,
-                self.viewport_texture_id,
-                viewport_state,
-            ));
-        });
+        // Render the application
+        self.render_app(ui, viewport_state);
     }
-}
-
-/// Generate a normal map filename by appending _normal to the file name before the PNG
-fn generate_normal_map_filename(sprite_path: &Path) -> PathBuf {
-    let stem = sprite_path.file_stem().unwrap();
-    let new_filename = stem.to_str().unwrap().to_owned() + "_normal.png";
-
-    sprite_path.with_file_name(std::ffi::OsStr::new(&new_filename))
 }
