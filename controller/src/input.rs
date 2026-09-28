@@ -26,16 +26,16 @@ impl Controller {
         match input {
             Input::Recenter => {
                 let size = self.output().size();
-                self.camera = Camera::new([(size.width / 2) as i32, (size.height / 2) as i32], 1);
+                self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5], 1);
             },
 
             Input::CameraMove(axis, amount) => {
                 match axis {
                     Axis::Vertical => {
-                        self.camera.set_pos([self.camera.position[0], self.camera.position[1] + amount as i32]);
+                        self.camera.set_pos([self.camera.position[0], self.camera.position[1] + amount / self.camera.scale as f32]);
                     },
                     Axis::Horizontal => {
-                        self.camera.set_pos([self.camera.position[0] + amount as i32, self.camera.position[1]]);
+                        self.camera.set_pos([self.camera.position[0] + amount / self.camera.scale as f32, self.camera.position[1]]);
                     },
                 }
             },

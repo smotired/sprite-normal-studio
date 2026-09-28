@@ -2,18 +2,18 @@
 #[derive(Copy, Clone)]
 pub struct Camera {
     // Position of the pixel the camera is centered on, from the top left of the image, if scale = 1
-    pub position: [i32; 2],
+    pub position: [f32; 2],
 
     // Scale of the camera. At scale 2, each screen pixel is 2 pixels of the image. Always an integer >= 1.
     pub scale: u32,
 }
 
 impl Camera {
-    pub fn new(position: [i32; 2], scale: u32) -> Self {
+    pub fn new(position: [f32; 2], scale: u32) -> Self {
         Self { position, scale }
     }
 
-    pub fn set_pos(&mut self, position: [i32; 2]) -> Self {
+    pub fn set_pos(&mut self, position: [f32; 2]) -> Self {
         self.position = position;
         *self
     }
@@ -27,7 +27,7 @@ impl Camera {
 impl Default for Camera {
     fn default() -> Self {
         Self {
-            position: [0, 0],
+            position: [0.0, 0.0],
             scale: 1,
         }
     }

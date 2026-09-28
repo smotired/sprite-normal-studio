@@ -8,7 +8,7 @@
 // Uniform struct
 struct Params {
     // Position of the camera center ignoring scale
-    camera_pos: vec2<i32>,
+    camera_pos: vec2<f32>,
     // Scale of pixels per camera
     camera_scale: u32,
 
@@ -39,7 +39,10 @@ fn main(
     }
 
     // Get the pixel coordinates in the reference image from camera info
-    let pxl: vec2<i32> = (vec2<i32>(id.xy) - vec2<i32>(half) + params.camera_pos * i32(params.camera_scale)) / i32(params.camera_scale); // multiplying and then dividing pos by scale is correct
+    let scale_f = f32(params.camera_scale);
+    let screen_offset = vec2<f32>(id.xy) - vec2<f32>(half);
+    let pos_f = screen_offset / scale_f + params.camera_pos;
+    let pxl = vec2<i32>(floor(pos_f)); // floor puts -0.3 at -1, avoiding duplicate 0-row and 0-column
 
     // Base colors and normals for pixels outside of the image
     var color = vec3<f32>(0.2, 0.2, 0.2);
