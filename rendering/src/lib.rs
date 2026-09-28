@@ -1,7 +1,6 @@
 mod viewport;
 
-use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Texture, TextureView};
-use egui::{TextureId};
+use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture, TextureView};
 
 use crate::viewport::ViewportDataUniform;
 
@@ -12,9 +11,6 @@ struct ViewportTexture {
 
     /// The actual viewer for the viewport.
     view: TextureView,
-
-    /// The ID of the viewport texture used for egui.
-    id: TextureId,
 }
 
 /// References for the objects that have to do with WGPU rendering
@@ -45,14 +41,16 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    pub fn view(&self) -> &TextureView { &self.texture.view }
+
     /// Use egui's render state to initialize our renderer.
     /// Creates our compute pipeline, texture, and buffers.
-    pub fn new(rs: &egui_wgpu::RenderState) -> Self {
+    pub fn new(device: &Device) -> Self {
         // Load the shader
-        let shader = rs.device.create_shader_module(wgpu::include_wgsl!("viewport.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("viewport.wgsl"));
 
         // Create the pipeline for the shader
-        let pipeline = rs.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Viewport Rendering Pipeline"),
             layout: None,
             module: &shader,
@@ -64,21 +62,18 @@ impl Renderer {
         let size: (usize, usize) = (256, 256);
 
         // Create the buffer for the viewport uniform
-        let uniform_buffer = ViewportDataUniform::buffer(&rs.device);
+        let uniform_buffer = ViewportDataUniform::buffer(&device);
         
         // Create texture data
-        let view = create_texture(&rs.device, size);
-
-        // Get the initial ID
-        let texture_id = rs.renderer.write().register_native_texture(&rs.device, &view, wgpu::FilterMode::Nearest);
+        let view = create_texture(&device, size);
 
         // Create initial input textures
-        let sprite_view = create_texture(&rs.device, (16, 16));
-        let normal_view = create_texture(&rs.device, (16, 16));
+        let sprite_view = create_texture(&device, (16, 16));
+        let normal_view = create_texture(&device, (16, 16));
 
         // Create the bind group
         let bind_group = create_bind_group(
-            &rs.device,
+            &device,
             &pipeline,
             &view,
             &sprite_view,
@@ -88,29 +83,25 @@ impl Renderer {
 
         // Set up
         let control = RenderControl { pipeline, uniform_buffer, bind_group, sprite_view, normal_view  };
-        let texture = ViewportTexture { size, view, id: texture_id};
+        let texture = ViewportTexture { size, view };
         Self { control, texture }
     }
 
     /// Render the editor UI. Runs the shader and updates the texture, and returns the texture ID for use in egui.
-    pub fn render(&mut self, rs: &egui_wgpu::RenderState, (width, height): (usize, usize)) -> TextureId {
+    pub fn render(&mut self, device: &Device, queue: &Queue, (width, height): (usize, usize)) -> &TextureView {
         // Ensure we aren't rendering too small
         let width = width.max(16);
         let height = height.max(16);
 
         // Recreate texture if needed
         if (width, height) != self.texture.size {
-            let view = create_texture(&rs.device, (width, height));
-
-            rs.renderer.write().update_egui_texture_from_wgpu_texture(
-                &rs.device, &view, wgpu::FilterMode::Nearest, self.texture.id,
-            );
+            let view = create_texture(&device, (width, height));
 
             self.texture.view = view;
             self.texture.size = (width, height);
 
             self.control.bind_group = create_bind_group(
-                &rs.device,
+                &device,
                 &self.control.pipeline,
                 &self.texture.view,
                 &self.control.sprite_view,
@@ -120,7 +111,7 @@ impl Renderer {
         }
 
         // Create a command encoder
-        let mut encoder = rs.device.create_command_encoder(&Default::default());
+        let mut encoder = device.create_command_encoder(&Default::default());
 
         // Set up work groups
         {
@@ -137,13 +128,13 @@ impl Renderer {
 
         // Write uniforms
         let uniform = ViewportDataUniform::new();
-        rs.queue.write_buffer(&self.control.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
+        queue.write_buffer(&self.control.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
 
         // Submit workload
-        rs.queue.submit([encoder.finish()]);
+        queue.submit([encoder.finish()]);
 
-        // Return the texture ID
-        self.texture.id
+        // Return the texture view to be updated
+        &self.texture.view
     }
 
     /// Set the input textures for the viewport

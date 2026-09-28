@@ -2,3 +2,12 @@
 resolver = "3"
 members = ["controller","rendering","studio"]
 default-members = ["studio"]
+
+[workspace.dependencies]
+# Internal lib crates
+controller = { path = "controller" }
+rendering = { path = "rendering" }
+
+# Used by controller and rendering
+# Used indirectly by studio with eframe, should match version
+wgpu = "30.0.1"

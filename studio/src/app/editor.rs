@@ -1,16 +1,18 @@
-use eframe::egui::{ Response, Ui, Widget, Image, load::SizedTexture };
+use eframe::egui::{ Response, Ui, Widget, Image, TextureId, load::SizedTexture };
 use eframe::egui_wgpu::RenderState;
+use eframe::wgpu::FilterMode;
 use rendering::Renderer;
 
-/// Widget for the main editor
+/// Widget for the main editor window
 pub struct Editor<'a> {
     renderer: &'a mut Renderer,
     render_state: &'a RenderState,
+    viewport_texture_id: TextureId,
 }
 
 impl<'a> Editor<'a> {
-    pub fn new(renderer: &'a mut Renderer, render_state: &'a RenderState) -> Self {
-        Self { renderer, render_state }
+    pub fn new(renderer: &'a mut Renderer, render_state: &'a RenderState, viewport_texture_id: TextureId) -> Self {
+        Self { renderer, render_state, viewport_texture_id }
     }
 }
 
@@ -20,7 +22,16 @@ impl Widget for Editor<'_> {
         let ppp = ui.ctx().pixels_per_point();
         let px = (((points.x * ppp) as usize).max(16), ((points.y * ppp) as usize).max(16));
 
-        let id = self.renderer.render(self.render_state, px);
-        ui.add(Image::new(SizedTexture::new(id, points)))
+        // Render directly to the EGUI texture
+        let view = self.renderer.render(&self.render_state.device, &self.render_state.queue, px);
+        self.render_state.renderer.write().update_egui_texture_from_wgpu_texture(
+            &self.render_state.device,
+            &view,
+            FilterMode::Nearest,
+            self.viewport_texture_id,
+        );
+
+        // Display the texture image in as much space as possible
+        ui.add(Image::new(SizedTexture::new(self.viewport_texture_id, points)))
     }
 }
