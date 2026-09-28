@@ -27,7 +27,7 @@ impl Controller {
     pub fn new(device: &Device) -> Self {
         Self {
             generator: Generator::new(device),
-            camera: Camera::new([8, 8], 1), // center of starting image. when image is loaded, should recenter at image center and scale 0.
+            camera: Camera::new([8.0, 8.0], 1), // center of starting image. when image is loaded, should recenter at image center and scale 0.
             normals_stale: false,
         }
     }
@@ -44,7 +44,7 @@ impl Controller {
 
         // Recenter the camera
         let size = sprite.size();
-        self.camera = Camera::new([(size.width / 2) as i32, (size.height / 2) as i32], 1);
+        self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5], 1);
     }
 
     /// Runs every frame of the GUI. Handle rerendering as needed.

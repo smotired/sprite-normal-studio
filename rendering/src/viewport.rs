@@ -6,7 +6,7 @@ use wgpu::{Device, util::DeviceExt};
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)] // Needed to store into a buffer below
 pub struct ViewportDataUniform {
     // Pixel the camera is centered on, from top left, ignoring scale
-    camera_pos: [i32; 2],
+    camera_pos: [f32; 2],
     // Scale of the camera. 2 means each sprite pixel takes up 2 screen pixels each direction.
     camera_scale: u32,
 
