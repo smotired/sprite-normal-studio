@@ -46,7 +46,6 @@ impl StudioApp {
 
     fn update_input_textures(&mut self) {
         self.controller.set_inputs(&self.render_state.device, self.sprite_path.texture(), self.normal_path.texture());
-        self.controller.generate_normals(&self.render_state.device, &self.render_state.queue);
         self.renderer.set_inputs(&self.render_state.device, self.sprite_path.texture(), self.controller.output());
     }
 }
@@ -54,6 +53,9 @@ impl StudioApp {
 /// Root app UI
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Call the controller's update method to regenerate any textures as needed
+        self.controller.update(&self.render_state.device, &self.render_state.queue);
+
         egui::Panel::left("sidebar")
             .exact_size(240.0)
             .resizable(false)
