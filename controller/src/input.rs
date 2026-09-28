@@ -17,7 +17,7 @@ pub enum Input {
     CameraMove(Axis, f32),
 
     /// Changing the camera scale. Should be a power of 2.
-    CameraScale(f32),
+    CameraScale(f32, Option<(f32, f32)>),
 }
 
 impl Controller {
@@ -32,16 +32,16 @@ impl Controller {
             Input::CameraMove(axis, amount) => {
                 match axis {
                     Axis::Vertical => {
-                        self.camera.set_pos([self.camera.position[0], self.camera.position[1] + amount / self.camera.scale as f32]);
+                        self.camera.move_position((0.0, amount / self.camera.scale as f32));
                     },
                     Axis::Horizontal => {
-                        self.camera.set_pos([self.camera.position[0] + amount / self.camera.scale as f32, self.camera.position[1]]);
+                        self.camera.move_position((amount / self.camera.scale as f32, 0.0));
                     },
                 }
             },
 
-            Input::CameraScale(amount) => {
-                self.camera.set_scale((self.camera.scale as f32 * amount) as u32);
+            Input::CameraScale(amount, relative_to) => {
+                self.camera.apply_scale(amount, relative_to);
             },
 
             NoInput => { },
