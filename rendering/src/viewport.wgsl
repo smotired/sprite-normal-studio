@@ -7,8 +7,15 @@
 
 // Uniform struct
 struct Params {
-    // Gray color value of the background
-    background: u32,
+    // The ambient light color (nothing should be in total darkness)
+    ambient_light: u32,
+
+    // 12 padding bytes here for alignment. This is where camera pos/scale will go
+
+    // Position of the point light, assuming each pixel is one unit
+    light_pos: vec3<f32>,
+    // Light color
+    light_color: u32,
 }
 @group(0) @binding(3) var<uniform> params: Params;
 
@@ -29,28 +36,51 @@ fn main(
 
     // Base colors and normals for pixels outside of the image
     var color = vec3<f32>(0.2, 0.2, 0.2);
-    var norm = vec3<f32>(0, 0, 1);
 
-    // Get the background color from uniforms
-    let bg_gray = f32(params.background) / 255.0;
-    let background = vec3<f32>(bg_gray, bg_gray, bg_gray); // shown behind pixels in the image
+    // Get the background, ambient, and light colors from uniforms
+    let background: vec3<f32>    = vec3<f32>(0.25, 0.25, 0.25); // shown behind pixels in the image
+    let light_color: vec3<f32>   = unpack4x8unorm(params.light_color).rgb;
+    let ambient_color: vec3<f32> = unpack4x8unorm(params.ambient_light).rgb;
 
     // If this is within the spritesheet, get sprite color
-    // TODO: sRGB correction if necessary
     let size_spritesheet = textureDimensions(sprite);
     if (id.x < size_spritesheet.x && id.y < size_spritesheet.y) {
+        // Get the color from the spritesheet
         let sprite_color = textureLoad(sprite, id.xy, 0);
-        color = mix(background, sprite_color.rgb, sprite_color.a);
+        let base_color = sprite_color.rgb;
 
-        // Also set the normal map if it's within that
+        // Get the normal map if bounded. Normal map should have the same size, but bound just in case.
+        var norm = vec3<f32>(0, 0, 1);
         let size_normal = textureDimensions(normal);
         if (id.x < size_normal.x && id.y < size_normal.y) {
             let norm_color = textureLoad(normal, id.xy, 0); // vec4<f32>
-            norm = (norm_color * 2).xyz - vec3<f32>(1.0, 1.0, 1.0);
+            norm = normalize(norm_color.rgb * 2.0 - 1.0);
         }
-    }
     
-    // TODO: Render the light with the normal
+        // Render the light with the normal
+        let pos = vec3<f32>(vec2<f32>(id.xy), 0);
+
+        // Get direction and distance to the light source
+        let to_light = params.light_pos - pos;
+        let distance = length(to_light);
+        let light_dir = normalize(to_light);
+
+        // Calculate diffuse color from cosine to light direction
+        // Assuming +Z is our out direction, i.e. camera Z is at +infinity
+        let diffuse = max(dot(norm, light_dir), 0.0); // clamp to 0 so backwards normals (which shouldn't exist) don't mess stuff up
+
+        // Add falloff from light height
+        let attenuation = (params.light_pos.z * params.light_pos.z) / max(distance * distance, 1.0);
+
+        // Get actual reflected color
+        let reflected = base_color * light_color * diffuse * attenuation;
+
+        // Add ambient light
+        let ambient = base_color * ambient_color;
+
+        // Update color and fade alpha
+        color = mix(background, reflected + ambient, sprite_color.a);
+    }
 
     // Output to final viewport texture
     let rgba = vec4<f32>(color, 1.0);

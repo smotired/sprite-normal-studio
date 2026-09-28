@@ -37,8 +37,8 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Previews for sprite and normal map
 [x] Create a default normal map in memory if selected path does not exist
 [x] Pass sprite and normal map to compute shader and render the sprite
-[ ] Add a light source to shader as if it had a flat normal map
-[ ] Render with the normal map
+[x] Add a light source to shader as if it had a flat normal map
+[x] Render with the normal map
 [ ] Add camera controls
 [ ] Add controls for the light source
 ```
@@ -58,6 +58,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [ ] Selecting and manipulating multiple zones/vertices at once
 [ ] Set base normal for a zone, which will be applied after all shapes.
     Set up compute shader pipeline for this.
+[ ] Window preview mode for working normal map
 ```
 
 ### Phase IV
@@ -107,6 +108,7 @@ Will add steps to this section as I think of them.
 
 ```
 [ ] Better UI - final icons, repeatable welcome tutorial, etc.
+[ ] Preferences (light/dark mode, transparency background, etc.)
 [ ] Full testing suite
 [ ] CI and automatic deployment to Windows, MacOS, Linux
 [ ] Bug reporting and support system other than GitHub issues
