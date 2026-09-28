@@ -1,14 +1,23 @@
 use controller::{Axis, Input};
-use eframe::egui::{Event, InputState, Key, Modifiers};
+use eframe::egui::{Event, InputState, Key, Modifiers, Rect};
 
 use crate::app::StudioApp;
 
 impl StudioApp {
     // Convert egui inputs into something our controller can use.
-    pub fn handle_input<'a>(&mut self, i: &'a mut InputState) -> Box<dyn Iterator<Item = Input> + 'a> {
+    pub fn handle_input<'a>(&mut self, i: &'a mut InputState, (viewport_rect, ppp): (Rect, f32)) -> Box<dyn Iterator<Item = Input> + 'a> {
         // Get movement constants
         let movement = |shift: bool| { if shift { 100.0 } else { 10.0 } };
         let scale = |shift: bool| { if shift { 4f32 } else { 2f32 } };
+
+        // Get mouse position in world space over the image. None if mouse is not over image.
+        let (vw, vh) = self.renderer.size();
+        let mouse_world = i.pointer.latest_pos()
+            .filter(|pos| viewport_rect.contains(*pos))
+            .map(|pos| {
+                let local = (pos - viewport_rect.min) * ppp; // egui::Vec2, points -> local origin
+                self.controller.screen_to_world((local.x, local.y), (vw as f32, vh as f32))
+            });
 
         // Handle specific events
         Box::new(i.events.clone().into_iter().map(move |event| {
@@ -18,9 +27,9 @@ impl StudioApp {
                     if modifiers.ctrl {
                         let scale = scale(modifiers.shift);
                         if delta.y > 0.0 {
-                            Input::CameraScale(scale)
+                            Input::CameraScale(scale, mouse_world)
                         } else if delta.y < 0.0 {
-                            Input::CameraScale(1f32 / scale)
+                            Input::CameraScale(1f32 / scale, mouse_world)
                         } else { Input::NoInput }
                     } else {
                         if modifiers.shift && delta.y != 0.0 {
@@ -67,13 +76,13 @@ impl StudioApp {
                         Key::Equals => {
                             if pressed && !repeat && modifiers.ctrl {
                                 i.consume_key(Modifiers::CTRL, Key::Equals); // prevent app from also zooming
-                                Input::CameraScale(scale(modifiers.shift))
+                                Input::CameraScale(scale(modifiers.shift), mouse_world)
                             } else { Input::NoInput }
                         },
                         Key::Minus => {
                             if pressed && !repeat && modifiers.ctrl {
                                 i.consume_key(Modifiers::CTRL, Key::Minus); // prevent app from also zooming
-                                Input::CameraScale(1.0f32 / scale(modifiers.shift))
+                                Input::CameraScale(1.0f32 / scale(modifiers.shift), mouse_world)
                             } else { Input::NoInput }
                         },
 

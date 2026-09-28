@@ -47,6 +47,11 @@ impl Controller {
         self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5], 1);
     }
 
+    // Convert viewport pixel position to world/spritesheet space.
+    pub fn screen_to_world(&self, screen: (f32, f32), viewport_size: (f32, f32)) -> (f32, f32) {
+        self.camera.screen_to_world(screen, viewport_size)
+    }
+
     /// Runs every frame of the GUI. Handle rerendering as needed.
     /// Returns the status of the viewport as a tuple. Camera, light(s) later.
     #[must_use = "Use return values when rendering the viewport."]

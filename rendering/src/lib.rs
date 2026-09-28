@@ -44,6 +44,8 @@ pub struct Renderer {
 impl Renderer {
     pub fn view(&self) -> &TextureView { &self.texture.view }
 
+    pub fn size(&self) -> (usize, usize) { (self.texture.size.0, self.texture.size.1) }
+
     /// Use egui's render state to initialize our renderer.
     /// Creates our compute pipeline, texture, and buffers.
     pub fn new(device: &Device) -> Self {
