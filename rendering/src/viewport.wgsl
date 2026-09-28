@@ -7,10 +7,13 @@
 
 // Uniform struct
 struct Params {
+    // Position of the camera center ignoring scale
+    camera_pos: vec2<i32>,
+    // Scale of pixels per camera
+    camera_scale: u32,
+
     // The ambient light color (nothing should be in total darkness)
     ambient_light: u32,
-
-    // 12 padding bytes here for alignment. This is where camera pos/scale will go
 
     // Position of the point light, assuming each pixel is one unit
     light_pos: vec3<f32>,
@@ -28,40 +31,44 @@ fn main(
     @builtin(global_invocation_id) id: vec3<u32>
 ) {
     let size = textureDimensions(output);
+    let half = size / 2;
 
-    // Ensure this pixel is bounded in the image
+    // Ensure this pixel is bounded to the viewport image
     if (id.x >= size.x || id.y >= size.y) {
         return;
     }
 
+    // Get the pixel coordinates in the reference image from camera info
+    let pxl: vec2<i32> = (vec2<i32>(id.xy) - vec2<i32>(half) + params.camera_pos * i32(params.camera_scale)) / i32(params.camera_scale); // multiplying and then dividing pos by scale is correct
+
     // Base colors and normals for pixels outside of the image
     var color = vec3<f32>(0.2, 0.2, 0.2);
 
-    // Get the background, ambient, and light colors from uniforms
-    let background: vec3<f32>    = vec3<f32>(0.25, 0.25, 0.25); // shown behind pixels in the image
-    let light_color: vec3<f32>   = unpack4x8unorm(params.light_color).rgb;
-    let ambient_color: vec3<f32> = unpack4x8unorm(params.ambient_light).rgb;
-
     // If this is within the spritesheet, get sprite color
-    let size_spritesheet = textureDimensions(sprite);
-    if (id.x < size_spritesheet.x && id.y < size_spritesheet.y) {
+    let size_spritesheet = vec2<i32>(textureDimensions(sprite));
+    if (pxl.x >= 0 && pxl.y >= 0 && pxl.x < size_spritesheet.x && pxl.y < size_spritesheet.y) {
         // Get the color from the spritesheet
-        let sprite_color = textureLoad(sprite, id.xy, 0);
+        let sprite_color = textureLoad(sprite, pxl.xy, 0);
         let base_color = sprite_color.rgb;
+
+        // Get the background, ambient, and light colors from uniforms
+        let background: vec3<f32>    = vec3<f32>(0.25, 0.25, 0.25); // shown behind pixels in the image
+        let light_color: vec3<f32>   = unpack4x8unorm(params.light_color).rgb;
+        let ambient_color: vec3<f32> = unpack4x8unorm(params.ambient_light).rgb;
 
         // Get the normal map if bounded. Normal map should have the same size, but bound just in case.
         var norm = vec3<f32>(0, 0, 1);
-        let size_normal = textureDimensions(normal);
-        if (id.x < size_normal.x && id.y < size_normal.y) {
-            let norm_color = textureLoad(normal, id.xy, 0); // vec4<f32>
+        let size_normal = vec2<i32>(textureDimensions(normal));
+        if (pxl.x < size_normal.x && pxl.y < size_normal.y) {
+            let norm_color = textureLoad(normal, pxl.xy, 0); // vec4<f32>
             norm = normalize(norm_color.rgb * 2.0 - 1.0);
         }
     
         // Render the light with the normal
-        let pos = vec3<f32>(vec2<f32>(id.xy), 0);
+        let pos = vec3<f32>(vec2<f32>(pxl.xy), 0);
 
         // Get direction and distance to the light source
-        let to_light = params.light_pos - pos;
+        let to_light = params.light_pos - pos; // light_pos should be correct despite scale
         let distance = length(to_light);
         let light_dir = normalize(to_light);
 

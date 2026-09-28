@@ -1,14 +1,17 @@
+use controller::ViewportState;
 use wgpu::{Device, util::DeviceExt};
 
 /// Formats data used for the actual rendering process.
 #[repr(C)] // Needed for Rust to pass to shaders correctly
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)] // Needed to store into a buffer below
 pub struct ViewportDataUniform {
+    // Pixel the camera is centered on, from top left, ignoring scale
+    camera_pos: [i32; 2],
+    // Scale of the camera. 2 means each sprite pixel takes up 2 screen pixels each direction.
+    camera_scale: u32,
+
     // The ambient light color (nothing should be in total darkness)
     ambient_light: u32,
-
-    // pad because light_pos needs to be aligned
-    _pad0: [u32; 3],
 
     // Position of the point light, assuming each pixel is one unit
     light_pos: [f32; 3],
@@ -18,7 +21,7 @@ pub struct ViewportDataUniform {
 
 impl ViewportDataUniform {
     /// Create viewport data from some parameters
-    pub fn new() -> Self {
+    pub fn new((camera, _): ViewportState) -> Self {
         // Pack 20% ambient light into the integer we expect
         let ambient_value = (255 as f32 * 0.25) as u8;
         let ambient_light = pack_color(ambient_value, ambient_value, ambient_value, 255);
@@ -28,9 +31,10 @@ impl ViewportDataUniform {
         let light_color = pack_color(light_value, light_value, light_value, 255);
 
         Self {
-            ambient_light,
+            camera_pos: camera.position,
+            camera_scale: camera.scale,
 
-            _pad0: [0, 0, 0],
+            ambient_light,
 
             light_pos: [ 200.0, 100.0, 200.0 ], // static position for now
             light_color,
@@ -40,7 +44,7 @@ impl ViewportDataUniform {
     /// Create a buffer that can be used to store this uniform data.
     pub fn buffer(device: &Device) -> wgpu::Buffer {
         // Create initial contents
-        let data = Self::new();
+        let data = Self::new(Default::default());
 
         // Create and return the buffer
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

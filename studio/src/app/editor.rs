@@ -1,3 +1,4 @@
+use controller::ViewportState;
 use eframe::egui::{ Response, Ui, Widget, Image, TextureId, load::SizedTexture };
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu::FilterMode;
@@ -8,11 +9,12 @@ pub struct Editor<'a> {
     renderer: &'a mut Renderer,
     render_state: &'a RenderState,
     viewport_texture_id: TextureId,
+    state: ViewportState,
 }
 
 impl<'a> Editor<'a> {
-    pub fn new(renderer: &'a mut Renderer, render_state: &'a RenderState, viewport_texture_id: TextureId) -> Self {
-        Self { renderer, render_state, viewport_texture_id }
+    pub fn new(renderer: &'a mut Renderer, render_state: &'a RenderState, viewport_texture_id: TextureId, state: ViewportState) -> Self {
+        Self { renderer, render_state, viewport_texture_id, state }
     }
 }
 
@@ -23,7 +25,7 @@ impl Widget for Editor<'_> {
         let px = (((points.x * ppp) as usize).max(16), ((points.y * ppp) as usize).max(16));
 
         // Render directly to the EGUI texture
-        let view = self.renderer.render(&self.render_state.device, &self.render_state.queue, px);
+        let view = self.renderer.render(&self.render_state.device, &self.render_state.queue, self.state, px);
         self.render_state.renderer.write().update_egui_texture_from_wgpu_texture(
             &self.render_state.device,
             &view,
