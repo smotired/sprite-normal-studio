@@ -4,14 +4,16 @@ use wgpu::{Device, util::DeviceExt};
 #[repr(C)] // Needed for Rust to pass to shaders correctly
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)] // Needed to store into a buffer below
 pub struct ViewportDataUniform {
-    blue: u32, // we just need something to pass to the buffer
+    // The grayscale background color for the sprite
+    background: u32,
 }
 
 impl ViewportDataUniform {
     /// Create viewport data from some parameters
     pub fn new() -> Self {
         Self {
-            blue: 63, // we just need something to pass to the buffer
+            // Use a default gray background
+            background: 63,
         }
     }
 

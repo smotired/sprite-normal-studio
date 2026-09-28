@@ -2,6 +2,7 @@ mod file;
 mod editor;
 
 use std::path::{Path, PathBuf};
+use controller::Controller;
 use eframe::egui;
 use rendering::Renderer;
 
@@ -13,6 +14,9 @@ pub struct StudioApp {
     sprite_path: SpriteFileSelection,
     /// Path to the current normal map file which is not modified
     normal_path: SpriteFileSelection,
+
+    /// Controller object
+    controller: Controller,
 
     /// Renderer device
     renderer: Renderer,
@@ -27,8 +31,15 @@ impl StudioApp {
             sprite_path: SpriteFileSelection::new("spritesheet".to_owned(), &render_state, None),
             normal_path: SpriteFileSelection::new("normal_map".to_owned(), &render_state, None),
             renderer: Renderer::new(&render_state),
+            controller: Controller::new(&render_state.device),
             render_state,
         }
+    }
+
+    fn update_input_textures(&mut self) {
+        self.controller.set_inputs(&self.render_state.device, self.sprite_path.texture(), self.normal_path.texture());
+        self.controller.generate_normals(&self.render_state.device, &self.render_state.queue);
+        self.renderer.set_inputs(&self.render_state.device, self.sprite_path.texture(), self.controller.output());
     }
 }
 
@@ -40,7 +51,10 @@ impl eframe::App for StudioApp {
             .resizable(false)
             .show(ui, |ui| {
                 ui.heading("Sprite Normal Studio");
+
+                let mut must_update_textures = false;
                 
+                // Spritesheet selector button
                 ui.add(
                     file::SpriteFileSelect::new(
                         &mut self.sprite_path,
@@ -55,16 +69,27 @@ impl eframe::App for StudioApp {
                             size,
                             [128, 128, 255, 255],
                         );
+
+                        must_update_textures = true;
                     })
                 );
                 
+                // Normal map selector button
                 ui.add(
                     file::SpriteFileSelect::new(
                         &mut self.normal_path,
                         "Normal Map",
                         &self.render_state,
                     )
+                    .on_select(|_path, _size| {
+                        must_update_textures = true;
+                    })
                 );
+
+                // Regenerate the normal map and viewport if selections changed
+                if must_update_textures {
+                    self.update_input_textures();
+                }
             });
 
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
