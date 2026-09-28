@@ -4,6 +4,7 @@ mod editor;
 use std::path::{Path, PathBuf};
 use controller::Controller;
 use eframe::egui;
+use eframe::wgpu::FilterMode;
 use rendering::Renderer;
 
 use crate::app::file::loader::SpriteFileSelection;
@@ -22,17 +23,24 @@ pub struct StudioApp {
     renderer: Renderer,
     /// Render state
     render_state: eframe::egui_wgpu::RenderState,
+    /// Renderer viewport texture ID
+    viewport_texture_id: egui::TextureId,
 }
 
 /// Default initializer for application state
 impl StudioApp {
     pub fn new(render_state: eframe::egui_wgpu::RenderState) -> Self {
+        let renderer = Renderer::new(&render_state.device);
+        let viewport_texture_id = render_state.renderer.write()
+            .register_native_texture(&render_state.device, renderer.view(), FilterMode::Nearest);
+
         Self {
             sprite_path: SpriteFileSelection::new("spritesheet".to_owned(), &render_state, None),
             normal_path: SpriteFileSelection::new("normal_map".to_owned(), &render_state, None),
-            renderer: Renderer::new(&render_state),
             controller: Controller::new(&render_state.device),
+            renderer,
             render_state,
+            viewport_texture_id,
         }
     }
 
@@ -93,7 +101,7 @@ impl eframe::App for StudioApp {
             });
 
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-            ui.add(editor::Editor::new(&mut self.renderer, &self.render_state));
+            ui.add(editor::Editor::new(&mut self.renderer, &self.render_state, self.viewport_texture_id));
         });
     }
 }
