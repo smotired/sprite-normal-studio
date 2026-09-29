@@ -1,0 +1,56 @@
+/* overlay.wgsl
+ * Contains the functions to render the overlay to the viewport, to
+ * draw things like lights, zone paths, and shapes.
+ *******************************************************************/
+
+/***********************************/
+/*         LIGHTS OVERLAY          */
+/***********************************/
+
+// Constants for the light overlay
+const LIGHT_BUTTON_RADIUS = 10.0;    // Radius of the button where the actual light source is
+const LIGHT_HALO_WIDTH = 2.0;        // Width of the halo for the max range of the light source
+
+fn overlay_light(
+    pos: vec2<f32>,     // World-space position of this pixel
+) -> vec4<f32> {        // Returns pixel color from overlay
+    var color = vec4<f32>(0, 0, 0, 0);
+
+    // Get the distance to the light source
+    let light_distance_2d = length(params.light_pos.xy - pos.xy);
+
+    // Draw a circle at the light
+    if (light_distance_2d <= LIGHT_BUTTON_RADIUS / f32(params.camera_scale)) {
+        color = vec4<f32>(1, 1, 1, 1);
+    }
+
+    // Draw a halo around the light
+    else if (abs(light_distance_2d - params.light_pos.z) <= LIGHT_HALO_WIDTH * 0.5 / f32(params.camera_scale)) {
+        color = vec4<f32>(1, 1, 1, 1);
+    }
+
+    return color;
+}
+
+/***********************************/
+/*      MAIN OVERLAY METHOD        */
+/***********************************/
+
+fn overlay_color(
+    pos: vec2<f32>,     // World-space position of this pixel
+) -> vec4<f32> {        // Returns pixel color from overlay
+    // Render the overlay layer by layer.
+    var color = vec4<f32>(0, 0, 0, 0);
+
+    // Shapes
+
+    // Zone Interiors
+
+    // Zones
+
+    // Lights
+    let light = overlay_light(pos);
+    color = mix(color, vec4<f32>(light.rgb, 1.0), light.a);
+
+    return color;
+}

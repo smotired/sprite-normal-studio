@@ -10,8 +10,8 @@ pub struct ViewportDataUniform {
     // Scale of the camera. 2 means each sprite pixel takes up 2 screen pixels each direction.
     camera_scale: u32,
 
-    // The ambient light color (nothing should be in total darkness)
-    ambient_light: u32,
+    // Flags for the overlay. See shader/bindings.wgsl for full documentation of each flag.
+    overlay: u32,
 
     // Position of the point light, assuming each pixel is one unit
     light_pos: [f32; 3],
@@ -22,22 +22,14 @@ pub struct ViewportDataUniform {
 impl ViewportDataUniform {
     /// Create viewport data from some parameters
     pub fn new((camera, _): ViewportState) -> Self {
-        // Pack 20% ambient light into the integer we expect
-        let ambient_value = (255 as f32 * 0.25) as u8;
-        let ambient_light = pack_color(ambient_value, ambient_value, ambient_value, 255);
-
-        // Do the same for a white light
-        let light_value = (255 as f32 * 0.8) as u8;
-        let light_color = pack_color(light_value, light_value, light_value, 255);
-
         Self {
             camera_pos: camera.position,
             camera_scale: camera.scale,
 
-            ambient_light,
+            overlay: 0, // fix this imminently
 
             light_pos: [ 200.0, 100.0, 200.0 ], // static position for now
-            light_color,
+            light_color: 0xFFFFFFFF, // pure white light for now
         }
     }
 
@@ -53,11 +45,4 @@ impl ViewportDataUniform {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         })
     }
-}
-
-fn pack_color(r: u8, g: u8, b: u8, a: u8) -> u32 {
-    ((r as u32) <<  0) |
-    ((g as u32) <<  8) |
-    ((b as u32) << 16) |
-    ((a as u32) << 24)
 }
