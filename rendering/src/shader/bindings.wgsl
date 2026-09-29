@@ -14,8 +14,8 @@
 struct Params {
     // Position of the camera center ignoring scale
     camera_pos: vec2<f32>,
-    // Scale of pixels per camera
-    camera_scale: u32,
+    // Inverse scale of pixels in the camera. If one spritesheet pixel is 2 pixels onscreen, this is 0.5
+    inv_scale: f32,
 
     // Extra flags for which parts of the overlay are shown.
     // In order of increasing magnitude:
