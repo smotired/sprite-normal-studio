@@ -51,13 +51,14 @@ impl Renderer {
     pub fn new(device: &Device) -> Self {
         // Load the shader
         let source = format!(
-            "{}\n{}\n{}\n{}",                           // Concatenate each source file into one big one
+            "{}\n{}\n{}\n{}\n{}",                       // Concatenate each source file into one big one
             include_str!("shader/bindings.wgsl"),       // Contains the actual bindings, including a description of each overlay flag
+            include_str!("shader/helpers.wgsl"),        // Common helper functions
             include_str!("shader/spritesheet.wgsl"),    // Logic for drawing the lit spritesheet
             include_str!("shader/overlay.wgsl"),        // Logic for drawing overlay with lights, paths, shapes, etc.
             include_str!("shader/main.wgsl"),           // Main shader function which calls other stuff
         );
-        
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport.wgsl"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
