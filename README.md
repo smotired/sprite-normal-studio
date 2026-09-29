@@ -94,6 +94,15 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [ ] Manipulating a zone should also manipulate its shapes
 ```
 
+### Phase VI
+
+```
+[ ] Slicing the grid into individual sprites, and displaying the grid
+[ ] Copy/paste/move with sprite-level intervals
+[ ] Timeline panel where sprites can easily be added
+[ ] Display looping lit animation
+```
+
 ### Interlude
 
 ```
@@ -102,7 +111,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
     done and released and I can move on with my life.
 ```
 
-### Phase VI
+### Phase VII
 
 Finish, polish, and deploy as a commercial product.
 Will add steps to this section as I think of them.
