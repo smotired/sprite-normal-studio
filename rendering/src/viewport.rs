@@ -7,8 +7,9 @@ use wgpu::{Device, util::DeviceExt};
 pub struct ViewportDataUniform {
     // Pixel the camera is centered on, from top left, ignoring scale
     camera_pos: [f32; 2],
-    // Scale of the camera. 2 means each sprite pixel takes up 2 screen pixels each direction.
-    camera_scale: u32,
+    // Inverted scale of the camera. 1/2 means each sprite pixel takes up 2 screen pixels each direction.
+    // We never need the non inverted version, but this is used frequently to normalize stuff that doesn't depend on the camera scale like the overlay.
+    inv_scale: f32,
 
     // Flags for the overlay. See shader/bindings.wgsl for full documentation of each flag.
     overlay: u32,
@@ -24,7 +25,7 @@ impl ViewportDataUniform {
     pub fn new((camera, _): ViewportState) -> Self {
         Self {
             camera_pos: camera.position,
-            camera_scale: camera.scale,
+            inv_scale: 1.0 / camera.scale as f32,
 
             overlay: 0, // fix this imminently
 
