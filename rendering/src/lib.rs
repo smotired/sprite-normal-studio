@@ -200,15 +200,15 @@ fn create_bind_group(device: &Device, pipeline: &ComputePipeline, output: &Textu
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::TextureView(&sprite),
+                resource: uniform.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::TextureView(&normal),
+                resource: wgpu::BindingResource::TextureView(&sprite),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: uniform.as_entire_binding(),
+                resource: wgpu::BindingResource::TextureView(&normal),
             },
         ]
     })
