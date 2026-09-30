@@ -16,7 +16,8 @@ impl Light {
 
     pub fn distance(&self, pos: Vec2) -> f32 { self.position.distance(pos) }
 
-    pub fn pos_arr(&self) -> [f32; 3] { [ self.position.x, self.position.y, self.height ] }
+    pub fn position(&self) -> Vec2 { self.position }
+    pub fn height(&self) -> f32 { self.height }
     pub fn packed_color(&self) -> u32 { (self.color.0 as u32) | (self.color.1 as u32) << 8 | (self.color.2 as u32) << 16 }
 }
 

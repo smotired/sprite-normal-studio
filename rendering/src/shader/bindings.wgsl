@@ -53,8 +53,10 @@ struct Params {
     // 31: 
     overlay_flags: u32,
 
-    // Position of the point light, assuming each pixel is one unit
+    // Position of the point light, assuming each pixel is one unit.
+    // Technically passed in as a Vec2 and another f32 but this is fine. Keeping it as a vec3 is useful for shading.
     light_pos: vec3<f32>,
+
     // Light color
     light_color: u32,
 }

@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 vector = { workspace = true }
 wgpu = { workspace = true }
-bytemuck = { version = "1.25.2", features = ["derive"] }
+bytemuck = { workspace = true }

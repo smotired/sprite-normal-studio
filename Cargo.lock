@@ -4386,6 +4386,7 @@ dependencies = [
 name = "vector"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "egui",
  "wgpu",
 ]
