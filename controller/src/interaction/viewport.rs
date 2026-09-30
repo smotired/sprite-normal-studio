@@ -1,13 +1,15 @@
+use vector::Vec2;
 use wgpu::{Device, util::DeviceExt};
 
 use crate::interaction::{camera::Camera, light::Light, overlay::OverlayState};
 
 /// Formats data used for the actual rendering process.
 #[repr(C)] // Needed for Rust to pass to shaders correctly
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)] // Needed to store into a buffer below
+#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)] // Needed to store into a buffer below
 pub struct ViewportDataUniform {
     // Pixel the camera is centered on, from top left, ignoring scale
-    pub camera_pos: [f32; 2],
+    pub camera_pos: Vec2,
+
     // Inverted scale of the camera. 1/2 means each sprite pixel takes up 2 screen pixels each direction.
     // We never need the non inverted version, but this is used frequently to normalize stuff that doesn't depend on the camera scale like the overlay.
     pub inv_scale: f32,
@@ -16,7 +18,11 @@ pub struct ViewportDataUniform {
     pub overlay_flags: u32,
 
     // Position of the point light, assuming each pixel is one unit
-    pub light_pos: [f32; 3],
+    pub light_pos: Vec2,
+
+    // Height of the light in the same units as position. Affects attenuation.
+    pub light_height: f32,
+
     // Light color
     pub light_color: u32,
 }
@@ -24,10 +30,11 @@ pub struct ViewportDataUniform {
 impl ViewportDataUniform {
     pub fn new(light: &Light, camera: &Camera, overlay: &OverlayState) -> Self {
         Self {
-            camera_pos: [ camera.position.x, camera.position.y ],
+            camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
             overlay_flags: overlay.get_flags(),
-            light_pos: light.pos_arr(),
+            light_pos: light.position(),
+            light_height: light.height(),
             light_color: light.packed_color(),
         }
     }
@@ -43,16 +50,4 @@ impl ViewportDataUniform {
 
     /// Get the bytes for writing to a buffer
     pub fn bytes(&self) -> &[u8] { bytemuck::bytes_of(self) }
-}
-
-impl Default for ViewportDataUniform {
-    fn default() -> Self {
-        Self {
-            camera_pos: Default::default(),
-            inv_scale: Default::default(),
-            overlay_flags: Default::default(),
-            light_pos: Default::default(),
-            light_color: Default::default(),
-        }
-    }
 }

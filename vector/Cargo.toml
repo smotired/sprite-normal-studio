@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bytemuck = { workspace = true }
+
 # for Froms
 egui = { workspace = true }
 wgpu = { workspace = true }

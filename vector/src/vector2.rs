@@ -1,7 +1,8 @@
 use std::fmt::Display;
 use std::ops;
 
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vec2 { pub x: f32, pub y: f32, }
 
 /// Basic vector2 struct
@@ -58,6 +59,9 @@ impl Vec2 {
 
     /// Linear interpolation between two vectors according to a value between 0 and 1
     pub fn lerp(lhs: Self, rhs: Self, t: f32) -> Vec2 { lhs + t.clamp(0.0, 1.0) * (rhs - lhs) }
+
+    /// Convert to bytes for writing into a buffer
+    pub fn bytes(&self) -> &[u8] { bytemuck::bytes_of(self) }
 }
 
 impl ops::Add<Vec2> for Vec2 {
