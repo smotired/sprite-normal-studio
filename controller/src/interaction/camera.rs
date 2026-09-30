@@ -17,8 +17,8 @@ impl Camera {
         (screen - viewport_size * 0.5) * self.inv_scale() + self.position
     }
 
-    // Move the camera by a position delta
-    pub fn set_position(&mut self, pos: Vec2) { self.position = pos; }
+    // Move the camera to a specific position and reset scale
+    pub fn reset_position(&mut self, pos: Vec2) { self.position = pos; self.scale = 0; }
 
     // Move the camera by a position delta
     pub fn move_position(&mut self, delta: Vec2) { self.position += delta; }
