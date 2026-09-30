@@ -1,6 +1,6 @@
 use controller::{Axis, Input};
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
-use vector::V2;
+use vector::Vec2;
 
 use crate::app::StudioApp;
 
@@ -17,7 +17,7 @@ impl StudioApp {
             .filter(|pos| viewport_rect.contains(*pos))
             .map(|pos| {
                 let local = (pos - viewport_rect.min) * ppp; // egui::Vec2, points -> local origin
-                self.controller.screen_to_world(V2::from(local), viewport_size)
+                self.controller.screen_to_world(Vec2::from(local), viewport_size)
             });
 
         // Handle specific events
@@ -136,10 +136,10 @@ impl StudioApp {
         let rect = response.rect;
 
         // Screen-space Pos2 -> local physical-pixel coordinates -> world space coordinates
-        let viewport_size = V2::new(response.rect.width(), response.rect.height());
+        let viewport_size = Vec2::new(response.rect.width(), response.rect.height());
         let to_world = |pos: Pos2| {
             let local = (pos - rect.min) * ppp;
-            self.controller.screen_to_world(V2::from(local), viewport_size)
+            self.controller.screen_to_world(Vec2::from(local), viewport_size)
         };
 
         // Final list of events to process
