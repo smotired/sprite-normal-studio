@@ -18,10 +18,10 @@ fn spritesheet_color(
     // Base color for pixels outside of the image
     var color = vec3<f32>(1, 1, 1) * GRAY_OOB;
 
-    // If flag 00 (NORMAL MAP) is set, draw the normal map instead
-    if (flag(0)) {
+    // If flag 00 (NORMAL MAP) is set, and flag 01 (LIGHTING) is unset, draw the normal map instead
+    if (flag(0) && !flag(1)) {
         let size_normal = vec2<i32>(textureDimensions(normal));
-        if (pxl.x < size_normal.x && pxl.y < size_normal.y) {
+        if (pxl.x >= 0 && pxl.y >= 0 && pxl.x < size_normal.x && pxl.y < size_normal.y) {
             let background: vec3<f32>  = vec3<f32>(1, 1, 1) * GRAY_BACKGROUND;
             let norm_color = textureLoad(normal, pxl.xy, 0); // vec4<f32>
             color = mix(background, norm_color.rgb, norm_color.a); // a should always be 1 but maybe not
@@ -42,10 +42,10 @@ fn spritesheet_color(
 
         // If flag 01 (LIGHTING) is enabled, perform lighting
         if (flag(1)) {
-            // Get the normal map if bounded. Normal map should have the same size, but bound just in case.
+            // Get the normal map if bounded and the flag is set. Normal map should have the same size, but bound just in case.
             var norm = vec3<f32>(0, 0, 1);
             let size_normal = vec2<i32>(textureDimensions(normal));
-            if (pxl.x < size_normal.x && pxl.y < size_normal.y) {
+            if (flag(0) && pxl.x < size_normal.x && pxl.y < size_normal.y) {
                 let norm_color = textureLoad(normal, pxl.xy, 0); // vec4<f32>
                 norm = normalize(norm_color.rgb * 2.0 - 1.0);
             }

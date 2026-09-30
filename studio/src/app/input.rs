@@ -44,8 +44,8 @@ impl StudioApp {
                 Event::Key { key, pressed, repeat, modifiers, .. } => {
                     match key {
                         // Recenter camera
-                        Key::H => {
-                            if pressed && !repeat && modifiers.ctrl {
+                        Key::Home => {
+                            if pressed && !repeat {
                                 Input::Recenter
                             } else { Input::NoInput }
                         }
@@ -95,6 +95,26 @@ impl StudioApp {
                         Key::PageDown => {
                             if pressed {
                                 Input::Altitude(false)
+                            } else { Input::NoInput }
+                        },
+
+                        // Toggling lighting
+                        Key::L => {
+                            if pressed && !repeat {
+                                if modifiers.ctrl {
+                                    Input::LightingToggled(None) // Toggle both lighting and normal map
+                                } else if modifiers.shift {
+                                    Input::LightingToggled(Some(false)) // Toggle normal map
+                                } else {
+                                    Input::LightingToggled(Some(true)) // Toggle just lighting
+                                }
+                            } else { Input::NoInput }
+                        },
+
+                        // Toggling the overlay
+                        Key::O => {
+                            if pressed && !repeat {
+                                Input::OverlayToggled
                             } else { Input::NoInput }
                         },
 

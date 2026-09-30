@@ -34,6 +34,13 @@ pub enum Input {
 
     /// Altitude is changed (i.e. page up/down is pressed). True if going up.
     Altitude(bool),
+
+    /// Overlay is toggled on or off. Maybe later I will add an enum for OverlayComponentKind which is passed here.
+    OverlayToggled,
+
+    /// Lighting/shading is toggled.
+    /// If none, toggle both. If true, toggling lighting, otherwise toggling normal.
+    LightingToggled(Option<bool>),
 }
 
 impl Controller {
@@ -67,9 +74,11 @@ impl Controller {
             Input::MouseDragStarted((x, y)) => {
                 self.overlay_state.dragging_light = false;
 
-                // Decide if we should start dragging the light
-                if self.light.distance((x, y)) * self.camera.scale as f32 <= 10.0 {
-                    self.overlay_state.dragging_light = true;
+                if self.overlay_state.overlay_on() {
+                    // Decide if we should start dragging the light
+                    if self.light.distance((x, y)) * self.camera.scale as f32 <= 10.0 {
+                        self.overlay_state.dragging_light = true;
+                    }
                 }
             }
 
@@ -87,6 +96,29 @@ impl Controller {
             Input::Altitude(up) => {
                 if self.overlay_state.dragging_light {
                     self.light.adjust_height(if up { 100.0 } else { -100.0 });
+                }
+            },
+
+            Input::OverlayToggled => {
+                self.overlay_state.toggle_overlay();
+            },
+
+            Input::LightingToggled(toggle) => {
+                if let Some(toggling_lighting) = toggle {
+                    if toggling_lighting {
+                        self.overlay_state.lighting_on = !self.overlay_state.lighting_on;
+                    } else {
+                        self.overlay_state.normals_on = !self.overlay_state.normals_on;
+                    }
+                } else {
+                    // Go to fully shaded unless we are already at fully shaded
+                    if self.overlay_state.lighting_on && self.overlay_state.normals_on {
+                        self.overlay_state.lighting_on = false;
+                        self.overlay_state.normals_on = false;
+                    } else {
+                        self.overlay_state.lighting_on = true;
+                        self.overlay_state.normals_on = true;
+                    }
                 }
             },
 
