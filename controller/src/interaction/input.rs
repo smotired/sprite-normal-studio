@@ -1,3 +1,5 @@
+use vector::V2;
+
 use crate::interaction::Interaction;
 
 pub enum Axis {
@@ -18,22 +20,22 @@ pub enum Input {
 
     /// Changing the camera scale.
     /// Optionally, scale relative to a fixed anchor point in world space.
-    CameraScale(i32, Option<(f32, f32)>),
+    CameraScale(i32, Option<V2>),
 
     /// Left-clicking the mouse at a world space position
-    MouseClicked((f32, f32)),
+    MouseClicked(V2),
 
     /// Starting a drag event
-    MouseDragStarted((f32, f32)),
+    MouseDragStarted(V2),
 
     /// Dragging the mouse while left clicking, from a start position to an end position.
-    MouseDragged((f32, f32), (f32, f32)),
+    MouseDragged(V2, V2),
 
     /// Releasing the mouse dragging
     MouseDragReleased,
 
     /// Dragging the camera across this world space delta.
-    CameraDragged((f32, f32)),
+    CameraDragged(V2),
 
     /// Altitude is changed (i.e. page up/down is pressed). True if going up.
     Altitude(bool),
@@ -48,20 +50,20 @@ pub enum Input {
 
 impl Interaction {
     // Handle different inputs from the UI
-    pub fn handle_input(&mut self, input: Input, viewport_size: (f32, f32)) {
+    pub fn handle_input(&mut self, input: Input, viewport_size: V2) {
         match input {
             Input::Recenter => {
-                self.camera.set_position((viewport_size.0 * 0.5, viewport_size.1 as f32 * 0.5));
-                self.light.set_pos((viewport_size.0 as f32 * 0.5, viewport_size.1 as f32 * 0.5));
+                self.camera.set_position(viewport_size * 0.5);
+                self.light.set_pos(viewport_size * 0.5);
             },
 
             Input::CameraMove(axis, amount) => {
                 match axis {
                     Axis::Vertical => {
-                        self.camera.move_position((0.0, amount * self.camera.inv_scale()));
+                        self.camera.move_position(V2::vt(amount * self.camera.inv_scale()));
                     },
                     Axis::Horizontal => {
-                        self.camera.move_position((amount * self.camera.inv_scale(), 0.0));
+                        self.camera.move_position(V2::hz(amount * self.camera.inv_scale()));
                     },
                 }
             },
@@ -70,25 +72,25 @@ impl Interaction {
                 self.camera.apply_scale(amount, relative_to);
             },
 
-            Input::MouseClicked((x, y)) => {
-                println!("Clicked: ({}, {})", x, y);  
+            Input::MouseClicked(pos) => {
+                println!("Clicked: {}", pos);  
             },
 
-            Input::MouseDragStarted((x, y)) => {
+            Input::MouseDragStarted(pos) => {
                 self.overlay_state.dragging_light = false;
 
                 if self.overlay_state.overlay_on() {
                     // Decide if we should start dragging the light
-                    if self.light.distance((x, y)) * self.camera.scale() <= 10.0 {
+                    if self.light.distance(pos) * self.camera.scale() <= 10.0 {
                         self.overlay_state.dragging_light = true;
                     }
                 }
             }
 
-            Input::MouseDragged((_sx, _sy), (nx, ny)) => {
+            Input::MouseDragged(_start, new) => {
                 // Move the light if we are dragging it
                 if self.overlay_state.dragging_light {
-                    self.light.set_pos((nx, ny));
+                    self.light.set_pos(new);
                 }
             },
 
@@ -106,8 +108,8 @@ impl Interaction {
                 self.overlay_state.toggle_overlay();
             },
 
-            Input::CameraDragged((dx, dy)) => {
-                self.camera.move_position((-dx, -dy));
+            Input::CameraDragged(delta) => {
+                self.camera.move_position(-delta);
             },
 
             Input::LightingToggled(toggle) => {
