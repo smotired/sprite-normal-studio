@@ -22,7 +22,7 @@ impl Widget for Editor<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let points = ui.available_size();
         let ppp = ui.ctx().pixels_per_point();
-        let px = vector::V2::new((points.x * ppp).max(16.0), (points.y * ppp).max(16.0));
+        let px = vector::Vec2::new((points.x * ppp).max(16.0), (points.y * ppp).max(16.0));
 
         // Render directly to the EGUI texture
         let view = self.renderer.render(&self.render_state.device, &self.render_state.queue, self.uniform, px);

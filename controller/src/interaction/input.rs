@@ -1,4 +1,4 @@
-use vector::V2;
+use vector::Vec2;
 
 use crate::interaction::Interaction;
 
@@ -20,22 +20,22 @@ pub enum Input {
 
     /// Changing the camera scale.
     /// Optionally, scale relative to a fixed anchor point in world space.
-    CameraScale(i32, Option<V2>),
+    CameraScale(i32, Option<Vec2>),
 
     /// Left-clicking the mouse at a world space position
-    MouseClicked(V2),
+    MouseClicked(Vec2),
 
     /// Starting a drag event
-    MouseDragStarted(V2),
+    MouseDragStarted(Vec2),
 
     /// Dragging the mouse while left clicking, from a start position to an end position.
-    MouseDragged(V2, V2),
+    MouseDragged(Vec2, Vec2),
 
     /// Releasing the mouse dragging
     MouseDragReleased,
 
     /// Dragging the camera across this world space delta.
-    CameraDragged(V2),
+    CameraDragged(Vec2),
 
     /// Altitude is changed (i.e. page up/down is pressed). True if going up.
     Altitude(bool),
@@ -50,7 +50,7 @@ pub enum Input {
 
 impl Interaction {
     // Handle different inputs from the UI
-    pub fn handle_input(&mut self, input: Input, viewport_size: V2) {
+    pub fn handle_input(&mut self, input: Input, viewport_size: Vec2) {
         match input {
             Input::Recenter => {
                 self.camera.set_position(viewport_size * 0.5);
@@ -60,10 +60,10 @@ impl Interaction {
             Input::CameraMove(axis, amount) => {
                 match axis {
                     Axis::Vertical => {
-                        self.camera.move_position(V2::vt(amount * self.camera.inv_scale()));
+                        self.camera.move_position(Vec2::vt(amount * self.camera.inv_scale()));
                     },
                     Axis::Horizontal => {
-                        self.camera.move_position(V2::hz(amount * self.camera.inv_scale()));
+                        self.camera.move_position(Vec2::hz(amount * self.camera.inv_scale()));
                     },
                 }
             },

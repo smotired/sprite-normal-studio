@@ -1,11 +1,11 @@
-use vector::V2;
+use vector::Vec2;
 use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture, TextureView};
 use controller::ViewportDataUniform;
 
 /// Contains information about the viewport texture.
 struct ViewportTexture {
     /// The current size of the viewport, in pixels.
-    size: V2,
+    size: Vec2,
 
     /// The actual viewer for the viewport.
     view: TextureView,
@@ -41,7 +41,7 @@ pub struct Renderer {
 impl Renderer {
     pub fn view(&self) -> &TextureView { &self.texture.view }
 
-    pub fn size(&self) -> V2 { self.texture.size }
+    pub fn size(&self) -> Vec2 { self.texture.size }
 
     /// Use egui's render state to initialize our renderer.
     /// Creates our compute pipeline, texture, and buffers.
@@ -71,7 +71,7 @@ impl Renderer {
             cache: Default::default(),
         });
 
-        let size = V2::square(256.0);
+        let size = Vec2::square(256.0);
 
         // Create the buffer for the viewport uniform
         let uniform_buffer = ViewportDataUniform::buffer(&device);
@@ -80,8 +80,8 @@ impl Renderer {
         let view = create_texture(&device, size);
 
         // Create initial input textures
-        let sprite_view = create_texture(&device, V2::square(16.0));
-        let normal_view = create_texture(&device, V2::square(16.0));
+        let sprite_view = create_texture(&device, Vec2::square(16.0));
+        let normal_view = create_texture(&device, Vec2::square(16.0));
 
         // Create the bind group
         let bind_group = create_bind_group(
@@ -100,12 +100,12 @@ impl Renderer {
     }
 
     /// Render the editor UI. Runs the shader and updates the texture, and returns the texture ID for use in egui.
-    pub fn render(&mut self, device: &Device, queue: &Queue, uniform: ViewportDataUniform, size: V2) -> &TextureView {
+    pub fn render(&mut self, device: &Device, queue: &Queue, uniform: ViewportDataUniform, size: Vec2) -> &TextureView {
         // Ensure we aren't rendering too small
         let size = {
             let width = size.x.max(16.0);
             let height = size.y.max(16.0);
-            V2::new(width, height)
+            Vec2::new(width, height)
         };
 
         // Recreate texture if needed
@@ -171,7 +171,7 @@ impl Renderer {
 }
     
 /// Create a texture and view bindgroup for a pipeline. Should be called when the target render size changes.
-fn create_texture(device: &Device, size: V2) -> TextureView {
+fn create_texture(device: &Device, size: Vec2) -> TextureView {
     // Create a new texture and texture view when resizing
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("output"),
