@@ -8,4 +8,5 @@ bytemuck = { workspace = true }
 
 # for Froms
 egui = { workspace = true }
+rand = "0.10.3"
 wgpu = { workspace = true }
