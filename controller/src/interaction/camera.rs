@@ -1,7 +1,7 @@
 use vector::Vec2;
 
 /// Defines the current state of the camera.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct Camera {
     // Position of the pixel the camera is centered on, from the top left of the image, if scale = 1
     pub position: Vec2,
@@ -36,13 +36,4 @@ impl Camera {
 
     pub fn scale(&self) -> f32 { (2 as f32).powf(self.scale as f32) }
     pub fn inv_scale(&self) -> f32 { (2 as f32).powf(-self.scale as f32) }
-}
-
-impl Default for Camera {
-    fn default() -> Self {
-        Self {
-            position: Vec2::ZERO,
-            scale: 0,
-        }
-    }
 }

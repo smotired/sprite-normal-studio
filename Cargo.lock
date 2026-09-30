@@ -857,6 +857,7 @@ dependencies = [
 name = "controller"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytemuck",
  "vector",
  "wgpu",

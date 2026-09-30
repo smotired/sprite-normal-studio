@@ -7,3 +7,4 @@ edition = "2024"
 vector = { workspace = true }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
+anyhow = { workspace = true }

@@ -15,4 +15,4 @@ egui_extras = { version = "0.36.2", features = ["all_loaders"] }
 rfd = "0.17.2"
 env_logger = "0.11.11"
 image = "0.25.10"
-anyhow = "1.0.104"
+anyhow = { workspace = true }

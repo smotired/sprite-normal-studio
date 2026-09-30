@@ -1,6 +1,6 @@
 use vector::Vec2;
 use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture, TextureView};
-use controller::ViewportDataUniform;
+use controller::{Controller, ViewportDataUniform};
 
 /// Contains information about the viewport texture.
 struct ViewportTexture {
@@ -100,7 +100,7 @@ impl Renderer {
     }
 
     /// Render the editor UI. Runs the shader and updates the texture, and returns the texture ID for use in egui.
-    pub fn render(&mut self, device: &Device, queue: &Queue, uniform: ViewportDataUniform, size: Vec2) -> &TextureView {
+    pub fn render(&mut self, device: &Device, queue: &Queue, controller: &Controller, size: Vec2) -> &TextureView {
         // Ensure we aren't rendering too small
         let size = {
             let width = size.x.max(16.0);
@@ -142,7 +142,7 @@ impl Renderer {
         }
 
         // Write uniforms
-        queue.write_buffer(&self.control.uniform_buffer, 0, uniform.bytes());
+        queue.write_buffer(&self.control.uniform_buffer, 0, controller.uniform().bytes());
 
         // Submit workload
         queue.submit([encoder.finish()]);

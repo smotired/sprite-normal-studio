@@ -1,5 +1,6 @@
 mod generator;
 mod interaction;
+mod objects;
 
 use wgpu::{Device, Queue};
 
@@ -7,6 +8,7 @@ use crate::generator::Generator;
 
 pub use crate::interaction::input::{Input, Axis};
 pub use crate::interaction::viewport::ViewportDataUniform;
+pub use crate::objects::{ObjectBuffers, BufferStates};
 
 /// The Controller manages our actual working pipeline.
 pub struct Controller {
@@ -24,6 +26,9 @@ pub struct Controller {
 
     // Current state of the overlay and viewport
     overlay_state: interaction::OverlayState,
+
+    /// The points, zones, and shapes.
+    objects: objects::ObjectBuffers,
 }
 
 impl Controller {
@@ -35,19 +40,15 @@ impl Controller {
             camera: Default::default(),
             light: Default::default(),
             overlay_state: Default::default(),
+            objects: ObjectBuffers::new(device),
         }
     }
 
     /// Runs every frame of the GUI. Handle rerendering as needed.
-    /// Returns the status of the viewport as a tuple. Camera, light(s) later.
-    #[must_use = "Use return values when rendering the viewport."]
-    pub fn update(&mut self, device: &Device, queue: &Queue) -> ViewportDataUniform
-    {
+    pub fn update(&mut self, device: &Device, queue: &Queue) {
         if self.normals_stale {
             self.generator.generate_normals(device, queue);
             self.normals_stale = false;
         }
-
-        self.uniform()
     }
 }

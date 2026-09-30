@@ -118,7 +118,7 @@ impl eframe::App for StudioApp {
         });
 
         // Call the controller's update method to regenerate any textures as needed
-        let viewport_uniform = self.controller.update(&self.render_state.device, &self.render_state.queue);
+        self.controller.update(&self.render_state.device, &self.render_state.queue);
 
         // Render the main editor component and get the response for the image itself
         let response = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -126,7 +126,7 @@ impl eframe::App for StudioApp {
                 &mut self.renderer,
                 &self.render_state,
                 self.viewport_texture_id,
-                viewport_uniform,
+                &self.controller,
             ))
         }).inner;
 
