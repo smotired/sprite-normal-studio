@@ -1,35 +1,24 @@
 mod generator;
-mod camera;
-mod input;
-mod light;
-mod overlay;
+mod interaction;
 
 use wgpu::{Device, Queue, Texture};
 
 use crate::generator::Generator;
-use crate::camera::Camera;
-pub use crate::input::{Input, Axis};
-use crate::light::Light;
-use crate::overlay::OverlayState;
+use crate::interaction::Interaction;
 
-pub type ViewportState = (Camera, Light, u32);
+pub use crate::interaction::input::{Input, Axis};
+pub use crate::interaction::viewport::ViewportDataUniform;
 
 /// The Controller manages our actual working pipeline.
 pub struct Controller {
     // In charge of generating normal maps when we change the controller
     generator: Generator,
 
-    // Current state of the camera
-    camera: Camera,
-
-    // Current state of the light
-    light: Light,
-
     // If we need to regenerate the normal map on the next render.
     normals_stale: bool,
 
-    // Defines the state of what we are inputting
-    overlay_state: OverlayState,
+    // Handles our current interaction
+    interaction: Interaction,
 }
 
 impl Controller {
@@ -37,10 +26,8 @@ impl Controller {
     pub fn new(device: &Device) -> Self {
         Self {
             generator: Generator::new(device),
-            camera: Camera::new([8.0, 8.0]), // center of starting image. when image is loaded, should recenter at image center and scale 0.
-            light: Light::new(),
             normals_stale: false,
-            overlay_state: OverlayState::new(),
+            interaction: Default::default(),
         }
     }
     
@@ -56,25 +43,30 @@ impl Controller {
 
         // Recenter the camera and the light
         let size = sprite.size();
-        self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5]);
-        self.light.set_pos((size.width as f32 * 0.5, size.height as f32 * 0.5));
+        self.interaction.handle_input(Input::Recenter, (size.width as f32, size.height as f32));
     }
 
     // Convert viewport pixel position to world/spritesheet space.
     pub fn screen_to_world(&self, screen: (f32, f32), viewport_size: (f32, f32)) -> (f32, f32) {
-        self.camera.screen_to_world(screen, viewport_size)
+        self.interaction.screen_to_world(screen, viewport_size)
+    }
+    
+    // Forward input interactions
+    pub fn handle_input(&mut self, input: Input) {
+        let size = self.output().size();
+        self.interaction.handle_input(input, (size.width as f32, size.height as f32));
     }
 
     /// Runs every frame of the GUI. Handle rerendering as needed.
     /// Returns the status of the viewport as a tuple. Camera, light(s) later.
     #[must_use = "Use return values when rendering the viewport."]
-    pub fn update(&mut self, device: &Device, queue: &Queue) -> ViewportState
+    pub fn update(&mut self, device: &Device, queue: &Queue) -> ViewportDataUniform
     {
         if self.normals_stale {
             self.generator.generate_normals(device, queue);
             self.normals_stale = false;
         }
 
-        (self.camera, self.light, self.overlay_state.get_flags())
+        self.interaction.output()
     }
 }

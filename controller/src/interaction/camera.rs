@@ -10,10 +10,6 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new(position: [f32; 2]) -> Self {
-        Self { position, scale: 0 }
-    }
-
     // Convert viewport pixel position to world/spritesheet space.
     pub fn screen_to_world(&self, screen: (f32, f32), viewport_size: (f32, f32)) -> (f32, f32) {
         let half = (viewport_size.0 / 2.0, viewport_size.1 / 2.0);
@@ -21,6 +17,12 @@ impl Camera {
             (screen.0 - half.0) * self.inv_scale() + self.position[0],
             (screen.1 - half.1) * self.inv_scale() + self.position[1]
         )
+    }
+
+    // Move the camera by a position delta
+    pub fn set_position(&mut self, pos: (f32, f32)) {
+        self.position[0] = pos.0;
+        self.position[1] = pos.1;
     }
 
     // Move the camera by a position delta
