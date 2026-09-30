@@ -53,7 +53,7 @@ impl Interaction {
     pub fn handle_input(&mut self, input: Input, viewport_size: Vec2) {
         match input {
             Input::Recenter => {
-                self.camera.set_position(viewport_size * 0.5);
+                self.camera.reset_position(viewport_size * 0.5);
                 self.light.set_pos(viewport_size * 0.5);
             },
 
