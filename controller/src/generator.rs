@@ -1,5 +1,7 @@
 use wgpu::{BindGroup, ComputePipeline, Device, Queue, Texture};
 
+use crate::{Controller, Input};
+
 /// The Generator is in charge of generating the normal map from the
 /// input texture, spritesheet (for size), zones, and shapes.
 pub struct Generator {
@@ -101,4 +103,20 @@ fn create_output(device: &Device, (width, height): (u32, u32)) -> Texture {
         usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     })
+}
+
+impl Controller {
+    /// Get a reference to the working normal map texture
+    pub fn output(&self) -> &Texture { self.generator.output() }
+    
+    /// When sprite or normal map are loaded from files, update child objects.
+    pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
+    {
+        // Regenerate the normal map's output texture
+        self.generator.set_inputs(device, sprite, normal);
+        self.normals_stale = true;
+
+        // Recenter the camera and the light by adding a fake input (maybe not a good idea but icbatgetslftmoas </3)
+        self.handle_input(Input::Recenter);
+    }
 }

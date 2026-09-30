@@ -6,35 +6,20 @@ mod overlay;
 pub mod viewport;
 pub mod input;
 
-pub struct Interaction {
-    // Current state of the camera
-    camera: camera::Camera,
+pub use camera::Camera;
+pub use light::Light;
+pub use overlay::OverlayState;
 
-    // Current state of the light
-    light: light::Light,
+use crate::Controller;
 
-    // Current state of the overlay and viewport
-    overlay_state: overlay::OverlayState,
-}
-
-impl Interaction {
+impl Controller {
     // Camera methods
     pub fn screen_to_world(&self, screen: Vec2, viewport_size: Vec2) -> Vec2 {
         self.camera.screen_to_world(screen, viewport_size)
     }
 
     // Get output
-    pub fn output(&self) -> viewport::ViewportDataUniform {
+    pub fn uniform(&self) -> viewport::ViewportDataUniform {
         viewport::ViewportDataUniform::new(&self.light, &self.camera, &self.overlay_state)
-    }
-}
-
-impl Default for Interaction {
-    fn default() -> Self {
-        Self {
-            camera: Default::default(),
-            light: Default::default(),
-            overlay_state: Default::default(),
-        }
     }
 }

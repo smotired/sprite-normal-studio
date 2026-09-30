@@ -1,11 +1,9 @@
 mod generator;
 mod interaction;
 
-use vector::Vec2;
-use wgpu::{Device, Queue, Texture};
+use wgpu::{Device, Queue};
 
 use crate::generator::Generator;
-use crate::interaction::Interaction;
 
 pub use crate::interaction::input::{Input, Axis};
 pub use crate::interaction::viewport::ViewportDataUniform;
@@ -18,8 +16,14 @@ pub struct Controller {
     // If we need to regenerate the normal map on the next render.
     normals_stale: bool,
 
-    // Handles our current interaction
-    interaction: Interaction,
+    // Current state of the camera
+    camera: interaction::Camera,
+
+    // Current state of the light
+    light: interaction::Light,
+
+    // Current state of the overlay and viewport
+    overlay_state: interaction::OverlayState,
 }
 
 impl Controller {
@@ -28,32 +32,10 @@ impl Controller {
         Self {
             generator: Generator::new(device),
             normals_stale: false,
-            interaction: Default::default(),
+            camera: Default::default(),
+            light: Default::default(),
+            overlay_state: Default::default(),
         }
-    }
-    
-    /// Get a reference to the working normal map texture
-    pub fn output(&self) -> &Texture { self.generator.output() }
-    
-    /// When sprite or normal map are loaded from files, update child objects.
-    pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
-    {
-        // Regenerate the normal map's output texture
-        self.generator.set_inputs(device, sprite, normal);
-        self.normals_stale = true;
-
-        // Recenter the camera and the light by adding a fake input (maybe not a good idea but icbatgetslftmoas </3)
-        self.interaction.handle_input(Input::Recenter, Vec2::from(self.output().size()));
-    }
-
-    // Convert viewport pixel position to world/spritesheet space.
-    pub fn screen_to_world(&self, screen: Vec2, viewport_size: Vec2) -> Vec2 {
-        self.interaction.screen_to_world(screen, viewport_size)
-    }
-    
-    // Forward input interactions
-    pub fn handle_input(&mut self, input: Input) {
-        self.interaction.handle_input(input, Vec2::from(self.output().size()));
     }
 
     /// Runs every frame of the GUI. Handle rerendering as needed.
@@ -66,6 +48,6 @@ impl Controller {
             self.normals_stale = false;
         }
 
-        self.interaction.output()
+        self.uniform()
     }
 }
