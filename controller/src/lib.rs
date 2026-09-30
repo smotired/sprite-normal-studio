@@ -1,6 +1,7 @@
 mod generator;
 mod interaction;
 
+use vector::V2;
 use wgpu::{Device, Queue, Texture};
 
 use crate::generator::Generator;
@@ -41,20 +42,18 @@ impl Controller {
         self.generator.set_inputs(device, sprite, normal);
         self.normals_stale = true;
 
-        // Recenter the camera and the light
-        let size = sprite.size();
-        self.interaction.handle_input(Input::Recenter, (size.width as f32, size.height as f32));
+        // Recenter the camera and the light by adding a fake input (maybe not a good idea but icbatgetslftmoas </3)
+        self.interaction.handle_input(Input::Recenter, V2::from(self.output().size()));
     }
 
     // Convert viewport pixel position to world/spritesheet space.
-    pub fn screen_to_world(&self, screen: (f32, f32), viewport_size: (f32, f32)) -> (f32, f32) {
+    pub fn screen_to_world(&self, screen: V2, viewport_size: V2) -> V2 {
         self.interaction.screen_to_world(screen, viewport_size)
     }
     
     // Forward input interactions
     pub fn handle_input(&mut self, input: Input) {
-        let size = self.output().size();
-        self.interaction.handle_input(input, (size.width as f32, size.height as f32));
+        self.interaction.handle_input(input, V2::from(self.output().size()));
     }
 
     /// Runs every frame of the GUI. Handle rerendering as needed.

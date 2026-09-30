@@ -1,3 +1,5 @@
+use vector::V2;
+
 mod camera;
 mod light;
 mod overlay;
@@ -17,7 +19,7 @@ pub struct Interaction {
 
 impl Interaction {
     // Camera methods
-    pub fn screen_to_world(&self, screen: (f32, f32), viewport_size: (f32, f32)) -> (f32, f32) {
+    pub fn screen_to_world(&self, screen: V2, viewport_size: V2) -> V2 {
         self.camera.screen_to_world(screen, viewport_size)
     }
 

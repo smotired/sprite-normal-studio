@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::ops;
 
 #[derive(Debug, Copy, Clone, PartialEq, Default)]
@@ -17,6 +18,9 @@ impl V2 {
 
     /// Create a V2 on the y axis
     pub fn vt(y: f32) -> Self { Self { x: 0.0, y } }
+
+    /// Create a vector with identical x and y
+    pub fn square(v: f32) -> Self { Self { x: v, y: v } }
 
     /// Find the dot product with another V2
     pub fn dot(self, rhs: Self) -> f32 { self.x * rhs.x + self.y * rhs.y }
@@ -54,9 +58,6 @@ impl V2 {
 
     /// Linear interpolation between two vectors according to a value between 0 and 1
     pub fn lerp(lhs: Self, rhs: Self, t: f32) -> V2 { lhs + t.clamp(0.0, 1.0) * (rhs - lhs) }
-
-    /// Convert to an array for use in a uniform
-    pub fn arr(self) -> [f32; 2] { [ self.x, self.y ] }
 }
 
 impl ops::Add<V2> for V2 {
@@ -124,6 +125,12 @@ impl From<(f32, f32)> for V2 {
     }
 }
 
+impl From<(usize, usize)> for V2 {
+    fn from(value: (usize, usize)) -> Self {
+        Self { x: value.0 as f32, y: value.1 as f32 }
+    }
+}
+
 impl From<[f32; 2]> for V2 {
     fn from(value: [f32; 2]) -> Self {
         Self { x: value[0], y: value[1] }
@@ -136,8 +143,20 @@ impl From<egui::Pos2> for V2 {
     }
 }
 
+impl From<egui::Vec2> for V2 {
+    fn from(value: egui::Vec2) -> Self {
+        Self { x: value.x, y: value.y }
+    }
+}
+
 impl From<wgpu::Extent3d> for V2 {
     fn from(value: wgpu::Extent3d) -> Self {
         Self { x: value.width as f32, y: value.height as f32 }
+    }
+}
+
+impl Display for V2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.x, self.y)
     }
 }

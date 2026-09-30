@@ -24,7 +24,7 @@ pub struct ViewportDataUniform {
 impl ViewportDataUniform {
     pub fn new(light: &Light, camera: &Camera, overlay: &OverlayState) -> Self {
         Self {
-            camera_pos: camera.position,
+            camera_pos: [ camera.position.x, camera.position.y ],
             inv_scale: camera.inv_scale(),
             overlay_flags: overlay.get_flags(),
             light_pos: light.pos_arr(),

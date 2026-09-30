@@ -1,5 +1,6 @@
 use controller::{Axis, Input};
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
+use vector::V2;
 
 use crate::app::StudioApp;
 
@@ -11,12 +12,12 @@ impl StudioApp {
         let scale = |shift: bool| { if shift { 2 } else { 1 } };
 
         // Get mouse position in world space over the image. None if mouse is not over image.
-        let (vw, vh) = self.renderer.size();
+        let viewport_size = self.renderer.size();
         let mouse_world = i.pointer.latest_pos()
             .filter(|pos| viewport_rect.contains(*pos))
             .map(|pos| {
                 let local = (pos - viewport_rect.min) * ppp; // egui::Vec2, points -> local origin
-                self.controller.screen_to_world((local.x, local.y), (vw as f32, vh as f32))
+                self.controller.screen_to_world(V2::from(local), viewport_size)
             });
 
         // Handle specific events
@@ -135,9 +136,10 @@ impl StudioApp {
         let rect = response.rect;
 
         // Screen-space Pos2 -> local physical-pixel coordinates -> world space coordinates
+        let viewport_size = V2::new(response.rect.width(), response.rect.height());
         let to_world = |pos: Pos2| {
             let local = (pos - rect.min) * ppp;
-            self.controller.screen_to_world((local.x, local.y), (response.rect.width(), response.rect.height()))
+            self.controller.screen_to_world(V2::from(local), viewport_size)
         };
 
         // Final list of events to process
@@ -184,7 +186,7 @@ impl StudioApp {
             // Convert the delta to world space by treating it like a point and then finding delta from whatever 0 is
             let world_origin = to_world(Pos2::ZERO);
             let delta_pos_in_world = to_world(Pos2::new(delta.x, delta.y));
-            let world_delta = (delta_pos_in_world.0 - world_origin.0, delta_pos_in_world.1 - world_origin.1);
+            let world_delta = delta_pos_in_world - world_origin;
 
             inputs.push(Input::CameraDragged(world_delta));
         }
