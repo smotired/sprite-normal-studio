@@ -1,6 +1,6 @@
 use vector::Vec2;
 
-use crate::interaction::Interaction;
+use crate::Controller;
 
 pub enum Axis {
     Vertical,
@@ -48,13 +48,14 @@ pub enum Input {
     LightingToggled(Option<bool>),
 }
 
-impl Interaction {
+impl Controller {
     // Handle different inputs from the UI
-    pub fn handle_input(&mut self, input: Input, viewport_size: Vec2) {
+    pub fn handle_input(&mut self, input: Input) {
         match input {
             Input::Recenter => {
-                self.camera.reset_position(viewport_size * 0.5);
-                self.light.set_pos(viewport_size * 0.5);
+                let center = Vec2::from(self.output().size()) * 0.5;
+                self.camera.reset_position(center);
+                self.light.set_pos(center);
             },
 
             Input::CameraMove(axis, amount) => {
