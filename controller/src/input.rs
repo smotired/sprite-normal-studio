@@ -31,6 +31,9 @@ pub enum Input {
 
     /// Releasing the mouse dragging
     MouseDragReleased,
+
+    /// Altitude is changed (i.e. page up/down is pressed). True if going up.
+    Altitude(bool),
 }
 
 impl Controller {
@@ -79,6 +82,12 @@ impl Controller {
 
             Input::MouseDragReleased => {
                 self.overlay_state.dragging_light = false;
+            },
+
+            Input::Altitude(up) => {
+                if self.overlay_state.dragging_light {
+                    self.light.adjust_height(if up { 100.0 } else { -100.0 });
+                }
             },
 
             Input::NoInput => { },

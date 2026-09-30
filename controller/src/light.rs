@@ -11,6 +11,10 @@ impl Light {
         self.pos = (pos.0, pos.1, self.pos.2);
     }
 
+    pub fn adjust_height(&mut self, delta: f32) {
+        self.pos.2 = (self.pos.2 + delta).max(100.0);
+    }
+
     pub fn distance(&self, pos: (f32, f32)) -> f32 {
         let dx = self.pos.0 - pos.0;
         let dy = self.pos.1 - pos.1;
