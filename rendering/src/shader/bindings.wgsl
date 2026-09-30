@@ -1,8 +1,8 @@
 /* bindings.wgsl
  * Contains buffer bindings and their structs for the viewport.
- * Group 1: Output texture, camera/light uniform, spritesheet, and
+ * Group 0: Output texture, camera/light uniform, spritesheet, and
  *          normal map texture.
- * Group 2: Zone, path, and shape buffers.
+ * Group 1: Zone, path, and shape buffers.
  *******************************************************************/
 
 /***********************************/
@@ -21,8 +21,8 @@ struct Params {
 
     // Extra flags for which parts of the overlay are shown.
     // In order of increasing magnitude:
-    // 00: Normal Map on (default false, replaces spritesheet)
-    // 01: Lighting on (default true, does nothing if flag 00 is set)
+    // 00: Normal Map on (default true, replaces spritesheet if lighting is off)
+    // 01: Lighting on (default true, shades flat if normal map is off)
     // 02: Light Button On (default true)
     // 03: Light Button Halo On (default false, true when dragging light)
     // 04: Zone paths enabled

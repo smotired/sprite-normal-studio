@@ -23,7 +23,12 @@ impl Zone {
         }
     }
 
-    pub fn add_point(&mut self) { self.point_count += 1; }
+    // Add a point and return the new ID (need an Insert method later)
+    pub fn add_point(&mut self) -> u16 {
+        let point_id = self.point_start + self.point_count;
+        self.point_count += 1;
+        point_id
+    }
 
     /// Adds an offset to this zone's start position assuming we have enough room for all points
     pub fn add_offset(&mut self, offset: i32) {

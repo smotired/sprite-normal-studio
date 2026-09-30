@@ -46,9 +46,10 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 
 ### Phase III - Zone Management
+*9/30/26 - present*
 
 ```
-[ ] Create a Zone struct
+[x] Create a Zone struct
 [ ] Render Zone boundaries
 [ ] Assign pixels to zones in compute shader
 [ ] Allow creating zones with bezier paths
@@ -143,8 +144,9 @@ This section will be added to as I add keybinds (and remember).
 ### Camera
 
 > `WASD` - Pan camera. Hold shift to pan more quickly.  
+> `Middle Click + Drag` - Pan camera.
 > `Home` - Recenter camera.  
-> `Ctrl + Scroll` - Zoom in or out.  
+> `Shift + Scroll` - Zoom in or out.  
 > `Ctrl + Plus` - Zoom in.  
 > `Ctrl + Minus` - Zoom out.  
 
@@ -157,3 +159,8 @@ This section will be added to as I add keybinds (and remember).
 ### Overlay
 
 > `O` - Toggle entire overlay.  
+
+### Objects
+
+> `Left Click + Drag` - Drag light or selected zones/control points/shapes.
+> `PageUp/PageDown` - Adjust light height while dragging it.  
