@@ -1,5 +1,5 @@
 use controller::ViewportState;
-use eframe::egui::{ Response, Ui, Widget, Image, TextureId, load::SizedTexture };
+use eframe::egui::{ Response, Ui, Widget, Image, TextureId, load::SizedTexture, Sense };
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu::FilterMode;
 use rendering::Renderer;
@@ -34,6 +34,6 @@ impl Widget for Editor<'_> {
         );
 
         // Display the texture image in as much space as possible
-        ui.add(Image::new(SizedTexture::new(self.viewport_texture_id, points)))
+        ui.add(Image::new(SizedTexture::new(self.viewport_texture_id, points)).sense(Sense::click_and_drag()))
     }
 }

@@ -1,4 +1,4 @@
-use crate::{Controller, Input::NoInput, camera::Camera};
+use crate::{Controller, camera::Camera};
 
 pub enum Axis {
     Vertical,
@@ -17,7 +17,37 @@ pub enum Input {
     CameraMove(Axis, f32),
 
     /// Changing the camera scale. Should be a power of 2.
+    /// Optionally, scale relative to a fixed anchor point in world space.
     CameraScale(f32, Option<(f32, f32)>),
+
+    /// Left-clicking the mouse at a world space position
+    MouseClicked((f32, f32)),
+
+    /// Starting a drag event
+    MouseDragStarted((f32, f32)),
+
+    /// Dragging the mouse while left clicking, from a start position to an end position.
+    MouseDragged((f32, f32), (f32, f32)),
+
+    /// Releasing the mouse dragging
+    MouseDragReleased,
+}
+
+/// Tracks input state
+pub struct InputState {
+    pub dragging_light: bool,
+}
+
+impl InputState {
+    pub fn new() -> Self {
+        Self {
+            dragging_light: false,
+        }
+    }
+
+    pub fn reset_drag(&mut self) {
+        self.dragging_light = false;
+    }
 }
 
 impl Controller {
@@ -44,7 +74,35 @@ impl Controller {
                 self.camera.apply_scale(amount, relative_to);
             },
 
-            NoInput => { },
+            Input::MouseClicked((x, y)) => {
+                println!("Clicked: ({}, {})", x, y);  
+            },
+
+            Input::MouseDragStarted((x, y)) => {
+                self.input_state.reset_drag();
+                println!("Drag started from: ({}, {})", x, y);  
+
+                let screen_distance_to_light = self.light.distance((x, y)) * self.camera.scale as f32;
+                println!("Screen distance to light: {}", screen_distance_to_light);
+
+                // Decide if we should start dragging the light
+                if screen_distance_to_light <= 10.0 {
+                    self.input_state.dragging_light = true;
+                }
+            }
+
+            Input::MouseDragged((_sx, _sy), (nx, ny)) => {
+                // Move the light if we are dragging it
+                if self.input_state.dragging_light {
+                    self.light.set_pos((nx, ny));
+                }
+            },
+
+            Input::MouseDragReleased => {
+                self.input_state.reset_drag();
+            },
+
+            Input::NoInput => { },
         }
     }
 }
