@@ -57,14 +57,7 @@ impl<T> VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
 
     /// Write the items to the buffer.
     pub fn write(&self, queue: &Queue) {
-        // TODO: THIS MUST BE SO FUCKING SLOW
-        let item_size = bytemuck::bytes_of(&T::zeroed()).len() as u64;
-        for i in 0..self.items.len() {
-            queue.write_buffer(&self.buffer, i as u64 * item_size, bytemuck::bytes_of(&self.items[i]));
-        }
-        for i in self.items.len()..self.buffer_size {
-            queue.write_buffer(&self.buffer, i as u64 * item_size, bytemuck::bytes_of(&T::zeroed()));
-        }
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&self.items[..]));
     }
 }
 
@@ -182,6 +175,8 @@ impl ObjectBuffers {
         self.zones.write(queue);
         self.points.write(queue);
     }
+
+    pub fn object_counts(&self) -> (usize, usize) { (self.zones.items.len(), self.points.items.len()) }
 }
 
 /// Create a buffer for use with a VecWithBuffer. Return the buffer and its size of the buffer.

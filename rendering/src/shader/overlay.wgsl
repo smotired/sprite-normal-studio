@@ -53,11 +53,10 @@ fn overlay_zone_paths(
     let h = CONTROL_POINT_WIDTH * 0.5;
     
     // Loop through all zones
-    let zone_count = arrayLength(&zones);
-    for (var i = 0u; i < zone_count; i += 1u) {
+    for (var i = 0u; i < params.zone_count; i += 1u) {
         let zone = unpack_zone(zones[i]);
 
-        for (var j = 0u; j < zone.points_count; j += 1u) {
+        for (var j = 0u; j < zone.point_count; j += 1u) {
             let to_point = unpack_point(points[zone.points_start + j]).position - pos;
 
             // If within the square return orange
