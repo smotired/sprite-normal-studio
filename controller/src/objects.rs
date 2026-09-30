@@ -10,6 +10,7 @@ use point::{ControlPoint, ControlPointMode};
 use crate::Controller;
 
 const MAX_OBJECT_ID: usize = 65535;
+const MIN_BUFFER_SIZE: usize = 32;
 
 /// States of the Zones buffer and Points buffer.
 pub type BufferStates<'a> = ((&'a Buffer, usize), (&'a Buffer, usize));
@@ -42,8 +43,12 @@ impl<T> VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
 
     /// Get the buffer and its size. Caller should keep track of buffer sizes and recreate bind groups if they change.
     pub fn get_buffer(&mut self, device: &Device) -> (&Buffer, usize) {
+        let required_space = &self.items.len().max(MIN_BUFFER_SIZE);
+        let maintain_range = (self.buffer_size >> 2)..=(self.buffer_size);
+
         // Recreate the buffer if the length has grown too large or too small
-        if !((self.buffer_size >> 2)..=(self.buffer_size)).contains(&self.items.len()) {
+        if !(maintain_range).contains(required_space) {
+            println!("Need to recreate {} | Buffer size: {} |  Item count: {}", self.label, self.buffer_size, self.items.len());
             (self.buffer, self.buffer_size) = create_buffer(device, &self.items, self.label);
         }
 
@@ -183,7 +188,7 @@ impl ObjectBuffers {
 fn create_buffer<T>(device: &Device, vector: &Vec<T>, label: &str) -> (Buffer, usize) where T : bytemuck::Pod + bytemuck::Zeroable {
     // Make buffer the smallest power of 2 above 32 that will fit
     let item_count = {
-        let mut size = 32 as usize;
+        let mut size = MIN_BUFFER_SIZE as usize;
         let target = vector.len();
         while size < target { size = size << 1 }
         size
@@ -194,7 +199,7 @@ fn create_buffer<T>(device: &Device, vector: &Vec<T>, label: &str) -> (Buffer, u
         label: Some(label),
         size: (item_count * bytemuck::bytes_of(&T::zeroed()).len()) as u64,
         mapped_at_creation: false,
-        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
     (buffer, item_count)
@@ -204,4 +209,7 @@ impl Controller {
     /// Get references to the buffers and their sizes. Recreates the buffers if needed.
     /// The caller should keep track of the previous buffer sizes and recreate the bind group if they differ.
     pub fn object_buffers(&mut self, device: &Device) -> BufferStates<'_> { self.objects.get_buffers(device) }
+
+    /// Add a command to write the current object lists to the buffers. Assumes the buffers have already been sized.
+    pub fn write_object_buffers(&self, queue: &Queue) { self.objects.write_buffers(queue); }
 }

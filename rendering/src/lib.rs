@@ -1,6 +1,6 @@
 use vector::Vec2;
 use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture, TextureView};
-use controller::{Controller, ViewportDataUniform};
+use controller::{BufferStates, Controller, ViewportDataUniform};
 
 /// Contains information about the viewport texture.
 struct ViewportTexture {
@@ -19,14 +19,20 @@ struct RenderControl {
     /// The uniform buffer we use to send viewport data to the GPU.
     uniform_buffer: Buffer,
 
-    /// Bind group for sending the textures and uniforms to the GPU.
-    bind_group: BindGroup,
+    /// Bind group for sending the textures and uniform to the GPU.
+    textures_bind_group: BindGroup,
 
     /// TextureView for the spritesheet, passed to the renderer
     sprite_view: TextureView,
 
     /// TextureView for the working normal map, passed to the renderer
     normal_view: TextureView,
+
+    /// Bind group for sending the zone/shape buffers to the GPU.
+    objects_bind_group: BindGroup,
+
+    /// The size of the object buffers
+    object_buffer_sizes: (usize, usize),
 }
 
 /// Primary struct for rendering the viewport.
@@ -45,7 +51,7 @@ impl Renderer {
 
     /// Use egui's render state to initialize our renderer.
     /// Creates our compute pipeline, texture, and buffers.
-    pub fn new(device: &Device) -> Self {
+    pub fn new(device: &Device, object_buffers: BufferStates) -> Self {
         // Load the shader
         let source = format!(
             "{}\n{}\n{}\n{}\n{}",                       // Concatenate each source file into one big one
@@ -84,8 +90,8 @@ impl Renderer {
         let normal_view = create_texture(&device, Vec2::square(16.0));
 
         // Create the bind group
-        let bind_group = create_bind_group(
-            &device,
+        let textures_bind_group = create_textures_bind_group(
+            device,
             &pipeline,
             &view,
             &sprite_view,
@@ -93,14 +99,30 @@ impl Renderer {
             &uniform_buffer
         );
 
+        // Create object bind group
+        let (zones_buffer, points_buffer) = object_buffers;
+        let objects_bind_group = create_objects_bind_group(device, &pipeline, zones_buffer.0, points_buffer.0);
+        let object_buffer_sizes = (zones_buffer.1, points_buffer.1);
+
         // Set up
-        let control = RenderControl { pipeline, uniform_buffer, bind_group, sprite_view, normal_view  };
-        let texture = ViewportTexture { size, view };
+        let control = RenderControl {
+            pipeline,
+            uniform_buffer,
+            textures_bind_group,
+            sprite_view,
+            normal_view,
+            objects_bind_group,
+            object_buffer_sizes,
+        };
+        let texture = ViewportTexture {
+            size,
+            view,
+        };
         Self { control, texture }
     }
 
     /// Render the editor UI. Runs the shader and updates the texture, and returns the texture ID for use in egui.
-    pub fn render(&mut self, device: &Device, queue: &Queue, controller: &Controller, size: Vec2) -> &TextureView {
+    pub fn render(&mut self, device: &Device, queue: &Queue, controller: &mut Controller, size: Vec2) -> &TextureView {
         // Ensure we aren't rendering too small
         let size = {
             let width = size.x.max(16.0);
@@ -115,14 +137,22 @@ impl Renderer {
             self.texture.view = view;
             self.texture.size = size;
 
-            self.control.bind_group = create_bind_group(
-                &device,
+            self.control.textures_bind_group = create_textures_bind_group(
+                device,
                 &self.control.pipeline,
                 &self.texture.view,
                 &self.control.sprite_view,
                 &self.control.normal_view,
                 &self.control.uniform_buffer
             );
+        }
+
+        // Recreate objects bind group if needed
+        let (zones_buffer, points_buffer) = controller.object_buffers(device);
+        let object_buffer_sizes = (zones_buffer.1, points_buffer.1);
+        if object_buffer_sizes != self.control.object_buffer_sizes {
+            self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, zones_buffer.0, points_buffer.0);
+            self.control.object_buffer_sizes = object_buffer_sizes;
         }
 
         // Create a command encoder
@@ -137,12 +167,16 @@ impl Renderer {
             // Set up the render pass and dispatch work groups
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&self.control.pipeline);
-            pass.set_bind_group(0, &self.control.bind_group, &[]);
+            pass.set_bind_group(0, &self.control.textures_bind_group, &[]);
+            pass.set_bind_group(1, &self.control.objects_bind_group, &[]);
             pass.dispatch_workgroups(blocks_x, blocks_y, 1);
         }
 
         // Write uniforms
         queue.write_buffer(&self.control.uniform_buffer, 0, controller.uniform().bytes());
+
+        // Write shapes
+        controller.write_object_buffers(queue);
 
         // Submit workload
         queue.submit([encoder.finish()]);
@@ -159,7 +193,7 @@ impl Renderer {
         self.control.normal_view = normal.create_view(&Default::default());
 
         // Must recreate the bind group
-        self.control.bind_group = create_bind_group(
+        self.control.textures_bind_group = create_textures_bind_group(
             device,
             &self.control.pipeline,
             &self.texture.view,
@@ -189,7 +223,7 @@ fn create_texture(device: &Device, size: Vec2) -> TextureView {
 
 /// Create a new bind group for a pipeline. Should be called whenever the viewport is resized or texture references are changed
 /// (Not just whenever the input textures are written to)
-fn create_bind_group(device: &Device, pipeline: &ComputePipeline, output: &TextureView, sprite: &TextureView, normal: &TextureView, uniform: &Buffer) -> BindGroup {
+fn create_textures_bind_group(device: &Device, pipeline: &ComputePipeline, output: &TextureView, sprite: &TextureView, normal: &TextureView, uniform: &Buffer) -> BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipeline.get_bind_group_layout(0),
@@ -209,6 +243,24 @@ fn create_bind_group(device: &Device, pipeline: &ComputePipeline, output: &Textu
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: wgpu::BindingResource::TextureView(&normal),
+            },
+        ]
+    })
+}
+
+/// Create a new bind group for a pipeline. Should be called whenever the object buffers are recreated.
+fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, zones: &Buffer, points: &Buffer) -> BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &pipeline.get_bind_group_layout(1),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: zones.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: points.as_entire_binding(),
             },
         ]
     })

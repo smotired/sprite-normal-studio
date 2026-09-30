@@ -28,6 +28,9 @@ impl OverlayState {
                 // 03: Light halo
                 if self.dragging_light { flags |= 1 << 3; }
             }
+
+            // 04: Overlay paths
+            flags |= 1 << 4;
         }
 
         flags
