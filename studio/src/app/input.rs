@@ -1,5 +1,5 @@
 use controller::{Axis, Input};
-use eframe::egui::{Ui, Response, Event, InputState, Key, Modifiers, Rect, Pos2};
+use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
 
 use crate::app::StudioApp;
 
@@ -151,14 +151,14 @@ impl StudioApp {
         }
 
         // Handle starting drag
-        if response.drag_started() {
+        if response.drag_started_by(PointerButton::Primary) {
             if let Some(start_screen) = ui.input(|i| i.pointer.press_origin()) {
                 inputs.push(Input::MouseDragStarted(to_world(start_screen)));
             }
         }
 
         // Handle an active drag
-        if response.dragged() {
+        if response.dragged_by(PointerButton::Primary) {
             if let Some(start_screen) = ui.input(|i| i.pointer.press_origin()) {
                 if let Some(total_delta) = response.total_drag_delta() {
                     let start_world = to_world(start_screen);
@@ -173,8 +173,20 @@ impl StudioApp {
         }
 
         // Handle stopping drag
-        if response.drag_stopped() {
+        if response.drag_stopped_by(PointerButton::Primary) {
             inputs.push(Input::MouseDragReleased);
+        }
+
+        // Handle an active drag with the middle mouse button for camera
+        if response.dragged_by(PointerButton::Middle) {
+            let delta = response.drag_delta();
+
+            // Convert the delta to world space by treating it like a point and then finding delta from whatever 0 is
+            let world_origin = to_world(Pos2::ZERO);
+            let delta_pos_in_world = to_world(Pos2::new(delta.x, delta.y));
+            let world_delta = (delta_pos_in_world.0 - world_origin.0, delta_pos_in_world.1 - world_origin.1);
+
+            inputs.push(Input::CameraDragged(world_delta));
         }
 
         inputs

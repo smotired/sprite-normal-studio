@@ -32,6 +32,9 @@ pub enum Input {
     /// Releasing the mouse dragging
     MouseDragReleased,
 
+    /// Dragging the camera across this world space delta.
+    CameraDragged((f32, f32)),
+
     /// Altitude is changed (i.e. page up/down is pressed). True if going up.
     Altitude(bool),
 
@@ -101,6 +104,10 @@ impl Controller {
 
             Input::OverlayToggled => {
                 self.overlay_state.toggle_overlay();
+            },
+
+            Input::CameraDragged((dx, dy)) => {
+                self.camera.move_position((-dx, -dy));
             },
 
             Input::LightingToggled(toggle) => {
