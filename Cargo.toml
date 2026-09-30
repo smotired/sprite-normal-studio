@@ -18,3 +18,6 @@ egui = { version = "0.36.2" }
 
 # Used by vector and controller
 bytemuck = { version = "1.25.2", features = ["derive"] }
+
+# Used by studio and controller
+anyhow = "1.0.104"
