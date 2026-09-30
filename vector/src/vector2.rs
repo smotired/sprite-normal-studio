@@ -8,8 +8,12 @@ pub struct Vec2 { pub x: f32, pub y: f32, }
 /// Basic vector2 struct
 impl Vec2 {
     /// Constants
-    pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
-    pub const ONE: Self  = Self { x: 1.0, y: 1.0 };
+    pub const ZERO:  Self = Self { x:  0.0, y:  0.0 };
+    pub const ONE:   Self = Self { x:  1.0, y:  1.0 };
+    pub const UP:    Self = Self { x:  0.0, y:  1.0 };
+    pub const DOWN:  Self = Self { x:  0.0, y: -1.0 };
+    pub const RIGHT: Self = Self { x:  1.0, y:  0.0 };
+    pub const LEFT:  Self = Self { x: -1.0, y:  0.0 };
 
     /// Create a new Vec2 from x and y coords
     pub fn new(x: f32, y: f32) -> Self { Self { x, y } }
@@ -22,6 +26,15 @@ impl Vec2 {
 
     /// Create a vector with identical x and y
     pub fn square(v: f32) -> Self { Self { x: v, y: v } }
+
+    /// Create a random normalized vector (uniformly distributed on unit circle)
+    pub fn random_on_circle() -> Self {
+        let angle = rand::random_range(0.0 .. crate::M_2PI);
+        Self {
+            x: angle.cos(),
+            y: angle.sin(),
+        }
+    }
 
     /// Find the dot product with another Vec2
     pub fn dot(self, rhs: Self) -> f32 { self.x * rhs.x + self.y * rhs.y }
@@ -36,7 +49,7 @@ impl Vec2 {
     pub fn magnitude(self) -> f32 { self.sq_magnitude().sqrt() }
 
     /// Normalized form of this vector, or 0 if it's the zero vector
-    pub fn normalized(self) -> Vec2 { 
+    pub fn normalized(self) -> Self { 
         let magnitude = self.magnitude();
         if magnitude == 0.0 {
             Self::ZERO
@@ -64,10 +77,10 @@ impl Vec2 {
     pub fn bytes(&self) -> &[u8] { bytemuck::bytes_of(self) }
 }
 
-impl ops::Add<Vec2> for Vec2 {
-    type Output = Vec2;
+impl ops::Add<Self> for Vec2 {
+    type Output = Self;
 
-    fn add(self, rhs: Vec2) -> Self::Output {
+    fn add(self, rhs: Self) -> Self::Output {
         Self::Output { x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
@@ -79,10 +92,10 @@ impl ops::AddAssign for Vec2 {
     }
 }
 
-impl ops::Sub<Vec2> for Vec2 {
-    type Output = Vec2;
+impl ops::Sub<Self> for Vec2 {
+    type Output = Self;
 
-    fn sub(self, rhs: Vec2) -> Self::Output {
+    fn sub(self, rhs: Self) -> Self::Output {
         Self::Output { x: self.x - rhs.x, y: self.y - rhs.y }
     }
 }
@@ -95,7 +108,7 @@ impl ops::SubAssign for Vec2 {
 }
 
 impl ops::Mul<f32> for Vec2 {
-    type Output = Vec2;
+    type Output = Self;
 
     fn mul(self, rhs: f32) -> Self::Output {
         Self::Output { x: self.x * rhs, y: self.y * rhs }
@@ -118,7 +131,7 @@ impl ops::Mul<Vec2> for f32 {
 }
 
 impl ops::Neg for Vec2 {
-    type Output = Vec2;
+    type Output = Self;
 
     fn neg(self) -> Self::Output { self * -1.0 }
 }
