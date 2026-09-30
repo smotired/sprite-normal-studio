@@ -33,23 +33,6 @@ pub enum Input {
     MouseDragReleased,
 }
 
-/// Tracks input state
-pub struct InputState {
-    pub dragging_light: bool,
-}
-
-impl InputState {
-    pub fn new() -> Self {
-        Self {
-            dragging_light: false,
-        }
-    }
-
-    pub fn reset_drag(&mut self) {
-        self.dragging_light = false;
-    }
-}
-
 impl Controller {
     // Handle different inputs from the controller
     pub fn handle_input(&mut self, input: Input) {
@@ -79,27 +62,23 @@ impl Controller {
             },
 
             Input::MouseDragStarted((x, y)) => {
-                self.input_state.reset_drag();
-                println!("Drag started from: ({}, {})", x, y);  
-
-                let screen_distance_to_light = self.light.distance((x, y)) * self.camera.scale as f32;
-                println!("Screen distance to light: {}", screen_distance_to_light);
+                self.overlay_state.dragging_light = false;
 
                 // Decide if we should start dragging the light
-                if screen_distance_to_light <= 10.0 {
-                    self.input_state.dragging_light = true;
+                if self.light.distance((x, y)) * self.camera.scale as f32 <= 10.0 {
+                    self.overlay_state.dragging_light = true;
                 }
             }
 
             Input::MouseDragged((_sx, _sy), (nx, ny)) => {
                 // Move the light if we are dragging it
-                if self.input_state.dragging_light {
+                if self.overlay_state.dragging_light {
                     self.light.set_pos((nx, ny));
                 }
             },
 
             Input::MouseDragReleased => {
-                self.input_state.reset_drag();
+                self.overlay_state.dragging_light = false;
             },
 
             Input::NoInput => { },

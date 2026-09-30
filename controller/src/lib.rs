@@ -2,16 +2,17 @@ mod generator;
 mod camera;
 mod input;
 mod light;
+mod overlay;
 
 use wgpu::{Device, Queue, Texture};
 
 use crate::generator::Generator;
 use crate::camera::Camera;
 pub use crate::input::{Input, Axis};
-use crate::input::InputState;
 use crate::light::Light;
+use crate::overlay::OverlayState;
 
-pub type ViewportState = (Camera, Light);
+pub type ViewportState = (Camera, Light, u32);
 
 /// The Controller manages our actual working pipeline.
 pub struct Controller {
@@ -28,7 +29,7 @@ pub struct Controller {
     normals_stale: bool,
 
     // Defines the state of what we are inputting
-    input_state: InputState,
+    overlay_state: OverlayState,
 }
 
 impl Controller {
@@ -39,7 +40,7 @@ impl Controller {
             camera: Camera::new([8.0, 8.0], 1), // center of starting image. when image is loaded, should recenter at image center and scale 0.
             light: Light::new(),
             normals_stale: false,
-            input_state: InputState::new(),
+            overlay_state: OverlayState::new(),
         }
     }
     
@@ -74,6 +75,6 @@ impl Controller {
             self.normals_stale = false;
         }
 
-        (self.camera, self.light)
+        (self.camera, self.light, self.overlay_state.get_flags())
     }
 }

@@ -3,6 +3,16 @@
  * parts of the shader.
  *******************************************************************/
 
+// Function for checking constant flag IDs
+fn flag(id: u32) -> bool {
+    if (id >= 32) {
+        return false;
+    }
+    return (params.overlay_flags & u32(1 << id)) > 0;
+}
+
+// Feathering function
+
 const FEATHER = 1.5;       // Width of soft edge in pixels, should be no less than sqrt(2) probably as that's a full pixel along the diagonal
 
 fn feather_color(

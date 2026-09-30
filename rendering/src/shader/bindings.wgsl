@@ -19,10 +19,10 @@ struct Params {
 
     // Extra flags for which parts of the overlay are shown.
     // In order of increasing magnitude:
-    // 00: 
-    // 01: 
-    // 02: 
-    // 03: 
+    // 00: Normal Map on (default false, replaces spritesheet)
+    // 01: Lighting on (default true, does nothing if flag 00 is set)
+    // 02: Light Button On (default true)
+    // 03: Light Button Halo On (default false, true when dragging light)
     // 04: 
     // 05: 
     // 06: 
@@ -51,7 +51,7 @@ struct Params {
     // 29: 
     // 30: 
     // 31: 
-    overlay: u32,
+    overlay_flags: u32,
 
     // Position of the point light, assuming each pixel is one unit
     light_pos: vec3<f32>,

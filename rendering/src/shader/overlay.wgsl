@@ -20,20 +20,22 @@ fn overlay_light(
     // Get the distance to the light source
     let light_distance_2d = length(params.light_pos.xy - pos.xy);
     
-    // Draw a circle at the light
-    if (light_distance_2d <= LIGHT_BUTTON_RADIUS * params.inv_scale) {
-        color = vec4<f32>(1, 1, 1, 1);
+    // If flags 02 (LIGHT BUTTON), draw a circle at the light
+    if (flag(2)) {
+        if (light_distance_2d <= LIGHT_BUTTON_RADIUS * params.inv_scale) {
+            color = vec4<f32>(1, 1, 1, 1);
+        }
+        let light_outline_distance = light_distance_2d - LIGHT_BUTTON_RADIUS * params.inv_scale;
+        let button_color = feather_color(vec4<f32>(0, 0, 0, 1), light_outline_distance, LIGHT_BUTTON_OUTLINE_WIDTH * 0.5);
+        color = mix(color, vec4<f32>(button_color.rgb, 1.0), button_color.a);
     }
-    let light_outline_distance = light_distance_2d - LIGHT_BUTTON_RADIUS * params.inv_scale;
-    let button_color = feather_color(vec4<f32>(0, 0, 0, 1), light_outline_distance, LIGHT_BUTTON_OUTLINE_WIDTH * 0.5);
-    color = mix(color, vec4<f32>(button_color.rgb, 1.0), button_color.a);
 
-    // Draw a circle at the light
-
-    // Draw a halo around the light
-    let halo_distance = light_distance_2d - params.light_pos.z;
-    let halo_color = feather_color(vec4<f32>(1, 1, 1, 1), halo_distance, LIGHT_HALO_WIDTH * 0.5);
-    color = mix(color, vec4<f32>(halo_color.rgb, 1.0), halo_color.a);
+    // If flags 03 (LIGHT HALO), draw a halo around the light
+    if (flag(3)) {
+        let halo_distance = light_distance_2d - params.light_pos.z;
+        let halo_color = feather_color(vec4<f32>(1, 1, 1, 1), halo_distance, LIGHT_HALO_WIDTH * 0.5);
+        color = mix(color, vec4<f32>(halo_color.rgb, 1.0), halo_color.a);
+    }
 
     return color;
 }
