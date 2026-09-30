@@ -18,7 +18,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 
 ## Development plan
 
-### Phase I
+### Phase I - Initial
 *9/21/26 - 9/25/26*
 
 ```
@@ -29,8 +29,8 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Ensure quick shader performance, check by resizing and everything
 ```
 
-### Phase II
-*9/25/26 - current*
+### Phase II - Basic Rendering
+*9/25/26 - 9/29/26*
 
 ```
 [x] Allow selecting files for sprite and normal map
@@ -40,12 +40,12 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Add a light source to shader as if it had a flat normal map
 [x] Render with the normal map
 [x] Add camera controls
-[ ] Add controls for the light source and a widget to show where it is.
+[x] Add controls for the light source and a widget to show where it is.
     This will require setting up the Overlay pipeline
-[ ] Allow toggling overlay
+[x] Allow toggling overlay
 ```
 
-### Phase III
+### Phase III - Zone Management
 
 ```
 [ ] Create a Zone struct
@@ -62,7 +62,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [ ] Window preview mode for working normal map
 ```
 
-### Phase IV
+### Phase IV - Editor Features
 
 ```
 [ ] Undo/redo with history. Use a stack like Unity's Undo class. Look for an
@@ -76,7 +76,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [ ] Copy/pasting zones between workspace files
 ```
 
-### Phase V
+### Phase V - The Whole Point
 
 ```
 [ ] Shape trait, and basic Point shape that acts like the top of a cone
@@ -94,13 +94,16 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [ ] Manipulating a zone should also manipulate its shapes
 ```
 
-### Phase VI
+### Phase VI - Extra Features
 
 ```
 [ ] Slicing the grid into individual sprites, and displaying the grid
 [ ] Copy/paste/move with sprite-level intervals
 [ ] Timeline panel where sprites can easily be added
 [ ] Display looping lit animation
+[ ] Putting zones (and their control points) on different layers. Pixels will be assigned to the highest layer zone.
+    This allows more complicated sprites where one object might pass in front of another.
+[ ] Layer management, including temporarily disabling them.
 ```
 
 ### Interlude
@@ -111,10 +114,11 @@ Basically, other software is to Photoshop what this is to Illustrator.
     done and released and I can move on with my life.
 ```
 
-### Phase VII
+### Phase VII - Release
 
 Finish, polish, and deploy as a commercial product.
 Will add steps to this section as I think of them.
+Will probably remove the GPL 3.0 license.
 
 ```
 [ ] Better UI - final icons, repeatable welcome tutorial, etc.
@@ -131,3 +135,25 @@ Will add steps to this section as I think of them.
 [ ] Marketing
 [ ] Launch
 ```
+
+## Keybinds Reference
+
+This section will be added to as I add keybinds (and remember).
+
+### Camera
+
+> `WASD` - Pan camera. Hold shift to pan more quickly.  
+> `Home` - Recenter camera.  
+> `Ctrl + Scroll` - Zoom in or out.  
+> `Ctrl + Plus` - Zoom in.  
+> `Ctrl + Minus` - Zoom out.  
+
+### Rendering
+
+> `L` - Toggle lighting. If normal maps are on and light is off, the normal map itself is visible.  
+> `Shift + L` - Toggle shading w/ normal map. If disabled with lighting on, shades flat.  
+> `Ctrl + L` - Toggle both lighting and normal map. Allows quick swap between full shaded and flat unshaded sprites.
+
+### Overlay
+
+> `O` - Toggle entire overlay.  
