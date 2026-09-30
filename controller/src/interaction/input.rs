@@ -1,4 +1,4 @@
-use crate::{Controller, camera::Camera};
+use crate::interaction::Interaction;
 
 pub enum Axis {
     Vertical,
@@ -46,13 +46,13 @@ pub enum Input {
     LightingToggled(Option<bool>),
 }
 
-impl Controller {
-    // Handle different inputs from the controller
-    pub fn handle_input(&mut self, input: Input) {
+impl Interaction {
+    // Handle different inputs from the UI
+    pub fn handle_input(&mut self, input: Input, viewport_size: (f32, f32)) {
         match input {
             Input::Recenter => {
-                let size = self.output().size();
-                self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5]);
+                self.camera.set_position((viewport_size.0 * 0.5, viewport_size.1 as f32 * 0.5));
+                self.light.set_pos((viewport_size.0 as f32 * 0.5, viewport_size.1 as f32 * 0.5));
             },
 
             Input::CameraMove(axis, amount) => {

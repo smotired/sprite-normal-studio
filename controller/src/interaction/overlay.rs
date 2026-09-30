@@ -8,15 +8,6 @@ pub struct OverlayState {
 }
 
 impl OverlayState {
-    pub fn new() -> Self {
-        Self {
-            lighting_on: true,
-            normals_on: true,
-            dragging_light: false,
-            overlay_on: true,
-        }
-    }
-
     // Packs flags into a uint
     pub fn get_flags(&self) -> u32 {
         let mut flags: u32 = 0;
@@ -53,5 +44,16 @@ impl OverlayState {
         }
 
         self.overlay_on
+    }
+}
+
+impl Default for OverlayState {
+    fn default() -> Self {
+        Self {
+            lighting_on: true,
+            normals_on: true,
+            dragging_light: false,
+            overlay_on: true,
+        }
     }
 }
