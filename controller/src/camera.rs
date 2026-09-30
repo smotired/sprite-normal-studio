@@ -4,21 +4,22 @@ pub struct Camera {
     // Position of the pixel the camera is centered on, from the top left of the image, if scale = 1
     pub position: [f32; 2],
 
-    // Scale of the camera. At scale 2, each screen pixel is 2 pixels of the image. Always an integer >= 1.
-    pub scale: u32,
+    // Scale of the camera. Determines how big the pixels are. Starts at 0 for 1:1 scale.
+    // pixel_size = 2 ^ scale, so scaling is done geometrically by sqrt(2).
+    scale: i32,
 }
 
 impl Camera {
-    pub fn new(position: [f32; 2], scale: u32) -> Self {
-        Self { position, scale }
+    pub fn new(position: [f32; 2]) -> Self {
+        Self { position, scale: 0 }
     }
 
     // Convert viewport pixel position to world/spritesheet space.
     pub fn screen_to_world(&self, screen: (f32, f32), viewport_size: (f32, f32)) -> (f32, f32) {
         let half = (viewport_size.0 / 2.0, viewport_size.1 / 2.0);
         (
-            (screen.0 - half.0) / self.scale as f32 + self.position[0],
-            (screen.1 - half.1) / self.scale as f32 + self.position[1]
+            (screen.0 - half.0) * self.inv_scale() + self.position[0],
+            (screen.1 - half.1) * self.inv_scale() + self.position[1]
         )
     }
 
@@ -29,23 +30,26 @@ impl Camera {
     }
 
     // Update the camera scale, keeping relative_to fixed on screen. Defaults to current camera position.
-    // factor should be a power of 2.
-    pub fn apply_scale(&mut self, factor: f32, relative_to: Option<(f32, f32)>) {
+    pub fn apply_scale(&mut self, factor: i32, relative_to: Option<(f32, f32)>) {
         let anchor = relative_to.unwrap_or((self.position[0], self.position[1]));
-        let new_scale = ((self.scale as f32 * factor) as u32).clamp(1, 64);
-        let ratio = self.scale as f32 / new_scale as f32;
+        let old_real_scale = self.scale();
+        self.scale = (self.scale + factor).clamp(-2, 5); // kind of arbitrary bounds for 0.25x to 32x
+        let ratio = old_real_scale / self.scale();
 
+        // Update position to keep the anchor in the same place
         self.position[0] = anchor.0 + (self.position[0] - anchor.0) * ratio;
         self.position[1] = anchor.1 + (self.position[1] - anchor.1) * ratio;
-        self.scale = new_scale;
     }
+
+    pub fn scale(&self) -> f32 { (2 as f32).powf(self.scale as f32) }
+    pub fn inv_scale(&self) -> f32 { (2 as f32).powf(-self.scale as f32) }
 }
 
 impl Default for Camera {
     fn default() -> Self {
         Self {
             position: [0.0, 0.0],
-            scale: 1,
+            scale: 0,
         }
     }
 }

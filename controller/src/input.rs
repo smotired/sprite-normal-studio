@@ -16,9 +16,9 @@ pub enum Input {
     /// Moving the camera in a direction by a float amount
     CameraMove(Axis, f32),
 
-    /// Changing the camera scale. Should be a power of 2.
+    /// Changing the camera scale.
     /// Optionally, scale relative to a fixed anchor point in world space.
-    CameraScale(f32, Option<(f32, f32)>),
+    CameraScale(i32, Option<(f32, f32)>),
 
     /// Left-clicking the mouse at a world space position
     MouseClicked((f32, f32)),
@@ -52,16 +52,16 @@ impl Controller {
         match input {
             Input::Recenter => {
                 let size = self.output().size();
-                self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5], 1);
+                self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5]);
             },
 
             Input::CameraMove(axis, amount) => {
                 match axis {
                     Axis::Vertical => {
-                        self.camera.move_position((0.0, amount / self.camera.scale as f32));
+                        self.camera.move_position((0.0, amount * self.camera.inv_scale()));
                     },
                     Axis::Horizontal => {
-                        self.camera.move_position((amount / self.camera.scale as f32, 0.0));
+                        self.camera.move_position((amount * self.camera.inv_scale(), 0.0));
                     },
                 }
             },
@@ -79,7 +79,7 @@ impl Controller {
 
                 if self.overlay_state.overlay_on() {
                     // Decide if we should start dragging the light
-                    if self.light.distance((x, y)) * self.camera.scale as f32 <= 10.0 {
+                    if self.light.distance((x, y)) * self.camera.scale() <= 10.0 {
                         self.overlay_state.dragging_light = true;
                     }
                 }

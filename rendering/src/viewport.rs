@@ -27,7 +27,7 @@ impl ViewportDataUniform {
 
         Self {
             camera_pos: camera.position,
-            inv_scale: 1.0 / camera.scale as f32,
+            inv_scale: camera.inv_scale(),
 
             overlay_flags,
             light_pos,
