@@ -1,11 +1,11 @@
 use controller::{Axis, Input};
-use eframe::egui::{Event, InputState, Key, Modifiers, Rect};
+use eframe::egui::{Ui, Response, Event, InputState, Key, Modifiers, Rect, Pos2};
 
 use crate::app::StudioApp;
 
 impl StudioApp {
     // Convert egui inputs into something our controller can use.
-    pub fn handle_input<'a>(&mut self, i: &'a mut InputState, (viewport_rect, ppp): (Rect, f32)) -> Box<dyn Iterator<Item = Input> + 'a> {
+    pub fn handle_app_input<'a>(&mut self, i: &'a mut InputState, (viewport_rect, ppp): (Rect, f32)) -> Box<dyn Iterator<Item = Input> + 'a> {
         // Get movement constants
         let movement = |shift: bool| { if shift { 100.0 } else { 10.0 } };
         let scale = |shift: bool| { if shift { 4f32 } else { 2f32 } };
@@ -21,7 +21,7 @@ impl StudioApp {
 
         // Handle specific events
         Box::new(i.events.clone().into_iter().map(move |event| {
-            match event {
+            match event {                
                 // Mouse wheel event: Handles move or zoom depending on if shift is held
                 Event::MouseWheel { delta, modifiers, .. } => {
                     if modifiers.shift {
@@ -94,5 +94,57 @@ impl StudioApp {
                 _ => Input::NoInput,
             }
         }))
+    }
+
+    // Handle inputs on the editor image itself
+    pub fn handle_editor_input(&mut self, ui: &Ui, response: Response) ->  Vec<Input> {
+        // Get information about the editor image window
+        let ppp = ui.ctx().pixels_per_point();
+        let rect = response.rect;
+
+        // Screen-space Pos2 -> local physical-pixel coordinates -> world space coordinates
+        let to_world = |pos: Pos2| {
+            let local = (pos - rect.min) * ppp;
+            self.controller.screen_to_world((local.x, local.y), (response.rect.width(), response.rect.height()))
+        };
+
+        // Final list of events to process
+        let mut inputs = Vec::new();
+
+        // Handle click as determined by egui
+        if response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                inputs.push(Input::MouseClicked(to_world(pos)));
+            }
+        }
+
+        // Handle starting drag
+        if response.drag_started() {
+            if let Some(start_screen) = ui.input(|i| i.pointer.press_origin()) {
+                inputs.push(Input::MouseDragStarted(to_world(start_screen)));
+            }
+        }
+
+        // Handle an active drag
+        if response.dragged() {
+            if let Some(start_screen) = ui.input(|i| i.pointer.press_origin()) {
+                if let Some(total_delta) = response.total_drag_delta() {
+                    let start_world = to_world(start_screen);
+
+                    // drag_delta is this frame's incremental movement
+                    let final_screen = start_screen + total_delta;
+                    let final_world = to_world(final_screen);
+
+                    inputs.push(Input::MouseDragged(start_world, final_world));
+                }
+            }
+        }
+
+        // Handle stopping drag
+        if response.drag_stopped() {
+            inputs.push(Input::MouseDragReleased);
+        }
+
+        inputs
     }
 }

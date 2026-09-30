@@ -110,9 +110,9 @@ impl eframe::App for StudioApp {
         );
         let ppp = ui.pixels_per_point();
 
-        // Handle input events
+        // Handle app-level input events
         ui.input_mut(|i| {
-            for event in self.handle_input(i, (viewport_rect, ppp)) {
+            for event in self.handle_app_input(i, (viewport_rect, ppp)) {
                 self.controller.handle_input(event);
             }
         });
@@ -120,15 +120,20 @@ impl eframe::App for StudioApp {
         // Call the controller's update method to regenerate any textures as needed
         let viewport_state = self.controller.update(&self.render_state.device, &self.render_state.queue);
 
-        // Render the main editor component
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+        // Render the main editor component and get the response for the image itself
+        let response = egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             ui.add(editor::Editor::new(
                 &mut self.renderer,
                 &self.render_state,
                 self.viewport_texture_id,
                 viewport_state,
             ))
-        });
+        }).inner;
+
+        // Handle input events on the image itself, i.e. click and drag
+        for event in self.handle_editor_input(ui, response) {
+            self.controller.handle_input(event);
+        }
     }
 }
 

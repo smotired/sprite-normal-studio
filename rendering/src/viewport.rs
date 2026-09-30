@@ -22,15 +22,17 @@ pub struct ViewportDataUniform {
 
 impl ViewportDataUniform {
     /// Create viewport data from some parameters
-    pub fn new((camera, _): ViewportState) -> Self {
+    pub fn new((camera, light): ViewportState) -> Self {
+        let (light_pos, light_color) = light.info_for_shader();
+
         Self {
             camera_pos: camera.position,
             inv_scale: 1.0 / camera.scale as f32,
 
             overlay: 0, // fix this imminently
 
-            light_pos: [ 200.0, 100.0, 200.0 ], // static position for now
-            light_color: 0xFFFFFFFF, // pure white light for now
+            light_pos,
+            light_color
         }
     }
 

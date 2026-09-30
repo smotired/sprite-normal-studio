@@ -1,14 +1,17 @@
 mod generator;
 mod camera;
 mod input;
+mod light;
 
 use wgpu::{Device, Queue, Texture};
 
 use crate::generator::Generator;
 use crate::camera::Camera;
 pub use crate::input::{Input, Axis};
+use crate::input::InputState;
+use crate::light::Light;
 
-pub type ViewportState = (Camera, ());
+pub type ViewportState = (Camera, Light);
 
 /// The Controller manages our actual working pipeline.
 pub struct Controller {
@@ -18,8 +21,14 @@ pub struct Controller {
     // Current state of the camera
     camera: Camera,
 
+    // Current state of the light
+    light: Light,
+
     // If we need to regenerate the normal map on the next render.
     normals_stale: bool,
+
+    // Defines the state of what we are inputting
+    input_state: InputState,
 }
 
 impl Controller {
@@ -28,7 +37,9 @@ impl Controller {
         Self {
             generator: Generator::new(device),
             camera: Camera::new([8.0, 8.0], 1), // center of starting image. when image is loaded, should recenter at image center and scale 0.
+            light: Light::new(),
             normals_stale: false,
+            input_state: InputState::new(),
         }
     }
     
@@ -42,9 +53,10 @@ impl Controller {
         self.generator.set_inputs(device, sprite, normal);
         self.normals_stale = true;
 
-        // Recenter the camera
+        // Recenter the camera and the light
         let size = sprite.size();
         self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5], 1);
+        self.light.set_pos((size.width as f32 * 0.5, size.height as f32 * 0.5));
     }
 
     // Convert viewport pixel position to world/spritesheet space.
@@ -62,6 +74,6 @@ impl Controller {
             self.normals_stale = false;
         }
 
-        (self.camera, ())
+        (self.camera, self.light)
     }
 }
