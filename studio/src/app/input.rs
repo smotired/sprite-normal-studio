@@ -8,7 +8,7 @@ impl StudioApp {
     pub fn handle_app_input<'a>(&mut self, i: &'a mut InputState, (viewport_rect, ppp): (Rect, f32)) -> Box<dyn Iterator<Item = Input> + 'a> {
         // Get movement constants
         let movement = |shift: bool| { if shift { 100.0 } else { 10.0 } };
-        let scale = |shift: bool| { if shift { 4f32 } else { 2f32 } };
+        let scale = |shift: bool| { if shift { 2 } else { 1 } };
 
         // Get mouse position in world space over the image. None if mouse is not over image.
         let (vw, vh) = self.renderer.size();
@@ -29,7 +29,7 @@ impl StudioApp {
                         if delta.y > 0.0 {
                             Input::CameraScale(scale, mouse_world)
                         } else if delta.y < 0.0 {
-                            Input::CameraScale(1f32 / scale, mouse_world)
+                            Input::CameraScale(-scale, mouse_world)
                         } else { Input::NoInput }
                     } else {
                         if modifiers.ctrl && delta.y != 0.0 {
@@ -82,7 +82,7 @@ impl StudioApp {
                         Key::Minus => {
                             if pressed && !repeat && modifiers.ctrl {
                                 i.consume_key(Modifiers::CTRL, Key::Minus); // prevent app from also zooming
-                                Input::CameraScale(1.0f32 / scale(modifiers.shift), mouse_world)
+                                Input::CameraScale(-scale(modifiers.shift), mouse_world)
                             } else { Input::NoInput }
                         },
 

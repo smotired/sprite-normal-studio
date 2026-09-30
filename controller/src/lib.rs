@@ -37,7 +37,7 @@ impl Controller {
     pub fn new(device: &Device) -> Self {
         Self {
             generator: Generator::new(device),
-            camera: Camera::new([8.0, 8.0], 1), // center of starting image. when image is loaded, should recenter at image center and scale 0.
+            camera: Camera::new([8.0, 8.0]), // center of starting image. when image is loaded, should recenter at image center and scale 0.
             light: Light::new(),
             normals_stale: false,
             overlay_state: OverlayState::new(),
@@ -56,7 +56,7 @@ impl Controller {
 
         // Recenter the camera and the light
         let size = sprite.size();
-        self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5], 1);
+        self.camera = Camera::new([size.width as f32 * 0.5, size.height as f32 * 0.5]);
         self.light.set_pos((size.width as f32 * 0.5, size.height as f32 * 0.5));
     }
 
