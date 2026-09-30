@@ -12,7 +12,7 @@ pub struct ViewportDataUniform {
     inv_scale: f32,
 
     // Flags for the overlay. See shader/bindings.wgsl for full documentation of each flag.
-    overlay: u32,
+    overlay_flags: u32,
 
     // Position of the point light, assuming each pixel is one unit
     light_pos: [f32; 3],
@@ -22,15 +22,14 @@ pub struct ViewportDataUniform {
 
 impl ViewportDataUniform {
     /// Create viewport data from some parameters
-    pub fn new((camera, light): ViewportState) -> Self {
+    pub fn new((camera, light, overlay_flags): ViewportState) -> Self {
         let (light_pos, light_color) = light.info_for_shader();
 
         Self {
             camera_pos: camera.position,
             inv_scale: 1.0 / camera.scale as f32,
 
-            overlay: 0, // fix this imminently
-
+            overlay_flags,
             light_pos,
             light_color
         }
