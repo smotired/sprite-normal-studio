@@ -13,31 +13,26 @@ const LIGHT_BUTTON_OUTLINE_WIDTH = 0.0; // Width of the light button's black out
 const LIGHT_HALO_WIDTH = 1.0;           // Width of the halo for the max range of the light source
 
 fn overlay_light(
+    color: vec3<f32>,   // Base color below this part of the overlay
     pos: vec2<f32>,     // World-space position of this pixel
-) -> vec4<f32> {        // Returns pixel color from overlay
-    var color = vec4<f32>(0, 0, 0, 0);
+) -> vec3<f32> {        // Returns new color after adding overlay
+    var col = color;
 
     // Get the distance to the light source
     let light_distance_2d = length(params.light_pos.xy - pos.xy);
     
     // If flags 02 (LIGHT BUTTON), draw a circle at the light
     if (flag(2)) {
-        if (light_distance_2d <= LIGHT_BUTTON_RADIUS * params.inv_scale) {
-            color = vec4<f32>(1, 1, 1, 1);
-        }
-        let light_outline_distance = light_distance_2d - LIGHT_BUTTON_RADIUS * params.inv_scale;
-        let button_color = feather_color(vec4<f32>(0, 0, 0, 1), light_outline_distance, LIGHT_BUTTON_OUTLINE_WIDTH * 0.5);
-        color = mix(color, vec4<f32>(button_color.rgb, 1.0), button_color.a);
+        col = draw_circle(col, pos, vec4<f32>(1, 1, 1, 0.8), params.light_pos.xy, LIGHT_BUTTON_RADIUS, 0.0, true);
+        col = draw_circle(col, pos, vec4<f32>(0, 0, 0, 1), params.light_pos.xy, LIGHT_BUTTON_RADIUS, LIGHT_BUTTON_OUTLINE_WIDTH * 0.5, false);
     }
 
     // If flags 03 (LIGHT HALO), draw a halo around the light
     if (flag(3)) {
-        let halo_distance = light_distance_2d - params.light_pos.z;
-        let halo_color = feather_color(vec4<f32>(1, 1, 1, 1), halo_distance, LIGHT_HALO_WIDTH * 0.5);
-        color = mix(color, vec4<f32>(halo_color.rgb, 1.0), halo_color.a);
+        col = draw_circle(col, pos, vec4<f32>(1, 1, 1, 0.8), params.light_pos.xy, params.light_pos.z, LIGHT_HALO_WIDTH * 0.5, false);
     }
 
-    return color;
+    return col;
 }
 
 /***********************************/
@@ -91,8 +86,7 @@ fn overlay_color(
     }
 
     // Lights
-    let light = overlay_light(pos);
-    color = mix(color, light.rgb, light.a);
+    color = overlay_light(color, pos);
 
     return color;
 }
