@@ -61,12 +61,28 @@ struct Params {
 
     // Light color
     light_color: u32,
+
+    // Total amount of zones
+    zone_count: u32,
+
+    // Total amount of points
+    point_count: u32,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 
 // The input textures for the sprite and normal map
 @group(0) @binding(2) var sprite: texture_2d<f32>;
 @group(0) @binding(3) var normal: texture_2d<f32>;
+
+/***********************************/
+/*        UNPACKING HELPERS        */
+/***********************************/
+
+// Unpack the first u16 in a packed u32
+fn unpack_fst(input: u32) -> u32 { return input & 0xFFFFu; }
+
+// Unpack the second u16 in a packed u32
+fn unpack_snd(input: u32) -> u32 { return input >> 16u; }
 
 /***********************************/
 /*              ZONES              */
@@ -80,7 +96,7 @@ struct ZonePacked {
     // Start index of the points in this path
     // --------
     // Amount of points in this path
-    points_start_and_points_count: u32,
+    points_start_and_point_count: u32,
 }
 @group(1) @binding(0) var<storage, read> zones: array<ZonePacked>;
 
@@ -92,14 +108,14 @@ struct Zone {
     points_start: u32,
 
     // Amount of points in this path
-    points_count: u32,
+    point_count: u32,
 }
 
 fn unpack_zone(zone: ZonePacked) -> Zone {
     return Zone(
         zone.normal,
-        zone.points_start_and_points_count & 0xFFFFu,
-        zone.points_start_and_points_count >> 16u,
+        unpack_fst(zone.points_start_and_point_count),
+        unpack_snd(zone.points_start_and_point_count),
     );
 }
 
@@ -165,8 +181,9 @@ fn unpack_point(point: ControlPointPacked) -> ControlPoint {
         point.position,
         point.left_handle,
         point.right_handle,
-        point.mode_and_zone_id & 0xFFFFu,
-        point.mode_and_zone_id >> 16u,
-        point.id_and_sibling_id & 0xFFFFu,
+        unpack_fst(point.mode_and_zone_id),
+        unpack_snd(point.mode_and_zone_id),
+        unpack_fst(point.id_and_sibling_id),
+        // leave sibling ID
     );
 }

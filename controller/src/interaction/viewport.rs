@@ -25,10 +25,19 @@ pub struct ViewportDataUniform {
 
     // Light color
     pub light_color: u32,
+
+    // Amount of zones
+    pub zone_count: u32,
+
+    // Amount of control points
+    pub point_count: u32,
+
+    // pad to acceptable amount of bytes
+    pub _pad: [u32; 2],
 }
 
 impl ViewportDataUniform {
-    pub fn new(light: &Light, camera: &Camera, overlay: &OverlayState) -> Self {
+    pub fn new(light: &Light, camera: &Camera, overlay: &OverlayState, (zone_count, point_count): (usize, usize)) -> Self {
         Self {
             camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
@@ -36,6 +45,9 @@ impl ViewportDataUniform {
             light_pos: light.position(),
             light_height: light.height(),
             light_color: light.packed_color(),
+            zone_count: zone_count as u32,
+            point_count: point_count as u32,
+            _pad: Default::default(),
         }
     }
 
