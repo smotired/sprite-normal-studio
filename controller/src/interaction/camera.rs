@@ -7,7 +7,7 @@ pub struct Camera {
     pub position: Vec2,
 
     // Scale of the camera. Determines how big the pixels are. Starts at 0 for 1:1 scale.
-    // pixel_size = 2 ^ scale, so scaling is done geometrically by sqrt(2).
+    // pixel_size = 2 ^ scale, so scaling is done geometrically by 2.
     scale: i32,
 }
 
@@ -31,7 +31,7 @@ impl Camera {
         let ratio = old_real_scale / self.scale();
 
         // Update position to keep the anchor in the same place
-        self.position = Vec2::lerp(anchor, self.position, ratio);
+        self.position = anchor + (self.position - anchor) * ratio; // lerp clamps so do manually
     }
 
     pub fn scale(&self) -> f32 { (2 as f32).powf(self.scale as f32) }

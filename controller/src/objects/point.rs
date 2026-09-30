@@ -155,4 +155,13 @@ impl ControlPoint {
             }
         })
     }
+
+    /// Update an ID for a point
+    pub fn update_id(point_id: u16, new_point_id: u16, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
+        // When this is called in create_ or insert_point, the indices are already updated, so this should be correct.
+        Self::traverse_siblings(point_id, points, |point| {
+            if point.id == point_id { point.id = new_point_id; }
+            if point.sibling_id == point_id { point.sibling_id = new_point_id; }
+        })
+    }
 }

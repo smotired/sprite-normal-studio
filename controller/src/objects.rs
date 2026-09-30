@@ -129,14 +129,16 @@ impl ObjectBuffers {
         if zone_id as usize >= self.zones.items.len() {
             anyhow::bail!("Zone {} does not exist!", zone_id);
         }
-
+        
         // Add the point
-        let point_id = self.points.items.len() as u16;
+        let point_id = self.zones.items[zone_id as usize].add_point();
         let point = ControlPoint::new_solo(point_id, zone_id, position);
         self.points.items.push(point);
 
-        // Add the point to its zone and push the rest back
-        self.zones.items[zone_id as usize].add_point();
+        // Push the rest of the points and zones backwards
+        for i in (point_id as usize + 1)..(self.points.items.len()) {
+            ControlPoint::update_id(i as u16, i as u16 + 1, &mut self.points.items)?;
+        }
         for i in (zone_id as usize + 1)..(self.zones.items.len()) {
             self.zones.items[i].add_offset(1);
         }

@@ -37,11 +37,11 @@ impl Vec3 {
 
     /// Create a random normalized vector (uniformly distributed on unit sphere)
     pub fn random_on_sphere() -> Self {
-        let theta = rand::random_range(0.0 .. crate::M_2PI);
+        let cos_theta = rand::random_range(-1.0 .. 1.0);
         let phi   = rand::random_range(0.0 .. crate::M_PI);
         Self {
-            x: theta.cos() * phi.sin(),
-            y: theta.sin() * phi.sin(),
+            x: cos_theta * phi.sin(),
+            y: cos_theta.acos().sin() * phi.sin(),
             z: phi.cos(),
         }
     }
@@ -60,7 +60,7 @@ impl Vec3 {
     pub fn cross(self, rhs: Self) -> Self { 
         Self {
             x: self.y * rhs.z - rhs.y * self.z,
-            y: rhs.z * self.x - self.x * rhs.z,
+            y: rhs.x * self.z - self.x * rhs.z,
             z: self.x * rhs.y - rhs.x * self.y,
         }
     }
