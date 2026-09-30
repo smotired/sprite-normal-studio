@@ -11,21 +11,52 @@ fn flag(id: u32) -> bool {
     return (params.overlay_flags & u32(1 << id)) > 0;
 }
 
-// Feathering function
+/***********************************/
+/*         DRAWING HELPERS         */
+/***********************************/
 
 const FEATHER = 1.5;       // Width of soft edge in pixels, should be no less than sqrt(2) probably as that's a full pixel along the diagonal
 
 fn feather_color(
     color:     vec4<f32>,     // Target color at full opacity
-    distance:  f32,           // The distance to the path we are feathering
-    width:     f32,           // The width of the path we are feathering
+    distance:  f32,           // The unscaled distance to the path we are feathering
+    width:     f32,           // The unscaled width of the path we are feathering
 ) -> vec4<f32> {
     // Feather based on distance
     // smoothstep(a, b, x) maps [a, b] to [0, 1] and returns x's value in that space (or 0 or 1 if outside).
     // If distance is below the width, it's within the path, so opacity = 1.
     // If distance is above the width plus the feather range, it's fully off the path, so opacity = 0.
-    let opacity = smoothstep((width + FEATHER) * params.inv_scale, width * params.inv_scale, abs(distance));
+    let opacity = smoothstep(width + FEATHER, width, abs(distance));
 
     // Return the color
     return vec4<f32>(color.rgb, color.a * opacity);
+}
+
+/***********************************/
+/*     SHAPE DRAWING FUNCTIONS     */
+/***********************************/
+
+// Function to draw a circle over a base color.
+fn draw_circle(
+    base_color: vec3<f32>,   // RGB base canvas color.
+    pos: vec2<f32>,          // Position of this viewport pixel.
+    color: vec4<f32>,        // RGBA paint color for the circle.
+    center: vec2<f32>,       // Center of the circle.
+    radius: f32,             // Unscaled radius of the circle.
+    width: f32,              // Unscaled width of the circle outline.
+    filled: bool,            // If the circle should be filled with the color.
+) -> vec3<f32> {
+    // Do nothing if outside.
+    let distance = length(center - pos) * params.inv_scale; // get unscaled distance, i.e. in camera space
+    if (distance > radius + width * 0.5 + FEATHER) { return base_color; }
+
+    // Handle fill color
+    if (filled && distance <= radius) {
+        return mix(base_color, color.rgb, color.a);
+    }
+
+    // Otherwise treat it as a circular path
+    let to_circle = distance - radius;
+    let feathered = feather_color(color, to_circle, width);
+    return mix(base_color, feathered.rgb, feathered.a);
 }
