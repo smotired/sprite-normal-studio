@@ -6,10 +6,6 @@
 // The output image as a storage texture which allows pixel-level write access.
 @group(0) @binding(0) var output: texture_storage_2d<rgba8unorm, write>;
 
-// The input textures for the sprite and normal map
-@group(0) @binding(1) var sprite: texture_2d<f32>;
-@group(0) @binding(2) var normal: texture_2d<f32>;
-
 // Uniform struct
 struct Params {
     // Position of the camera center ignoring scale
@@ -60,4 +56,8 @@ struct Params {
     // Light color
     light_color: u32,
 }
-@group(0) @binding(3) var<uniform> params: Params;
+@group(0) @binding(1) var<uniform> params: Params;
+
+// The input textures for the sprite and normal map
+@group(0) @binding(2) var sprite: texture_2d<f32>;
+@group(0) @binding(3) var normal: texture_2d<f32>;
