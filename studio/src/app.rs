@@ -32,14 +32,16 @@ pub struct StudioApp {
 /// Default initializer for application state
 impl StudioApp {
     pub fn new(render_state: eframe::egui_wgpu::RenderState) -> Self {
-        let renderer = Renderer::new(&render_state.device);
+        let mut controller = Controller::new(&render_state.device);
+
+        let renderer = Renderer::new(&render_state.device, controller.object_buffers(&render_state.device));
         let viewport_texture_id = render_state.renderer.write()
             .register_native_texture(&render_state.device, renderer.view(), FilterMode::Nearest);
 
         Self {
             sprite_path: SpriteFileSelection::new("spritesheet".to_owned(), &render_state, None),
             normal_path: SpriteFileSelection::new("normal_map".to_owned(), &render_state, None),
-            controller: Controller::new(&render_state.device),
+            controller,
             renderer,
             render_state,
             viewport_texture_id,
@@ -126,7 +128,7 @@ impl eframe::App for StudioApp {
                 &mut self.renderer,
                 &self.render_state,
                 self.viewport_texture_id,
-                &self.controller,
+                &mut self.controller,
             ))
         }).inner;
 

@@ -30,8 +30,7 @@ fn main(
     var color = spritesheet_color(pos);
 
     // Add in the overlay
-    let overlay = overlay_color(pos);
-    color = mix(color, overlay.rgb, overlay.a);
+    color = overlay_color(color, pos);
 
     // Output final color to viewport texture
     textureStore(output, id.xy, vec4<f32>(color, 1.0));

@@ -9,11 +9,11 @@ pub struct Editor<'a> {
     renderer: &'a mut Renderer,
     render_state: &'a RenderState,
     viewport_texture_id: TextureId,
-    controller: &'a Controller,
+    controller: &'a mut Controller,
 }
 
 impl<'a> Editor<'a> {
-    pub fn new(renderer: &'a mut Renderer, render_state: &'a RenderState, viewport_texture_id: TextureId, controller: &'a Controller) -> Self {
+    pub fn new(renderer: &'a mut Renderer, render_state: &'a RenderState, viewport_texture_id: TextureId, controller: &'a mut Controller) -> Self {
         Self { renderer, render_state, viewport_texture_id, controller }
     }
 }
