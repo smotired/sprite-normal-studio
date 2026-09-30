@@ -4380,6 +4380,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vector"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "wgpu",
+]
+
+[[package]]
 name = "vello_common"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,13 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["controller","rendering","studio"]
+members = ["controller", "rendering", "studio", "vector"]
 default-members = ["studio"]
 
 [workspace.dependencies]
 # Internal lib crates
+vector = { path = "vector" }
 controller = { path = "controller" }
 rendering = { path = "rendering" }
 
-# Used by controller and rendering
+# Used by vector (for From traits), controller, and rendering
 # Used indirectly by studio with eframe, should match version
 wgpu = "30.0.1"
+
+# Used directly by vector (for From traits), indirectly by studio
+egui = { version = "0.36.2" }
