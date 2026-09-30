@@ -86,6 +86,18 @@ impl StudioApp {
                             } else { Input::NoInput }
                         },
 
+                        // Altitude
+                        Key::PageUp => {
+                            if pressed {
+                                Input::Altitude(true)
+                            } else { Input::NoInput }
+                        },
+                        Key::PageDown => {
+                            if pressed {
+                                Input::Altitude(false)
+                            } else { Input::NoInput }
+                        },
+
                         // Everything else
                         _ => Input::NoInput,
                     }
