@@ -13,7 +13,7 @@ const MAX_OBJECT_ID: usize = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
 
 /// States of the Zones buffer and Points buffer.
-pub type BufferStates<'a> = ((&'a Buffer, usize), (&'a Buffer, usize));
+pub type BufferStates = ((Buffer, usize), (Buffer, usize));
 
 struct VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
     /// Items in the vector
@@ -42,7 +42,7 @@ impl<T> VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
     }
 
     /// Get the buffer and its size. Caller should keep track of buffer sizes and recreate bind groups if they change.
-    pub fn get_buffer(&mut self, device: &Device) -> (&Buffer, usize) {
+    pub fn get_buffer(&mut self, device: &Device) -> (Buffer, usize) {
         let required_space = &self.items.len().max(MIN_BUFFER_SIZE);
         let maintain_range = (self.buffer_size >> 2)..=(self.buffer_size);
 
@@ -52,7 +52,7 @@ impl<T> VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
             (self.buffer, self.buffer_size) = create_buffer(device, &self.items, self.label);
         }
 
-        (&self.buffer, self.buffer_size)
+        (self.buffer.clone(), self.buffer_size)
     }
 
     /// Write the items to the buffer.
@@ -103,7 +103,7 @@ impl ObjectBuffers {
             pt2_id, 
             None,
             Some(ControlPointMode::Broken),
-            Some(Vec2::vt(30.0)),
+            Some(Vec2::vt(-30.0)),
             None,
         ).unwrap();
 
@@ -165,7 +165,7 @@ impl ObjectBuffers {
 
     /// Get references to the buffers and their sizes. Recreates the buffers if needed.
     /// The caller should keep track of the previous buffer sizes and recreate the bind group if they differ.
-    pub fn get_buffers(&mut self, device: &Device) -> BufferStates<'_> {
+    pub fn get_buffers(&mut self, device: &Device) -> BufferStates {
         (
             self.zones.get_buffer(device),
             self.points.get_buffer(device),
@@ -205,7 +205,7 @@ fn create_buffer<T>(device: &Device, vector: &Vec<T>, label: &str) -> (Buffer, u
 impl Controller {
     /// Get references to the buffers and their sizes. Recreates the buffers if needed.
     /// The caller should keep track of the previous buffer sizes and recreate the bind group if they differ.
-    pub fn object_buffers(&mut self, device: &Device) -> BufferStates<'_> { self.objects.get_buffers(device) }
+    pub fn object_buffers(&mut self, device: &Device) -> BufferStates { self.objects.get_buffers(device) }
 
     /// Add a command to write the current object lists to the buffers. Assumes the buffers have already been sized.
     pub fn write_object_buffers(&self, queue: &Queue) { self.objects.write_buffers(queue); }
