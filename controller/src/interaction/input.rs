@@ -50,6 +50,11 @@ pub enum Input {
 }
 
 impl Controller {
+    /// Set the cursor position in world space.
+    pub fn set_cursor_pos(&mut self, pos: Vec2) {
+        self.cursor_pos = pos;
+    }
+
     // Get the closest control point to a click position, if it's in the click range corrected for camera scale.
     fn get_clicked_control_point(&self, zone_id: Option<u16>, pos: Vec2) -> Option<(u16, u16)> {
         if let Some((zone_id, point_id)) = self.objects.get_closest_point(zone_id, pos) {
@@ -135,11 +140,43 @@ impl Controller {
                     EditorTool::Pen => {
                         // If we have a zone selected, we are already creating one, so add a linear node
                         if let Some(zone_id) = self.selected_zone {
-                            
-                        }
-                        // Otherwise, we should try to create a zone by adding a linear node
-                        else {
+                            // If we clicked a point, see if we should end the path
+                            if let Some((other_zone_id, point_id)) = self.get_clicked_control_point(Some(zone_id), pos) {
+                                // If it's the same zone, only do anything if we clicked the first point
+                                if other_zone_id == zone_id {
+                                    let (first_point, _) = self.objects.get_zone(zone_id).unwrap().range();
+                                    if point_id == first_point {
+                                        let point = self.objects.get_point(point_id).unwrap();
+                                        // If the point is continuous, update it to be broken and make its left handle linear
+                                        if let ControlPointMode::Continuous = point.mode() {
+                                            self.objects.update_point(point_id, None, Some(ControlPointMode::Broken), Some(Vec2::ZERO), None).unwrap();
+                                        }
 
+                                        // Go to the Zone tool. Should keep the zone selected.
+                                        self.select_tool(EditorTool::Zone);
+                                    }
+                                }
+
+                                // Otherwise, join the path if a path can be made to our original point via sibling points
+                                else {
+                                    // TODO
+
+                                    // Go to the Zone tool. Should keep the zone selected.
+                                    self.select_tool(EditorTool::Zone);
+                                }
+                            }
+
+                            // Otherwise add a new linear point to the selected zone
+                            else {
+                                self.selected_point = Some(self.objects.create_point(zone_id, pos).unwrap());
+                            }
+                        }
+                        // Otherwise, we should try to create a zone by adding a linear point
+                        else {
+                            // TODO: Add sibling point if there is a point here
+                            let zone_id = self.objects.create_zone().unwrap();
+                            self.selected_zone = Some(zone_id);
+                            self.selected_point = Some(self.objects.create_point(zone_id, pos).unwrap());
                         }
                     }
                 }

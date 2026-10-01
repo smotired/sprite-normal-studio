@@ -26,7 +26,7 @@ struct Params {
     // 02: Light Button On (default true)
     // 03: Light Button Halo On (default false, true when dragging light)
     // 04: Zone paths enabled
-    // 05: 
+    // 05: If the currently selected zone path should not be closed (i.e. if the first and last points are not connected. only true when creating a new path)
     // 06: 
     // 07: 
     // 08: 
@@ -61,6 +61,9 @@ struct Params {
 
     // Light color
     light_color: u32,
+
+    // Current cursor position in world space
+    cursor_pos: vec2<f32>,
 
     // Total amount of zones
     zone_count: u32,

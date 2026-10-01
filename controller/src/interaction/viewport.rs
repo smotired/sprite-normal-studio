@@ -1,7 +1,7 @@
 use vector::Vec2;
 use wgpu::{Device, util::DeviceExt};
 
-use crate::interaction::{camera::Camera, light::Light, overlay::OverlayState};
+use crate::{EditorTool, interaction::{camera::Camera, light::Light, overlay::OverlayState}};
 
 /// Formats data used for the actual rendering process.
 #[repr(C)] // Needed for Rust to pass to shaders correctly
@@ -25,8 +25,9 @@ pub struct ViewportDataUniform {
 
     // Light color
     pub light_color: u32,
-
-    // TODO: could pack the next 4 values if i want
+    
+    // Current world space position of cursor,
+    pub cursor_pos: Vec2,
 
     // Amount of zones
     pub zone_count: u32,
@@ -39,21 +40,34 @@ pub struct ViewportDataUniform {
 
     // Index of the currently selected point, or > 65535 if none is selected
     pub selected_point: u32,
+
+    // Padding to align the struct properly for the shader.
+    pub _padding: [f32; 2],
 }
 
 impl ViewportDataUniform {
-    pub fn new(light: &Light, camera: &Camera, overlay: &OverlayState, (zone_count, point_count): (usize, usize), (selected_zone, selected_point): (Option<u16>, Option<u16>)) -> Self {
+    pub fn new(
+        light: &Light,
+        camera: &Camera,
+        overlay: &OverlayState,
+        cursor: Vec2,
+        (zone_count, point_count): (usize, usize),
+        (selected_zone, selected_point): (Option<u16>, Option<u16>),
+        tool: EditorTool,
+        ) -> Self {
         Self {
             camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
-            overlay_flags: overlay.get_flags(),
+            overlay_flags: overlay.get_flags(tool),
             light_pos: light.position(),
             light_height: light.height(),
             light_color: light.packed_color(),
+            cursor_pos: cursor,
             zone_count: zone_count as u32,
             point_count: point_count as u32,
             selected_zone: selected_zone.map_or(65536, |v| v as u32),
             selected_point: selected_point.map_or(65536, |v| v as u32),
+            _padding: Default::default(),
         }
     }
 

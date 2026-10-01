@@ -58,7 +58,7 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Render the sidebar panel
-        let sidebar_response = egui::Panel::left("sidebar")
+        egui::Panel::left("sidebar")
             .exact_size(240.0)
             .resizable(false)
             .show(ui, |ui| {
@@ -105,7 +105,7 @@ impl eframe::App for StudioApp {
             });
 
         // Render the tools panel directly to the right of it
-        egui::Panel::left("tools")
+        let toolbar_response = egui::Panel::left("tools")
             .exact_size(21.0)
             .frame(
                 egui::Frame::side_top_panel(ui.style()) // or egui::Frame::default()
@@ -153,7 +153,7 @@ impl eframe::App for StudioApp {
         // The rest of the space will now be taken up by the editor
         let full_rect = ui.max_rect();
         let viewport_rect = egui::Rect::from_min_max(
-            egui::Pos2::new(sidebar_response.response.rect.max.x, full_rect.min.y),
+            egui::Pos2::new(toolbar_response.response.rect.max.x, full_rect.min.y),
             full_rect.max,
         );
         let ppp = ui.pixels_per_point();
@@ -162,6 +162,18 @@ impl eframe::App for StudioApp {
         ui.input_mut(|i| {
             for event in self.handle_app_input(i, (viewport_rect, ppp)) {
                 self.controller.handle_input(event);
+            }
+
+            // Set world space cursor position
+            let viewport_size = self.renderer.size();
+            if let Some(mouse_world) = i.pointer.latest_pos()
+                .filter(|pos| viewport_rect.contains(*pos))
+                .map(|pos| {
+                    let local = (pos - viewport_rect.min) * ppp; // egui::Vec2, points -> local origin
+                    self.controller.screen_to_world(vector::Vec2::from(local), viewport_size)
+                })
+            {
+                self.controller.set_cursor_pos(mouse_world);
             }
         });
 
