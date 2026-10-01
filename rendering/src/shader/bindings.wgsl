@@ -67,6 +67,12 @@ struct Params {
 
     // Total amount of points
     point_count: u32,
+
+    // Selected zone index (> 65535 if none)
+    selected_zone: u32,
+
+    // Selected point index (> 65535 if none)
+    selected_point: u32,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 
@@ -160,12 +166,8 @@ struct ControlPoint {
     // Relative position of outgoing handle
     right_handle: vec2<f32>,
     
-    // The handle mode of the control point, used for rendering and control.
-    // 0 = Continuous
-    // 1 = Broken
-    // 2 = Linear
-    // For our purposes, continuous == broken
-    mode: u32,
+    // Part of the handle mode of the control point. Controls if handles should be rendered
+    no_handles: bool,
 
     // The index of the zone this control point is a part of.
     zone_id: u32,
@@ -177,11 +179,14 @@ struct ControlPoint {
 }
 
 fn unpack_point(point: ControlPointPacked) -> ControlPoint {
+    let mode = unpack_fst(point.mode_and_zone_id);
+    let no_handles = (mode & 0x2u) > 0u;
+
     return ControlPoint(
         point.position,
         point.left_handle,
         point.right_handle,
-        unpack_fst(point.mode_and_zone_id),
+        no_handles,
         unpack_snd(point.mode_and_zone_id),
         unpack_fst(point.id_and_sibling_id),
         // leave sibling ID
@@ -191,7 +196,7 @@ fn unpack_point(point: ControlPointPacked) -> ControlPoint {
 // Get the actual position of a control point's left handle
 fn left_handle(point: ControlPoint) -> vec2<f32> {
     // Don't add the handle if it's linear
-    if ((point.mode & 0x2u) > 0u) {
+    if (point.no_handles) {
         return point.position;
     } else {
         return point.position + point.left_handle;
@@ -201,7 +206,7 @@ fn left_handle(point: ControlPoint) -> vec2<f32> {
 // Get the actual position of a control point's right handle
 fn right_handle(point: ControlPoint) -> vec2<f32> {
     // Don't add the handle if it's linear
-    if ((point.mode & 0x2u) > 0u) {
+    if (point.no_handles) {
         return point.position;
     } else {
         return point.position + point.right_handle;

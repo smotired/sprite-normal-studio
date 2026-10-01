@@ -2,7 +2,7 @@ use crate::Controller;
 
 /// Options for which tool we are using in the editor.
 /// Tool options may later be added as tuple parameters in this enum.
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum EditorTool {
     /// Allows selecting and manipulating zones by their control point.
     Zone,
@@ -16,6 +16,8 @@ pub enum EditorTool {
 }
 
 impl Controller {
+    pub fn selected_tool(&self) -> EditorTool { self.tool }
+
     /// Select a tool, and perform related side-effects
     pub fn select_tool(&mut self, tool: EditorTool) {
         // If this is the current tool, don't do anything.

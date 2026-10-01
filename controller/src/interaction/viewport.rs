@@ -26,18 +26,23 @@ pub struct ViewportDataUniform {
     // Light color
     pub light_color: u32,
 
+    // TODO: could pack the next 4 values if i want
+
     // Amount of zones
     pub zone_count: u32,
 
     // Amount of control points
     pub point_count: u32,
 
-    // pad to acceptable amount of bytes
-    pub _pad: [u32; 2],
+    // Index of the currently selected zone, or > 65535 if none is selected
+    pub selected_zone: u32,
+
+    // Index of the currently selected point, or > 65535 if none is selected
+    pub selected_point: u32,
 }
 
 impl ViewportDataUniform {
-    pub fn new(light: &Light, camera: &Camera, overlay: &OverlayState, (zone_count, point_count): (usize, usize)) -> Self {
+    pub fn new(light: &Light, camera: &Camera, overlay: &OverlayState, (zone_count, point_count): (usize, usize), (selected_zone, selected_point): (Option<u16>, Option<u16>)) -> Self {
         Self {
             camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
@@ -47,7 +52,8 @@ impl ViewportDataUniform {
             light_color: light.packed_color(),
             zone_count: zone_count as u32,
             point_count: point_count as u32,
-            _pad: Default::default(),
+            selected_zone: selected_zone.map_or(65536, |v| v as u32),
+            selected_point: selected_point.map_or(65536, |v| v as u32),
         }
     }
 

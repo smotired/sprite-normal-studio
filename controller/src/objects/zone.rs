@@ -35,4 +35,6 @@ impl Zone {
         self.point_start = (self.point_start as i32 + offset)
             .clamp(0, 65536 - self.point_count as i32) as u16
     }
+
+    pub fn range(&self) -> (u16, u16) { (self.point_start, self.point_count) }
 }
