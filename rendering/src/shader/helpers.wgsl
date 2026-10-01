@@ -32,6 +32,25 @@ fn feather_color(
     return vec4<f32>(color.rgb, color.a * opacity);
 }
 
+// Check if a position is within a bounding box
+fn check_bbox(
+    pos: vec2<f32>,  // World space position
+    min: vec2<f32>,  // Top left corner of bounding box
+    max: vec2<f32>,  // Bottom right corner of bounding box
+) -> bool {          // True if inside the bounding box (inclusive)
+    return pos.x >= min.x && pos.y >= min.y && pos.x <= max.x && pos.y <= max.y;
+}
+
+// Check if a position is within a bounding box with a feathered edge
+fn check_bbox_feathered(
+    pos: vec2<f32>,  // World space position
+    min: vec2<f32>,  // Top left corner of bounding box
+    max: vec2<f32>,  // Bottom right corner of bounding box
+) -> bool {          // True if inside the bounding box (inclusive)
+    let f = FEATHER * params.inv_scale;
+    return check_bbox(pos, min - f, max + f);
+}
+
 /***********************************/
 /*     SHAPE DRAWING FUNCTIONS     */
 /***********************************/
@@ -63,4 +82,19 @@ fn draw_circle(
     let to_circle = distance - r;
     let feathered = feather_color(color, to_circle, w * 0.5);
     return mix(base_color, feathered.rgb, feathered.a);
+}
+
+// Function to fill a box with a base color (no feather)
+fn draw_box(
+    base_color: vec3<f32>,   // RGB base canvas color.
+    pos: vec2<f32>,          // Position of this viewport pixel.
+    color: vec4<f32>,        // RGBA fill color for the box.
+    center: vec2<f32>,       // Center of the box.
+    half_size: f32,          // Half the uncorrected width and height of the box.
+) -> vec3<f32> {
+    let half = vec2<f32>(half_size, half_size) * params.inv_scale;
+    if (check_bbox(pos, center - half, center + half)) {
+        return mix(base_color, color.rgb, color.a);
+    }
+    return base_color;
 }

@@ -40,28 +40,26 @@ fn overlay_light(
 /***********************************/
 
 // Constants for the light overlay
-const CONTROL_POINT_WIDTH = 4.0;        // Width of the square drawn for control points
+const CONTROL_POINT_HALF_WIDTH = 3.0;        // Width of the square drawn for control points
 
 fn overlay_zone_paths(
+    color: vec3<f32>,   // Base color below this part of the overlay
     pos: vec2<f32>,     // World-space position of this pixel
-) -> vec4<f32> {        // Returns pixel color from overlay
-    let h = CONTROL_POINT_WIDTH * 0.5;
+) -> vec3<f32> {        // Returns new color after adding overlay
+    var col = color;
     
     // Loop through all zones
     for (var i = 0u; i < params.zone_count; i += 1u) {
         let zone = unpack_zone(zones[i]);
 
+        // Draw an orange box for each control point
         for (var j = 0u; j < zone.point_count; j += 1u) {
-            let to_point = unpack_point(points[zone.points_start + j]).position - pos;
-
-            // If within the square return orange
-            if (abs(to_point.x) <= h && abs(to_point.y) <= h) {
-                return vec4<f32>(1, 0.5, 0, 1);
-            }
+            let point = unpack_point(points[zone.points_start + j]).position;
+            col = draw_box(col, pos, vec4<f32>(1, 0.5, 0, 1), point, CONTROL_POINT_HALF_WIDTH);
         }
     }
 
-    return vec4<f32>(0, 0, 0, 0);
+    return col;
 }
 
 /***********************************/
@@ -81,8 +79,7 @@ fn overlay_color(
 
     // Zone paths/points if paths are enabled
     if (flag(4)) {
-        let paths = overlay_zone_paths(pos);
-        color = mix(color, paths.rgb, paths.a);
+        color = overlay_zone_paths(color, pos);
     }
 
     // Lights
