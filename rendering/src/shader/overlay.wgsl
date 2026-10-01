@@ -23,13 +23,13 @@ fn overlay_light(
     
     // If flags 02 (LIGHT BUTTON), draw a circle at the light
     if (flag(2)) {
-        col = draw_circle(col, pos, vec4<f32>(1, 1, 1, 0.8), params.light_pos.xy, LIGHT_BUTTON_RADIUS, 0.0, true);
-        col = draw_circle(col, pos, vec4<f32>(0, 0, 0, 1), params.light_pos.xy, LIGHT_BUTTON_RADIUS, LIGHT_BUTTON_OUTLINE_WIDTH * 0.5, false);
+        col = draw_circle(col, pos, vec4<f32>(1, 1, 1, 0.8), params.light_pos.xy, LIGHT_BUTTON_RADIUS - 1, 0.0, true);
+        col = draw_circle(col, pos, vec4<f32>(0, 0, 0, 1), params.light_pos.xy, LIGHT_BUTTON_RADIUS, LIGHT_BUTTON_OUTLINE_WIDTH, false);
     }
 
     // If flags 03 (LIGHT HALO), draw a halo around the light
     if (flag(3)) {
-        col = draw_circle(col, pos, vec4<f32>(1, 1, 1, 0.8), params.light_pos.xy, params.light_pos.z, LIGHT_HALO_WIDTH * 0.5, false);
+        col = draw_circle(col, pos, vec4<f32>(1, 1, 1, 0.8), params.light_pos.xy, params.light_pos.z / params.inv_scale, LIGHT_HALO_WIDTH, false);
     }
 
     return col;
