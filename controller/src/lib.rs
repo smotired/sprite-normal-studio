@@ -43,8 +43,8 @@ impl Controller {
         let objects_buffers = objects.get_buffers(device);
 
         Self {
-            assigner: ZoneAssigner::new(device, objects_buffers),
-            generator: Generator::new(device),
+            assigner: ZoneAssigner::new(device, objects_buffers.clone()),
+            generator: Generator::new(device, objects_buffers.clone()),
             normals_stale: false,
             camera: Default::default(),
             light: Default::default(),
@@ -57,8 +57,9 @@ impl Controller {
     pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
     {
         // Regenerate the normal map's output texture
-        self.assigner.set_inputs(device, sprite, self.objects.get_buffers(device));
-        self.generator.set_inputs(device, normal, self.assigner.output());
+        let object_buffers = self.objects.get_buffers(device);
+        self.assigner.set_inputs(device, sprite, object_buffers.clone());
+        self.generator.set_inputs(device, normal, self.assigner.output(), object_buffers.clone());
         self.normals_stale = true;
 
         // Recenter the camera and the light by adding a fake input (maybe not a good idea but icbatgetslftmoas </3)
@@ -73,8 +74,8 @@ impl Controller {
 
         if self.normals_stale {
             let zone_ignore = None; // TODO
-            self.assigner.assign_zones(device, queue, objects_buffers, zone_ignore);
-            self.generator.generate_normals(device, queue);
+            self.assigner.assign_zones(device, queue, objects_buffers.clone(), zone_ignore);
+            self.generator.generate_normals(device, queue, objects_buffers.clone());
             self.normals_stale = false;
         }
     }

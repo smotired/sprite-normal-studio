@@ -14,7 +14,7 @@ pub struct ZoneAssigner {
     /// The output texture for zone assignments.
     output: Texture,
 
-    /// Buffer for this uniform
+    /// Uniform buffer for this pipeline
     uniform_buffer: Buffer,
 
     /// Binds the output texture and uniforms to the pipeline.

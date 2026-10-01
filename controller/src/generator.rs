@@ -1,7 +1,7 @@
 use vector::Vec2;
-use wgpu::{BindGroup, ComputePipeline, Device, Queue, Texture};
+use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture};
 
-use crate::Controller;
+use crate::{BufferStates, Controller};
 
 /// The Generator is in charge of generating the normal map from the
 /// input texture, spritesheet (for size), zones, and shapes.
@@ -15,13 +15,20 @@ pub struct Generator {
     /// Binds our normal map shader to the WGPU device
     bind_group: Option<BindGroup>,
 
+    /// Binds our compute shader to the WGPU device.
+    /// Must be recreated whenever object buffers are recreated/resized.
+    objects_bind_group: BindGroup,
+
     /// Current size of the spritesheet.
     size: Vec2,
+
+    /// Last size of the zones buffer, used to know if we need to rebind the buffers.
+    object_buffer_sizes: (usize, ()),
 }
 
 impl Generator {
     /// Set up the generator and shader pipeline
-    pub fn new(device: &Device) -> Self {
+    pub fn new(device: &Device, object_buffers: BufferStates) -> Self {
         // Load the shader and create the pipeline
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/generator.wgsl"));
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -33,15 +40,21 @@ impl Generator {
             cache: Default::default(),
         });
 
+        // Create object bind group
+        let (zones_buffer, _points_buffer) = object_buffers;
+        let objects_bind_group = create_objects_bind_group(device, &pipeline, zones_buffer.0);
+        let object_buffer_sizes = (zones_buffer.1, ());
+
         // Create the output texture
         let size = Vec2::new(16.0, 16.0);
         let output = create_output(device, size);
-        Self { pipeline, output, bind_group: None, size }
+
+        Self { pipeline, output, bind_group: None, objects_bind_group, size, object_buffer_sizes }
     }
 
     /// Should be called whenever normal map or assignment textures are regenerated
     /// Recreate bind group for the pipeline
-    pub fn set_inputs(&mut self, device: &Device, normal: &Texture, assign: &Texture) {
+    pub fn set_inputs(&mut self, device: &Device, normal: &Texture, assign: &Texture, object_buffers: BufferStates) {
         // Recreate output texture if size mismatches
         let size = Vec2::from(assign.size());
         if size != self.size {
@@ -64,14 +77,30 @@ impl Generator {
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&output_view) },
             ],
         }));
+
+        // Recreate objects bind group if needed
+        let (zones_buffer, _points_buffer) = object_buffers;
+        let object_buffer_sizes = (zones_buffer.1, ());
+        if object_buffer_sizes != self.object_buffer_sizes {
+            self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0);
+            self.object_buffer_sizes = object_buffer_sizes;
+        }
     }
 
     /// Recompute working normal map.
     /// Should be run whenever the input textures, shapes, or zones change.
     /// Does not need to run every frame or when camera or light is changed.
-    pub fn generate_normals(&self, device: &Device, queue: &Queue) {
+    pub fn generate_normals(&mut self, device: &Device, queue: &Queue, object_buffers: BufferStates) {
         // Skip if we haven't set up the input textures yet
         let Some(bind_group) = &self.bind_group else { return };
+
+        // Recreate objects bind group if needed
+        let (zones_buffer, _points_buffer) = object_buffers;
+        let object_buffer_sizes = (zones_buffer.1, ());
+        if object_buffer_sizes != self.object_buffer_sizes {
+            self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0);
+            self.object_buffer_sizes = object_buffer_sizes;
+        }
 
         // Create encoder
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -80,6 +109,7 @@ impl Generator {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, bind_group, &[]);
+            pass.set_bind_group(1, &self.objects_bind_group, &[]);
             pass.dispatch_workgroups((self.size.x as u32).div_ceil(16), (self.size.y as u32).div_ceil(16), 1);
         }
 
@@ -103,6 +133,17 @@ fn create_output(device: &Device, size: Vec2) -> Texture {
         // Storage for the working pass to write it, texture binding for viewport renderer to read it.
         usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
+    })
+}
+
+/// Create an objects bind group
+fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, zones_buffer: Buffer) -> BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Normals generator objects bind group"),
+        layout: &pipeline.get_bind_group_layout(1),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: zones_buffer.as_entire_binding() },
+        ],
     })
 }
 

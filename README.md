@@ -52,6 +52,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Create a Zone struct
 [x] Render Zone boundaries
 [x] Assign pixels to zones in compute shader
+[x] Read zones in map generation pipeline and set some base normal.
 [ ] Allow creating zones with bezier paths
 [ ] Modify zone paths, at path and vertex level, including deletion and
     duplication
@@ -59,7 +60,6 @@ Basically, other software is to Photoshop what this is to Illustrator.
     when manipulated
 [ ] Selecting and manipulating multiple zones/vertices at once
 [ ] Set base normal for a zone, which will be applied after all shapes.
-    Set up compute shader pipeline for normal map generation.
 [ ] Window preview mode for working normal map
 ```
 
