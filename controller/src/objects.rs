@@ -212,6 +212,16 @@ impl ObjectBuffers {
         Ok(())
     }
 
+    pub fn update_zone_position(&mut self, point_id: u16, position: Vec2) -> anyhow::Result<()> {
+        let point = self.get_point(point_id).unwrap();
+        let delta = position - point.position();
+        let (start, count) = self.get_zone(point.zone_id()).unwrap().range();
+        for i in 0..count {
+            ControlPoint::add_position_delta(start + i, delta, &mut self.points.items)?;
+        }
+        Ok(())
+    }
+
     /// Get references to the buffers and their sizes. Recreates the buffers if needed.
     /// The caller should keep track of the previous buffer sizes and recreate the bind group if they differ.
     pub fn get_buffers(&mut self, device: &Device) -> BufferStates {

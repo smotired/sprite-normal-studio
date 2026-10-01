@@ -26,6 +26,9 @@ impl Controller {
 
         // On exit from current tool, reset in-progress actions like creating shapes
         match self.tool {
+            EditorTool::Point => {
+                self.dragging_handle = None;
+            }
             EditorTool::Pen => {
                 if let Some(_selection) = self.selected_zone {
                     // Delete the shape we are currently creating
@@ -36,9 +39,6 @@ impl Controller {
 
         // On entry to new tool, reset things like selection
         match tool {
-            EditorTool::Zone => {
-                self.selected_point = None;
-            },
             EditorTool::Pen => {
                 self.selected_zone = None;
                 self.selected_point = None;

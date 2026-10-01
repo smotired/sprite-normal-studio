@@ -62,6 +62,9 @@ pub struct ControlPoint {
 }
 
 impl ControlPoint {
+    /// Get the position of this control point.
+    pub fn position(&self) -> Vec2 { self.position }
+
     /// Calculate the distance from this control point to the given position.
     pub fn distance(&self, position: Vec2) -> f32 { self.position.distance(position) }
 
@@ -141,6 +144,11 @@ impl ControlPoint {
     /// Set the position of a control point. Updates its siblings as well.
     pub fn set_position(point_id: u16, position: Vec2, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
         Self::traverse_siblings(point_id, points, |point| { point.position = position; })
+    }
+
+    /// Add a delta to the position of a control point. Updates its siblings as well.
+    pub fn add_position_delta(point_id: u16, delta: Vec2, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
+        Self::traverse_siblings(point_id, points, |point| { point.position += delta; })
     }
 
     /// Set the handle mode of a control point. Updates its siblings as well.

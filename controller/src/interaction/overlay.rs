@@ -34,9 +34,17 @@ impl OverlayState {
             // 04: Overlay paths
             flags |= 1 << 4;
 
-            // 05: If the currently selected zone path should not be closed
+            // 05: If the currently selected zone path should have its points drawn
+            match tool {
+                EditorTool::Point | EditorTool::Pen => {
+                    flags |= 1 << 5;
+                },
+                _ => {}
+            }
+
+            // 06: If the currently selected zone path should not be closed
             if let EditorTool::Pen = tool {
-                flags |= 1 << 5;
+                flags |= 1 << 6;
             }
         }
 
