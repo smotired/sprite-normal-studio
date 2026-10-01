@@ -103,7 +103,7 @@ impl ObjectBuffers {
             pt2_id, 
             None,
             Some(ControlPointMode::Broken),
-            Some(Vec2::vt(-30.0)),
+            Some(Vec2::vt(30.0)),
             None,
         ).unwrap();
 
