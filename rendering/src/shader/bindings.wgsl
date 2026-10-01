@@ -187,3 +187,23 @@ fn unpack_point(point: ControlPointPacked) -> ControlPoint {
         // leave sibling ID
     );
 }
+
+// Get the actual position of a control point's left handle
+fn left_handle(point: ControlPoint) -> vec2<f32> {
+    // Don't add the handle if it's linear
+    if ((point.mode & 0x2u) > 0u) {
+        return point.position;
+    } else {
+        return point.position + point.left_handle;
+    }
+}
+
+// Get the actual position of a control point's right handle
+fn right_handle(point: ControlPoint) -> vec2<f32> {
+    // Don't add the handle if it's linear
+    if ((point.mode & 0x2u) > 0u) {
+        return point.position;
+    } else {
+        return point.position + point.right_handle;
+    }
+}

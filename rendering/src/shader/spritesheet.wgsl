@@ -48,6 +48,7 @@ fn spritesheet_color(
             if (flag(0) && pxl.x < size_normal.x && pxl.y < size_normal.y) {
                 let norm_color = textureLoad(normal, pxl.xy, 0); // vec4<f32>
                 norm = normalize(norm_color.rgb * 2.0 - 1.0);
+                norm.y = -norm.y; // normalize since everything else is y-up but screen is y-down
             }
 
             // Get direction and distance to the light source
