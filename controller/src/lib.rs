@@ -10,6 +10,7 @@ use crate::assignment::ZoneAssigner;
 
 pub use crate::interaction::input::{Input, Axis};
 pub use crate::interaction::viewport::ViewportDataUniform;
+pub use crate::interaction::tools::EditorTool;
 pub use crate::objects::{ObjectBuffers, BufferStates};
 
 /// The Controller manages our actual working pipeline.
@@ -34,6 +35,15 @@ pub struct Controller {
 
     /// The points, zones, and shapes.
     objects: objects::ObjectBuffers,
+
+    /// The tool we currently have selected
+    tool: EditorTool,
+
+    /// The ID of the zone we currently have selected
+    selected_zone: Option<u16>,
+
+    /// The ID of the point we currently have selected
+    selected_point: Option<u16>,
 }
 
 impl Controller {
@@ -50,12 +60,20 @@ impl Controller {
             light: Default::default(),
             overlay_state: Default::default(),
             objects,
+            tool: EditorTool::Zone,
+            selected_zone: None,
+            selected_point: None,
         }
     }
     
     /// When sprite or normal map are loaded from files, update child objects.
     pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
     {
+        // Reset selection
+        self.selected_zone = None;
+        self.selected_point = None;
+        self.tool = EditorTool::Zone;
+
         // Regenerate the normal map's output texture
         let object_buffers = self.objects.get_buffers(device);
         self.assigner.set_inputs(device, sprite, object_buffers.clone());
@@ -73,7 +91,7 @@ impl Controller {
         self.write_object_buffers(queue);
 
         if self.normals_stale {
-            let zone_ignore = None; // TODO
+            let zone_ignore = if let EditorTool::Pen = self.tool { self.selected_zone } else { None }; // If we are creating a zone, ignore it, otherwise don't ignore.
             self.assigner.assign_zones(device, queue, objects_buffers.clone(), zone_ignore);
             self.generator.generate_normals(device, queue, objects_buffers.clone());
             self.normals_stale = false;

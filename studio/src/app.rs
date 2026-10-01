@@ -4,7 +4,7 @@ mod input;
 
 use std::path::{Path, PathBuf};
 
-use controller::Controller;
+use controller::{Controller, EditorTool};
 use eframe::egui;
 use eframe::wgpu::FilterMode;
 use rendering::Renderer;
@@ -101,6 +101,26 @@ impl eframe::App for StudioApp {
                 // Regenerate the normal map and viewport if selections changed
                 if must_update_textures {
                     self.update_input_textures();
+                }
+            });
+
+        // Render the tools panel directly to the right of it
+        egui::Panel::left("tools")
+            .exact_size(20.0)
+            .resizable(false)
+            .show(ui, |ui| {
+                // TODO: Icons, and set as active if tool is active
+
+                if ui.button("Z").clicked() {
+                    self.controller.select_tool(EditorTool::Zone);
+                }
+
+                if ui.button("P").clicked() {
+                    self.controller.select_tool(EditorTool::Point);
+                }
+
+                if ui.button("A").clicked() {
+                    self.controller.select_tool(EditorTool::Pen);
                 }
             });
 
