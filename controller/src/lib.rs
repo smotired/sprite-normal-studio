@@ -47,6 +47,9 @@ pub struct Controller {
 
     /// The ID of the point we currently have selected
     selected_point: Option<u16>,
+
+    /// Whether we are currently dragging a handle of the selected point. If true, we are dragging the right handle.
+    dragging_handle: Option<bool>,
 }
 
 impl Controller {
@@ -67,6 +70,7 @@ impl Controller {
             tool: EditorTool::Zone,
             selected_zone: None,
             selected_point: None,
+            dragging_handle: None,
         }
     }
     

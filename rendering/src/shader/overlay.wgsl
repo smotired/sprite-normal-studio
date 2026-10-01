@@ -54,6 +54,7 @@ fn overlay_zone_paths(
     // Loop through all zones
     for (var i = 0u; i < params.zone_count; i += 1u) {
         let zone = unpack_zone(zones[i]);
+        let first_point = unpack_point(points[zone.points_start]);
         var last_point = unpack_point(points[zone.points_start + zone.point_count - 1]);
 
         // If not selected, just draw the path
@@ -63,9 +64,9 @@ fn overlay_zone_paths(
 
         // If selected check completion flag
         var start = 0u;
-        if (selected && flag(5)) {
+        if (selected && flag(6)) {
             start = 1u;
-            last_point = unpack_point(points[zone.points_start]);
+            last_point = first_point;
         }
 
         // Draw the path between control points
@@ -89,22 +90,30 @@ fn overlay_zone_paths(
             last_point = point;
         }
 
-        // If we stopped drawing the path early, complete the path at the cursor instead
-        if (selected && flag(5)) {
+        // If we stopped drawing the path early, complete the path at the cursor or the first point instead
+        if (selected && flag(6)) {
+            var pos2 = params.cursor_pos;
+            var pos3 = params.cursor_pos;
+            // If first point is selected we are completing the path now, so draw there instead
+            if (params.selected_point == zone.points_start && zone.point_count > 1u) {
+                pos2 = left_handle(first_point);
+                pos3 = first_point.position;
+            }
+
             col = draw_bezier(
                 col,
                 pos,
                 base_color,
                 last_point.position,
                 right_handle(last_point),
-                params.cursor_pos,
-                params.cursor_pos,
+                pos2,
+                pos3,
                 PATH_HALF_WIDTH * 0.5
             );
         }
 
-        // If the zone is selected, also draw the control points on top of the path
-        if (selected) {
+        // If the zone is selected and flag 5 is set, also draw the control points on top of the path
+        if (selected && flag(5)) {
             for (var j = 0u; j < zone.point_count; j += 1u) {
                 let point = unpack_point(points[zone.points_start + j]);
 

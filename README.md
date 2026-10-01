@@ -53,14 +53,14 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Render Zone boundaries
 [x] Assign pixels to zones in compute shader
 [x] Read zones in map generation pipeline and set some base normal.
-[ ] Allow creating zones with bezier paths
+[x] Allow creating zones with bezier paths
 [ ] Modify zone paths, at path and vertex level, including deletion and
     duplication
 [ ] Joining zone paths at certain vertices, which should update both paths
     when manipulated
 [ ] Selecting and manipulating multiple zones/vertices at once
 [ ] Set base normal for a zone, which will be applied after all shapes.
-[ ] Window preview mode for working normal map
+[x] Window preview mode for working normal map
 ```
 
 ### Phase IV - Editor Features
