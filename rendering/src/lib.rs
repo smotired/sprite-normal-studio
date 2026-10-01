@@ -175,9 +175,6 @@ impl Renderer {
         // Write uniforms
         queue.write_buffer(&self.control.uniform_buffer, 0, controller.uniform().bytes());
 
-        // Write shapes
-        controller.write_object_buffers(queue);
-
         // Submit workload
         queue.submit([encoder.finish()]);
 
@@ -249,7 +246,7 @@ fn create_textures_bind_group(device: &Device, pipeline: &ComputePipeline, outpu
 }
 
 /// Create a new bind group for a pipeline. Should be called whenever the object buffers are recreated.
-fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, zones: &Buffer, points: &Buffer) -> BindGroup {
+fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, zones: Buffer, points: Buffer) -> BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipeline.get_bind_group_layout(1),

@@ -1,6 +1,7 @@
+use vector::Vec2;
 use wgpu::{BindGroup, ComputePipeline, Device, Queue, Texture};
 
-use crate::{Controller, Input};
+use crate::Controller;
 
 /// The Generator is in charge of generating the normal map from the
 /// input texture, spritesheet (for size), zones, and shapes.
@@ -15,7 +16,7 @@ pub struct Generator {
     bind_group: Option<BindGroup>,
 
     /// Current size of the spritesheet.
-    size: (u32, u32),
+    size: Vec2,
 }
 
 impl Generator {
@@ -33,24 +34,24 @@ impl Generator {
         });
 
         // Create the output texture
-        let size = (16, 16);
+        let size = Vec2::new(16.0, 16.0);
         let output = create_output(device, size);
         Self { pipeline, output, bind_group: None, size }
     }
 
-    /// Should be called whenever sprite or normal map file selection changes
+    /// Should be called whenever normal map or assignment textures are regenerated
     /// Recreate bind group for the pipeline
-    pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture) {
+    pub fn set_inputs(&mut self, device: &Device, normal: &Texture, assign: &Texture) {
         // Recreate output texture if size mismatches
-        let size = (sprite.width(), sprite.height());
+        let size = Vec2::from(assign.size());
         if size != self.size {
             self.output = create_output(device, size);
             self.size = size;
         }
 
         // Create texture views
-        let sprite_view = sprite.create_view(&Default::default());
         let normal_view = normal.create_view(&Default::default());
+        let assign_view = assign.create_view(&Default::default());
         let output_view = self.output.create_view(&Default::default());
 
         // Recreate the texture bind group
@@ -58,8 +59,8 @@ impl Generator {
             label: Some("Controller texture bind group"),
             layout: &self.pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&sprite_view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&normal_view) },
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&normal_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&assign_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&output_view) },
             ],
         }));
@@ -79,7 +80,7 @@ impl Generator {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, bind_group, &[]);
-            pass.dispatch_workgroups(self.size.0.div_ceil(16), self.size.1.div_ceil(16), 1);
+            pass.dispatch_workgroups((self.size.x as u32).div_ceil(16), (self.size.y as u32).div_ceil(16), 1);
         }
 
         // Submit the command
@@ -91,10 +92,10 @@ impl Generator {
 }
 
 /// Create a new texture for the output when needed
-fn create_output(device: &Device, (width, height): (u32, u32)) -> Texture {
+fn create_output(device: &Device, size: Vec2) -> Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Working normal map"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d { width: size.x as u32, height: size.y as u32, depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -108,15 +109,4 @@ fn create_output(device: &Device, (width, height): (u32, u32)) -> Texture {
 impl Controller {
     /// Get a reference to the working normal map texture
     pub fn output(&self) -> &Texture { self.generator.output() }
-    
-    /// When sprite or normal map are loaded from files, update child objects.
-    pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
-    {
-        // Regenerate the normal map's output texture
-        self.generator.set_inputs(device, sprite, normal);
-        self.normals_stale = true;
-
-        // Recenter the camera and the light by adding a fake input (maybe not a good idea but icbatgetslftmoas </3)
-        self.handle_input(Input::Recenter);
-    }
 }
