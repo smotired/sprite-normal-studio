@@ -42,6 +42,8 @@ fn overlay_light(
 // Constants for the light overlay
 const PATH_HALF_WIDTH = 1.0;                 // Width of the line drawn for control point paths
 const CONTROL_POINT_HALF_WIDTH = 3.0;        // Width of the square drawn for control points
+const CONTROL_POINT_HANDLE_HALF_WIDTH = 1.0; // Width of the line drawn for handles of control points
+const CONTROL_POINT_HANDLE_RADIUS = 2.0;     // Radius of the circle drawn for handles of control points
 
 fn overlay_zone_paths(
     color: vec3<f32>,   // Base color below this part of the overlay
@@ -53,11 +55,19 @@ fn overlay_zone_paths(
     for (var i = 0u; i < params.zone_count; i += 1u) {
         let zone = unpack_zone(zones[i]);
         var last_point = unpack_point(points[zone.points_start + zone.point_count - 1]);
-        let path_color = vec4<f32>(1, 0.5, 0, 1);
 
-        // Draw an orange box for each control point
+        // If not selected, just draw the path
+        let selected = (i == params.selected_zone);
+        let base_color = vec4<f32>(1, 1, 1, 0.5);
+        let selected_color = vec4<f32>(1, 0.5, 0, 1);
+
+        // Draw the path between control points
         for (var j = 0u; j < zone.point_count; j += 1u) {
             let point = unpack_point(points[zone.points_start + j]);
+
+            var path_color = base_color;
+            if (selected) { path_color = selected_color; }
+
             col = draw_bezier(
                 col,
                 pos,
@@ -68,8 +78,39 @@ fn overlay_zone_paths(
                 point.position,
                 PATH_HALF_WIDTH
             );
-            col = draw_box(col, pos, path_color, point.position, CONTROL_POINT_HALF_WIDTH);
+
             last_point = point;
+        }
+
+        // If the zone is selected, also draw the control points on top of the path
+        if (selected) {
+            for (var j = 0u; j < zone.point_count; j += 1u) {
+                let point = unpack_point(points[zone.points_start + j]);
+
+                // If the point is not selected just draw a box
+                if (j != params.selected_point) {
+                    col = draw_box(col, pos, selected_color, point.position, CONTROL_POINT_HALF_WIDTH);
+                }
+
+                // Otherwise, draw the handles and then the box
+                else {
+                    if (!point.no_handles) {
+                        let left_handle = left_handle(point);
+                        let right_handle = right_handle(point);
+
+                        let left_handle_color = vec4<f32>(1, 0, 0, 1);
+                        let right_handle_color = vec4<f32>(1, 1, 0, 1);
+
+                        col = draw_line(col, pos, left_handle_color, point.position, left_handle, CONTROL_POINT_HANDLE_HALF_WIDTH);
+                        col = draw_line(col, pos, right_handle_color, point.position, right_handle, CONTROL_POINT_HANDLE_HALF_WIDTH);
+
+                        col = draw_circle(col, pos, left_handle_color, left_handle, CONTROL_POINT_HANDLE_RADIUS, 0.0, true);
+                        col = draw_circle(col, pos, right_handle_color, right_handle, CONTROL_POINT_HANDLE_RADIUS, 0.0, true);
+                    }
+
+                    col = draw_box(col, pos, vec4<f32>(1, 1, 1, 1), point.position, CONTROL_POINT_HALF_WIDTH);
+                }
+            }
         }
     }
 

@@ -21,6 +21,12 @@ impl Controller {
 
     // Get output
     pub fn uniform(&self) -> viewport::ViewportDataUniform {
-        viewport::ViewportDataUniform::new(&self.light, &self.camera, &self.overlay_state, self.objects.object_counts())
+        viewport::ViewportDataUniform::new(
+            &self.light,
+            &self.camera,
+            &self.overlay_state,
+            self.objects.object_counts(),
+            (self.selected_zone, self.selected_point),
+        )
     }
 }

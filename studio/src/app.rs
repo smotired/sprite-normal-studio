@@ -106,22 +106,48 @@ impl eframe::App for StudioApp {
 
         // Render the tools panel directly to the right of it
         egui::Panel::left("tools")
-            .exact_size(20.0)
+            .exact_size(21.0)
+            .frame(
+                egui::Frame::side_top_panel(ui.style()) // or egui::Frame::default()
+                    .inner_margin(egui::Margin::same(0)) // 10 pixels padding on all sides
+            )
             .resizable(false)
             .show(ui, |ui| {
-                // TODO: Icons, and set as active if tool is active
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    // TODO: Icons
+                    
+                    let selected_color = egui::Color32::DARK_GRAY;
+                    let default_color = egui::Color32::TRANSPARENT;
+                    
+                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
-                if ui.button("Z").clicked() {
-                    self.controller.select_tool(EditorTool::Zone);
-                }
+                    if ui.add_sized(
+                        [20.0, 20.0],
+                        egui::Button::new("Z")
+                            .corner_radius(0)
+                            .fill(if self.controller.selected_tool() == EditorTool::Zone { selected_color } else { default_color })
+                    ).clicked() {
+                        self.controller.select_tool(EditorTool::Zone);
+                    }
 
-                if ui.button("P").clicked() {
-                    self.controller.select_tool(EditorTool::Point);
-                }
+                    if ui.add_sized(
+                        [20.0, 20.0],
+                        egui::Button::new("P")
+                            .corner_radius(0)
+                            .fill(if self.controller.selected_tool() == EditorTool::Point { selected_color } else { default_color })
+                    ).clicked() {
+                        self.controller.select_tool(EditorTool::Point);
+                    }
 
-                if ui.button("A").clicked() {
-                    self.controller.select_tool(EditorTool::Pen);
-                }
+                    if ui.add_sized(
+                        [20.0, 20.0],
+                        egui::Button::new("A")
+                            .corner_radius(0)
+                            .fill(if self.controller.selected_tool() == EditorTool::Pen { selected_color } else { default_color })
+                    ).clicked() {
+                        self.controller.select_tool(EditorTool::Pen);
+                    }
+                });
             });
 
         // The rest of the space will now be taken up by the editor

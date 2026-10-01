@@ -5,7 +5,8 @@ use vector::{Vec2, Vec3};
 use wgpu::{Buffer, Device, Queue};
 
 use zone::Zone;
-use point::{ControlPoint, ControlPointMode};
+use point::ControlPoint;
+pub use point::ControlPointMode;
 
 use crate::Controller;
 
@@ -110,6 +111,24 @@ impl ObjectBuffers {
         objects
     }
 
+    /// Get a zone by its ID. Returns None if the zone does not exist.
+    pub fn get_zone(&self, zone_id: u16) -> Option<&Zone> {
+        if zone_id as usize >= self.zones.items.len() {
+            None
+        } else {
+            Some(&self.zones.items[zone_id as usize])
+        }
+    }
+
+    /// Get a control point by its ID. Returns None if the point does not exist.
+    pub fn get_point(&self, point_id: u16) -> Option<&ControlPoint> {
+        if point_id as usize >= self.points.items.len() {
+            None
+        } else {
+            Some(&self.points.items[point_id as usize])
+        }
+    }
+
     /// Add a zone to the zones buffer with a random (for now) offset, and return its ID.
     pub fn create_zone(&mut self) -> anyhow::Result<u16> {
         if self.zones.items.len() >= MAX_OBJECT_ID {
@@ -119,6 +138,36 @@ impl ObjectBuffers {
         let zone_id = self.zones.items.len() as u16;
         self.zones.items.push(Zone::new(self.points.items.len() as u16, Vec3::random_on_hemisphere()));
         Ok(zone_id)
+    }
+
+    /// Get the closest point to the given position within the specified zone.
+    /// Returns the ID of the closest control point to the given position within the specified zone, or None if no points exist.
+    /// If no zone is specified, returns the closest point across all zones.
+    /// Returns a tuple containing the zone ID and the point ID of the closest control point, or None if no points exist.
+    pub fn get_closest_point(&self, zone_id: Option<u16>, position: Vec2) -> Option<(u16, u16)> {
+        // Get the range of points to search for
+        let (start, count) = if let Some(zone_id) = zone_id {
+            if zone_id as usize >= self.zones.items.len() { return None; }
+            let zone = &self.zones.items[zone_id as usize];
+            zone.range()
+        } else {
+            (0, self.points.items.len() as u16)
+        };
+        if count == 0 { return None; }
+
+        // Find the closest point within the specified range
+        let mut closest_id = None;
+        let mut min_distance = f32::MAX;
+        for i in 0..count {
+            let point = &self.points.items[(start + i) as usize];
+            let distance = point.distance(position);
+            if distance < min_distance {
+                min_distance = distance;
+                closest_id = Some(start + i);
+            }
+        }
+        
+        closest_id.map(|point_id| (self.points.items[point_id as usize].zone_id(), point_id))
     }
 
     /// Add a linear control point to a zone and return its ID

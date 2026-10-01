@@ -1,6 +1,7 @@
 use vector::Vec2;
 
-use crate::Controller;
+use crate::{Controller, EditorTool};
+use crate::objects::ControlPointMode;
 
 pub enum Axis {
     Vertical,
@@ -49,6 +50,39 @@ pub enum Input {
 }
 
 impl Controller {
+    // Get the closest control point to a click position, if it's in the click range corrected for camera scale.
+    fn get_clicked_control_point(&self, zone_id: Option<u16>, pos: Vec2) -> Option<(u16, u16)> {
+        if let Some((zone_id, point_id)) = self.objects.get_closest_point(zone_id, pos) {
+            let distance = self.objects.get_point(point_id).unwrap().absolute_axis_distance(pos);
+            if distance * self.camera.inv_scale() <= 4.0 { // size of control point boxes in the overlay, plus 1 pixel
+                return Some((zone_id, point_id));
+            }
+        }
+        None
+    }
+
+    // Get the handle that was clicked for the selected control point, if applicable.
+    // Returns true if the right handle was clicked, and None if no handle was clicked.
+    fn get_clicked_handle(&self, pos: Vec2) -> Option<bool> {
+        if let Some(point_id) = self.selected_point {
+            let point = self.objects.get_point(point_id).unwrap();
+            if let ControlPointMode::Linear = point.mode() { return None; }
+
+            // Check the left handle
+            let left_handle_distance = point.left_handle().distance(pos) * self.camera.inv_scale();
+            if left_handle_distance <= 4.0 {
+                return Some(false); // left handle clicked
+            }
+
+            // Check the right handle
+            let right_handle_distance = point.right_handle().distance(pos) * self.camera.inv_scale();
+            if right_handle_distance <= 4.0 {
+                return Some(true); // right handle clicked
+            }
+        }
+        None
+    }
+
     // Handle different inputs from the UI
     pub fn handle_input(&mut self, input: Input) {
         match input {
@@ -74,7 +108,41 @@ impl Controller {
             },
 
             Input::MouseClicked(pos) => {
-                println!("Clicked: {}", pos);  
+                match self.tool {
+                    EditorTool::Zone => {
+                        // Select the zone if a control point was clicked
+                        if let Some((zone_id, _)) = self.get_clicked_control_point(None, pos) {
+                            self.selected_zone = Some(zone_id);
+                        } else {
+                            self.selected_zone = None;
+                        }
+                    },
+                    EditorTool::Point => {
+                        // If we have a control point selected, check if we clicked its handle
+                        if let Some(_) = self.get_clicked_handle(pos) {
+                            // Just don't deselect
+                        }
+
+                        // Select the zone and point if a control point was clicked
+                        else if let Some((zone_id, point_id)) = self.get_clicked_control_point(None, pos) {
+                            self.selected_zone = Some(zone_id);
+                            self.selected_point = Some(point_id);
+                        } else {
+                            self.selected_zone = None;
+                            self.selected_point = None;
+                        }
+                    },
+                    EditorTool::Pen => {
+                        // If we have a zone selected, we are already creating one, so add a linear node
+                        if let Some(zone_id) = self.selected_zone {
+                            
+                        }
+                        // Otherwise, we should try to create a zone by adding a linear node
+                        else {
+
+                        }
+                    }
+                }
             },
 
             Input::MouseDragStarted(pos) => {

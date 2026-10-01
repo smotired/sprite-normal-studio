@@ -62,6 +62,28 @@ pub struct ControlPoint {
 }
 
 impl ControlPoint {
+    /// Calculate the distance from this control point to the given position.
+    pub fn distance(&self, position: Vec2) -> f32 { self.position.distance(position) }
+
+    /// Calculate the square distance from this control point to the given position.
+    pub fn absolute_axis_distance(&self, position: Vec2) -> f32 {
+        let dx = self.position.x - position.x;
+        let dy = self.position.y - position.y;
+        dx.abs().max(dy.abs())
+    }
+
+    /// Get the zone ID of this control point.
+    pub fn zone_id(&self) -> u16 { self.zone_id }
+
+    /// Get the mode of this control point.
+    pub fn mode(&self) -> ControlPointMode { ControlPointMode::from_raw(self.mode) }
+
+    /// Get world space position of the left handle unless linear.
+    pub fn left_handle(&self) -> Vec2 { if let ControlPointMode::Linear = self.mode() { self.position } else { self.left_handle + self.position } }
+
+    /// Get world space position of the right handle unless linear.
+    pub fn right_handle(&self) -> Vec2 { if let ControlPointMode::Linear = self.mode() { self.position } else { self.right_handle + self.position } }
+
     /// Create a new control point node with no siblings
     pub fn new_solo(id: u16, zone_id: u16, position: Vec2) -> Self {
         Self {
