@@ -174,6 +174,26 @@ fn unpack_point(point: ControlPointPacked) -> ControlPoint {
     );
 }
 
+// Get the actual position of a control point's left handle
+fn left_handle(point: ControlPoint) -> vec2<f32> {
+    // Don't add the handle if it's linear
+    if ((point.mode & 0x2u) > 0u) {
+        return point.position;
+    } else {
+        return point.position + point.left_handle;
+    }
+}
+
+// Get the actual position of a control point's right handle
+fn right_handle(point: ControlPoint) -> vec2<f32> {
+    // Don't add the handle if it's linear
+    if ((point.mode & 0x2u) > 0u) {
+        return point.position;
+    } else {
+        return point.position + point.right_handle;
+    }
+}
+
 /***********************************/
 /*        HELPER FUNCTIONS         */
 /***********************************/
@@ -271,8 +291,8 @@ fn check_point_in_zone(
         sum += count_ray_intersect_bezier(
             pos, direction,
             last_point.position,
-            last_point.position + last_point.right_handle,
-            point.position + point.left_handle,
+            right_handle(last_point),
+            left_handle(point),
             point.position
         );
         last_point = point;

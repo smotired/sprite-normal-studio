@@ -63,8 +63,8 @@ fn overlay_zone_paths(
                 pos,
                 path_color,
                 last_point.position,
-                last_point.position + last_point.right_handle,
-                point.position + point.left_handle,
+                right_handle(last_point),
+                left_handle(point),
                 point.position,
                 PATH_HALF_WIDTH
             );
