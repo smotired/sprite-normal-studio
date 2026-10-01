@@ -36,6 +36,9 @@ pub struct Controller {
     /// The points, zones, and shapes.
     objects: objects::ObjectBuffers,
 
+    /// The current cursor position in world space.
+    cursor_pos: vector::Vec2,
+
     /// The tool we currently have selected
     tool: EditorTool,
 
@@ -60,6 +63,7 @@ impl Controller {
             light: Default::default(),
             overlay_state: Default::default(),
             objects,
+            cursor_pos: Default::default(),
             tool: EditorTool::Zone,
             selected_zone: None,
             selected_point: None,

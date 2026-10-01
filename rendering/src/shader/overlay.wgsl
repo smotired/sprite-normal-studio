@@ -61,8 +61,15 @@ fn overlay_zone_paths(
         let base_color = vec4<f32>(1, 1, 1, 0.5);
         let selected_color = vec4<f32>(1, 0.5, 0, 1);
 
+        // If selected check completion flag
+        var start = 0u;
+        if (selected && flag(5)) {
+            start = 1u;
+            last_point = unpack_point(points[zone.points_start]);
+        }
+
         // Draw the path between control points
-        for (var j = 0u; j < zone.point_count; j += 1u) {
+        for (var j = start; j < zone.point_count; j += 1u) {
             let point = unpack_point(points[zone.points_start + j]);
 
             var path_color = base_color;
@@ -82,13 +89,27 @@ fn overlay_zone_paths(
             last_point = point;
         }
 
+        // If we stopped drawing the path early, complete the path at the cursor instead
+        if (selected && flag(5)) {
+            col = draw_bezier(
+                col,
+                pos,
+                base_color,
+                last_point.position,
+                right_handle(last_point),
+                params.cursor_pos,
+                params.cursor_pos,
+                PATH_HALF_WIDTH * 0.5
+            );
+        }
+
         // If the zone is selected, also draw the control points on top of the path
         if (selected) {
             for (var j = 0u; j < zone.point_count; j += 1u) {
                 let point = unpack_point(points[zone.points_start + j]);
 
                 // If the point is not selected just draw a box
-                if (j != params.selected_point) {
+                if (j + zone.points_start != params.selected_point) {
                     col = draw_box(col, pos, selected_color, point.position, CONTROL_POINT_HALF_WIDTH);
                 }
 
