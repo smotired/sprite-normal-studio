@@ -50,7 +50,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 
 ```
 [x] Create a Zone struct
-[ ] Render Zone boundaries
+[x] Render Zone boundaries
 [ ] Assign pixels to zones in compute shader
 [ ] Allow creating zones with bezier paths
 [ ] Modify zone paths, at path and vertex level, including deletion and
