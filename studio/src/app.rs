@@ -4,7 +4,7 @@ mod input;
 
 use std::path::{Path, PathBuf};
 
-use controller::{Controller, EditorTool};
+use controller::{Controller, EditorToolKind};
 use eframe::egui;
 use eframe::wgpu::FilterMode;
 use rendering::Renderer;
@@ -125,27 +125,27 @@ impl eframe::App for StudioApp {
                         [20.0, 20.0],
                         egui::Button::new("Z")
                             .corner_radius(0)
-                            .fill(if self.controller.selected_tool() == EditorTool::Zone { selected_color } else { default_color })
+                            .fill(if self.controller.selected_tool() == EditorToolKind::Zone { selected_color } else { default_color })
                     ).clicked() {
-                        self.controller.select_tool(EditorTool::Zone);
+                        self.controller.select_tool(EditorToolKind::Zone);
                     }
 
                     if ui.add_sized(
                         [20.0, 20.0],
                         egui::Button::new("P")
                             .corner_radius(0)
-                            .fill(if self.controller.selected_tool() == EditorTool::Point { selected_color } else { default_color })
+                            .fill(if self.controller.selected_tool() == EditorToolKind::Point { selected_color } else { default_color })
                     ).clicked() {
-                        self.controller.select_tool(EditorTool::Point);
+                        self.controller.select_tool(EditorToolKind::Point);
                     }
 
                     if ui.add_sized(
                         [20.0, 20.0],
                         egui::Button::new("A")
                             .corner_radius(0)
-                            .fill(if self.controller.selected_tool() == EditorTool::Pen { selected_color } else { default_color })
+                            .fill(if self.controller.selected_tool() == EditorToolKind::Pen { selected_color } else { default_color })
                     ).clicked() {
-                        self.controller.select_tool(EditorTool::Pen);
+                        self.controller.select_tool(EditorToolKind::Pen);
                     }
                 });
             });

@@ -1,7 +1,7 @@
 use vector::Vec2;
 use wgpu::{Device, util::DeviceExt};
 
-use crate::{EditorTool, interaction::{camera::Camera, light::Light, overlay::OverlayState}};
+use crate::{interaction::{camera::Camera, light::Light, overlay::OverlayState, tools::EditorTool}};
 
 /// Formats data used for the actual rendering process.
 #[repr(C)] // Needed for Rust to pass to shaders correctly
@@ -52,13 +52,13 @@ impl ViewportDataUniform {
         overlay: &OverlayState,
         cursor: Vec2,
         (zone_count, point_count): (usize, usize),
-        (selected_zone, selected_point): (Option<u16>, Option<u16>),
-        tool: EditorTool,
-        ) -> Self {
+        tool: &Box<dyn EditorTool>,
+    ) -> Self {
+        let (selected_zone, selected_point) = tool.selection();
         Self {
             camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
-            overlay_flags: overlay.get_flags(tool),
+            overlay_flags: overlay.get_flags(tool.kind()),
             light_pos: light.position(),
             light_height: light.height(),
             light_color: light.packed_color(),

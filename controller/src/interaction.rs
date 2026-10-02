@@ -27,8 +27,7 @@ impl Controller {
             &self.overlay_state,
             self.cursor_pos,
             self.objects.object_counts(),
-            (self.selected_zone, self.selected_point),
-            self.selected_tool(),
+            &self.tool,
         )
     }
 }
