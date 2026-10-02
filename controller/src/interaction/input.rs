@@ -59,7 +59,7 @@ impl Controller {
     fn get_clicked_control_point(&self, zone_id: Option<u16>, pos: Vec2) -> Option<(u16, u16)> {
         if let Some((zone_id, point_id)) = self.objects.get_closest_point(zone_id, pos) {
             let distance = self.objects.get_point(point_id).unwrap().absolute_axis_distance(pos);
-            if distance * self.camera.inv_scale() <= 4.0 { // size of control point boxes in the overlay, plus 1 pixel
+            if distance <= 4.0 * self.camera.inv_scale() { // size of control point boxes in the overlay, plus 1 pixel
                 return Some((zone_id, point_id));
             }
         }
@@ -74,14 +74,12 @@ impl Controller {
             if let ControlPointMode::Linear = point.mode() { return None; }
 
             // Check the left handle
-            let left_handle_distance = point.left_handle().distance(pos) * self.camera.inv_scale();
-            if left_handle_distance <= 4.0 {
+            if point.left_handle().distance(pos) <= 4.0 * self.camera.inv_scale() {
                 return Some(false); // left handle clicked
             }
 
             // Check the right handle
-            let right_handle_distance = point.right_handle().distance(pos) * self.camera.inv_scale();
-            if right_handle_distance <= 4.0 {
+            if point.right_handle().distance(pos) <= 4.0 * self.camera.inv_scale() {
                 return Some(true); // right handle clicked
             }
         }

@@ -55,11 +55,17 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Read zones in map generation pipeline and set some base normal.
 [x] Allow creating zones with bezier paths
 [ ] Modify zone paths, at path and vertex level, including deletion and
-    duplication
+    insertion
 [ ] Joining zone paths at certain vertices, which should update both paths
     when manipulated
 [ ] Selecting and manipulating multiple zones/vertices at once
-[ ] Set base normal for a zone, which will be applied after all shapes.
+    Shift+select in zone mode should select all connected zones.
+    Shift+select in point mode should select all points in the clicked zone.
+    Ctrl+select in point mode hsould select all points in all connected zones.
+[ ] Selection options panel which allows you to set base normal for a zone,
+    which will be applied after all shapes.
+[ ] Changing vertex mode in tool panel, and changing coupling with siblings.
+[ ] Joining selected vertices as siblings in tool panel (moves to avg. pos).
 [x] Window preview mode for working normal map
 ```
 
@@ -68,6 +74,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 [ ] Undo/redo with history. Use a stack like Unity's Undo class. Look for an
     external crate first.
+[ ] Copy and paste selected zones.
 [ ] Saving workspace files (with path to sprite and normal map, all shapes,
     zones, and lights, but not camera)
 [ ] Loading workspace files
