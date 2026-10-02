@@ -113,6 +113,9 @@ impl ControlPoint {
         }
     }
 
+    /// Set a zone ID. Should be called when zone ordering changes.
+    pub fn set_zone_id(&mut self, zone_id: u16) { self.zone_id = zone_id; }
+
     /// Run a function across all siblings until we make it back to the start sibling
     fn traverse_siblings<F>(start_id: u16, points: &mut Vec<ControlPoint>, action: F) -> anyhow::Result<()>
         where F: Fn(&mut Self)
@@ -129,7 +132,7 @@ impl ControlPoint {
             let node = &mut points[id as usize];
             action(node);
 
-            // Stop traversal if we reach the front
+            // Stop traversal if we reach the 
             if node.sibling_id == start_id {
                 break;
             }
@@ -187,11 +190,33 @@ impl ControlPoint {
     }
 
     /// Update an ID for a point
-    pub fn update_id(point_id: u16, new_point_id: u16, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
-        // When this is called in create_ or insert_point, the indices are already updated, so this should be correct.
-        Self::traverse_siblings(point_id, points, |point| {
+    pub fn update_id(start_id: u16, point_id: u16, new_point_id: u16, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
+        // When this is called in create_ insert_ or remove_point, the indices are already updated, so this should be correct.
+        Self::traverse_siblings(start_id, points, |point| {
             if point.id == point_id { point.id = new_point_id; }
             if point.sibling_id == point_id { point.sibling_id = new_point_id; }
         })
+    }
+
+    /// Remove a point ID from the point list
+    pub fn remove_point(point_id: u16, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
+        // Skip the point in the siblings loop
+        let index = point_id as usize;
+        if index >= points.len() { anyhow::bail!("Point {} does not exist!", index); }
+        let sibling_id = points[index].sibling_id;
+        Self::traverse_siblings(sibling_id, points, |point| {
+            if point.sibling_id == point_id { point.sibling_id = sibling_id; }
+        })?;
+
+        // Remove the point from the vector
+        points.remove(index);
+
+        // Shift every point ID back one
+        let new_count = points.len();
+        for i in index..new_count {
+            Self::update_id(i as u16, i as u16 + 1, i as u16, points)?;
+        }
+
+        Ok(())
     }
 }

@@ -30,6 +30,13 @@ impl Zone {
         point_id
     }
 
+    // Decrease the point count
+    pub fn dec_points(&mut self) -> anyhow::Result<()> {
+        if self.point_count == 0 { anyhow::bail!("Can't remove ponits from an empty zone!"); }
+        self.point_count -= 1;
+        Ok(())
+    }
+
     /// Adds an offset to this zone's start position assuming we have enough room for all points
     pub fn add_offset(&mut self, offset: i32) {
         self.point_start = (self.point_start as i32 + offset)

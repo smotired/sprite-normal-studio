@@ -99,6 +99,18 @@ impl StudioApp {
                             } else { Input::NoInput }
                         },
 
+                        // Action controls
+                        Key::Escape => {
+                            if pressed && !repeat {
+                                Input::Cancel
+                            } else { Input::NoInput }
+                        },
+                        Key::Delete => {
+                            if pressed && !repeat {
+                                Input::Delete
+                            } else { Input::NoInput }
+                        },
+
                         // Toggling lighting
                         Key::L => {
                             if pressed && !repeat {

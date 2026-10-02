@@ -186,7 +186,7 @@ impl ObjectBuffers {
 
         // Push the rest of the points and zones backwards
         for i in (point_id as usize + 1)..(self.points.items.len()) {
-            ControlPoint::update_id(i as u16, i as u16 + 1, &mut self.points.items)?;
+            ControlPoint::update_id(i as u16, i as u16, i as u16 + 1, &mut self.points.items)?;
         }
         for i in (zone_id as usize + 1)..(self.zones.items.len()) {
             self.zones.items[i].add_offset(1);
@@ -219,6 +219,61 @@ impl ObjectBuffers {
         for i in 0..count {
             ControlPoint::add_position_delta(start + i, delta, &mut self.points.items)?;
         }
+        Ok(())
+    }
+
+    /// Remove a control point from the points list.
+    /// Returns true if the path was deleted.
+    fn delete_point_with_threshold(&mut self, point_id: u16, threshold: u16) -> anyhow::Result<bool> {
+        let point = self.get_point(point_id).unwrap();
+        let zone_id = point.zone_id();
+        let (_, count) = self.get_zone(zone_id).unwrap().range();
+
+        // If there are two or fewer points, delete the whole zone instead, as that's the minimum requirement for a path.
+        if count.max(1) <= threshold { self.delete_zone(zone_id)?; return Ok(true); }
+        let zone_id = zone_id as usize;
+
+        ControlPoint::remove_point(point_id, &mut self.points.items)?; // updates the list
+        self.zones.items[zone_id].dec_points()?;
+
+        // Pull the rest of the points and zones backwards
+        for i in (zone_id as usize + 1)..(self.zones.items.len()) {
+            self.zones.items[i].add_offset(-1);
+        }
+
+        Ok(false)
+    }
+
+    pub fn delete_point(&mut self, point_id: u16) -> anyhow::Result<()> {
+        self.delete_point_with_threshold(point_id, 2)?;
+        Ok(())
+    }
+
+    pub fn delete_point_in_wip_path(&mut self, point_id: u16) -> anyhow::Result<bool> {
+        self.delete_point_with_threshold(point_id, 1)
+    }
+
+    /// Remove a whole zone and all its points.
+    pub fn delete_zone(&mut self, zone_id: u16) -> anyhow::Result<()> {
+        let (start, count) = self.get_zone(zone_id).unwrap().range();
+        
+        // Remove points backwards to preserve indices
+        for i in 0..count {
+            let point_id = start + count - 1 - i;
+            self.delete_point_with_threshold(point_id, 0)?; // threshold 0 means it won't just call this method again
+        }
+
+        // Remove the zone from the list, and pull the rest of them backward
+        self.zones.items.remove(zone_id as usize);
+        for i in (zone_id as usize)..(self.zones.items.len()) {
+            let zone = &mut self.zones.items[i];
+            // The zone should already have had its range updated
+            let (start, count) = zone.range();
+            for j in 0..count {
+                self.points.items[(start + j) as usize].set_zone_id(i as u16);
+            }
+        }
+
         Ok(())
     }
 
