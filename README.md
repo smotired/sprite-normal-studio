@@ -54,16 +54,16 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Assign pixels to zones in compute shader
 [x] Read zones in map generation pipeline and set some base normal.
 [x] Allow creating zones with bezier paths
-[ ] Modify zone paths, at path and vertex level, including deletion and
-    insertion
+[x] Modify zone paths, at path and vertex level, including deletion and insertion
 [ ] Joining zone paths at certain vertices, which should update both paths
     when manipulated
 [ ] Selecting and manipulating multiple zones/vertices at once
     Shift+select in zone mode should select all connected zones.
     Shift+select in point mode should select all points in the clicked zone.
-    Ctrl+select in point mode hsould select all points in all connected zones.
+    Ctrl+select in point mode should select all points in all connected zones.
 [ ] Selection options panel which allows you to set base normal for a zone,
-    which will be applied after all shapes.
+    which will be applied before all shapes. Shapes will not influence past this
+    base layer
 [ ] Changing vertex mode in tool panel, and changing coupling with siblings.
 [ ] Joining selected vertices as siblings in tool panel (moves to avg. pos).
 [x] Window preview mode for working normal map
@@ -109,9 +109,10 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [ ] Copy/paste/move with sprite-level intervals
 [ ] Timeline panel where sprites can easily be added
 [ ] Display looping lit animation
+[ ] Layer management, including temporarily disabling them.
 [ ] Putting zones (and their control points) on different layers. Pixels will be assigned to the highest layer zone.
     This allows more complicated sprites where one object might pass in front of another.
-[ ] Layer management, including temporarily disabling them.
+[ ] Feathering between connected edges of zones, just between two control points. Difficult
 ```
 
 ### Interlude
@@ -171,3 +172,5 @@ This section will be added to as I add keybinds (and remember).
 
 > `Left Click + Drag` - Drag light or selected zones/control points/shapes.
 > `PageUp/PageDown` - Adjust light height while dragging it.  
+> `Escape` - Cancel zone path or shape creation.  
+> `Delete` - Delete selected zone path/vertex or shape.
