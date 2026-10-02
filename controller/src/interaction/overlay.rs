@@ -1,4 +1,4 @@
-use crate::EditorTool;
+use crate::EditorToolKind;
 
 /// Tracks the state of the overlay
 pub struct OverlayState {
@@ -11,7 +11,7 @@ pub struct OverlayState {
 
 impl OverlayState {
     // Packs flags into a uint
-    pub fn get_flags(&self, tool: EditorTool) -> u32 {
+    pub fn get_flags(&self, tool: EditorToolKind) -> u32 {
         let mut flags: u32 = 0;
 
         // 00: Shade with normal map
@@ -36,14 +36,14 @@ impl OverlayState {
 
             // 05: If the currently selected zone path should have its points drawn
             match tool {
-                EditorTool::Point | EditorTool::Pen => {
+                EditorToolKind::Point | EditorToolKind::Pen => {
                     flags |= 1 << 5;
                 },
                 _ => {}
             }
 
             // 06: If the currently selected zone path should not be closed
-            if let EditorTool::Pen = tool {
+            if let EditorToolKind::Pen = tool {
                 flags |= 1 << 6;
             }
         }

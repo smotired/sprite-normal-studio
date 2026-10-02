@@ -9,8 +9,9 @@ use crate::generator::Generator;
 use crate::assignment::ZoneAssigner;
 
 pub use crate::interaction::input::{Input, Axis};
+use crate::interaction::tools::{EditorTool, EditorToolZone};
 pub use crate::interaction::viewport::ViewportDataUniform;
-pub use crate::interaction::tools::EditorTool;
+pub use crate::interaction::tools::EditorToolKind;
 pub use crate::objects::{ObjectBuffers, BufferStates};
 
 /// The Controller manages our actual working pipeline.
@@ -40,16 +41,7 @@ pub struct Controller {
     cursor_pos: vector::Vec2,
 
     /// The tool we currently have selected
-    tool: EditorTool,
-
-    /// The ID of the zone we currently have selected
-    selected_zone: Option<u16>,
-
-    /// The ID of the point we currently have selected
-    selected_point: Option<u16>,
-
-    /// Whether we are currently dragging a handle of the selected point. If true, we are dragging the right handle.
-    dragging_handle: Option<bool>,
+    tool: Box<dyn EditorTool>,
 }
 
 impl Controller {
@@ -67,10 +59,7 @@ impl Controller {
             overlay_state: Default::default(),
             objects,
             cursor_pos: Default::default(),
-            tool: EditorTool::Zone,
-            selected_zone: None,
-            selected_point: None,
-            dragging_handle: None,
+            tool: EditorToolZone::select((None, None)),
         }
     }
     
@@ -78,9 +67,7 @@ impl Controller {
     pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
     {
         // Reset selection
-        self.selected_zone = None;
-        self.selected_point = None;
-        self.tool = EditorTool::Zone;
+        self.tool = EditorToolZone::select((None, None));
 
         // Regenerate the normal map's output texture
         let object_buffers = self.objects.get_buffers(device);
@@ -99,8 +86,7 @@ impl Controller {
         self.write_object_buffers(queue);
 
         if self.normals_stale {
-            let zone_ignore = if let EditorTool::Pen = self.tool { self.selected_zone } else { None }; // If we are creating a zone, ignore it, otherwise don't ignore.
-            self.assigner.assign_zones(device, queue, objects_buffers.clone(), zone_ignore);
+            self.assigner.assign_zones(device, queue, objects_buffers.clone(), self.tool.zone_ignore());
             self.generator.generate_normals(device, queue, objects_buffers.clone());
             self.normals_stale = false;
         }
