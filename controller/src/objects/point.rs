@@ -62,6 +62,7 @@ pub struct ControlPoint {
 }
 
 impl ControlPoint {
+    pub fn id(&self) -> u16 { self.id }
     /// Get the position of this control point.
     pub fn position(&self) -> Vec2 { self.position }
 
@@ -192,6 +193,7 @@ impl ControlPoint {
     /// Update an ID for a point
     pub fn update_id(start_id: u16, point_id: u16, new_point_id: u16, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
         // When this is called in create_ insert_ or remove_point, the indices are already updated, so this should be correct.
+        // We take in our corrected start ID, and we always update our target before traversing to it.
         Self::traverse_siblings(start_id, points, |point| {
             if point.id == point_id { point.id = new_point_id; }
             if point.sibling_id == point_id { point.sibling_id = new_point_id; }

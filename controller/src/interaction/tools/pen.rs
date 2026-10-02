@@ -70,12 +70,89 @@ impl EditorTool for EditorToolPen {
                 self.selected_point = Some(state.objects.create_point(zone_id, pos)?);
             }
         }
+
         // Otherwise, we should try to create a zone by adding a linear point
         else {
-            // TODO: Add sibling point if there is a point here
-            let zone_id = state.objects.create_zone()?;
-            self.selected_zone = Some(zone_id);
-            self.selected_point = Some(state.objects.create_point(zone_id, pos)?);
+            // If we clicked a point, start a path with a sibling node
+            if let Some((_zone_id, _point_id)) = utils::get_clicked_control_point(&state, None, pos) {
+                // TODO
+            }
+
+            // If we clicked a path, add a vertex to that zone, select it, and move to Point tool
+            else if let Some((zone_id, start_id, corrected, t)) = utils::get_clicked_zone_path(&state, pos) {
+                // Get the points at the start and end of the zone
+                let start = state.objects.get_point_info(start_id).unwrap();
+                let end = {
+                    let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+                    let end_id = if start_id + 1 == start + count { start } else { start_id + 1 };
+                    state.objects.get_point_info(end_id).unwrap()
+                };
+                
+                // Determine mode and handles for the path to not change
+                let (mode, left_handle, right_handle, start_rh, end_lh) = {
+                    // If both are linear, this should be linear.
+                    if let ControlPointMode::Linear = start.mode() && let ControlPointMode::Linear = end.mode() {
+                        (ControlPointMode::Linear, None, None, None, None)
+                    } 
+                    
+                    // Otherwise it should be continuous. You can split a cubic bezier curve at some t into
+                    // two cubic bezier curves such that the overall curve is continuous.
+
+                    // TODO: Rename `vector` crate to `studio_math` and just add a `curves` module with a `de_casteljau` method
+                    // that takes in pos0-pos3 and t and returns all 6 interpolated points. expose a `curve_point` that just returns middle
+                    // and a `curve_split` that returns the 5 middle control points
+                    else {
+                        let p0 = start.position();
+                        let p1 = start.right_handle();
+                        let p2 = end.left_handle();
+                        let p3 = end.position();
+
+                        let p11 = Vec2::lerp(p0, p1, t); // right handle of start
+                        let p21 = Vec2::lerp(p1, p2, t);
+                        let p31 = Vec2::lerp(p2, p3, t); // left handle of end
+
+                        let p12 = Vec2::lerp(p11, p21, t); // left handle of new
+                        let p22 = Vec2::lerp(p21, p31, t); // right handle of new
+
+                        (
+                            ControlPointMode::Continuous,
+                            Some(p12 - corrected),
+                            Some(p22 - corrected),
+                            Some(p11 - p0),
+                            Some(p31 - p3),
+                        )
+                    }
+                };
+
+                // Add the point and update its mode/handles
+                let point_id = state.objects.insert_point(zone_id, start_id + 1, corrected)?; // Insert after start of segment
+                state.objects.update_point(point_id, None, Some(mode), left_handle, right_handle)?;
+
+                // Also update the right and left handles of previous and next points, respectively.
+                // Theoretically they should be on the same lines, so even if continuous they shouldn't affect other parts of the curve
+                if let Some(handle) = start_rh {
+                    state.objects.update_point(start_id, None, None, None, Some(handle))?;
+                }
+                if let Some(handle) = end_lh {
+                    let end_id = {
+                        let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+                        if point_id + 1 == start + count { start } else { point_id + 1 }
+                    };
+                    state.objects.update_point(end_id, None, None, Some(handle), None)?;
+                }
+
+                // Select and return
+                self.selected_zone = Some(zone_id);
+                self.selected_point = Some(point_id);
+                return Ok(EditorToolActionResult::new(EditorToolKind::Point, true))
+            }
+
+            // Otherwise start creating a new path.
+            else {
+                let zone_id = state.objects.create_zone()?;
+                self.selected_zone = Some(zone_id);
+                self.selected_point = Some(state.objects.create_point(zone_id, pos)?);
+            }
         }
         self.ok()
     }
@@ -115,13 +192,85 @@ impl EditorTool for EditorToolPen {
         }
         // Otherwise, we should try to create a zone by adding a continuous point
         else {
-            // TODO: Add sibling point if there is a point here
-            let zone_id = state.objects.create_zone()?;
-            self.selected_zone = Some(zone_id);
-            let point_id = state.objects.create_point(zone_id, pos)?;
-            self.selected_point = Some(point_id);
-            state.objects.update_point(point_id, None, Some(ControlPointMode::Continuous), None, None)?;
-            self.handle = Some(true);
+            // If we clicked a point, start a path with a continuous sibling node and start dragging it
+            if let Some((_zone_id, _point_id)) = utils::get_clicked_control_point(&state, None, pos) {
+                // TODO
+            }
+
+            // If we clicked a path, add a vertex to that zone, select it, and move to Point tool
+            else if let Some((zone_id, start_id, corrected, t)) = utils::get_clicked_zone_path(&state, pos) {
+                // Get the points at the start and end of the zone
+                let start = state.objects.get_point_info(start_id).unwrap();
+                let end = {
+                    let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+                    let end_id = if start_id + 1 == start + count { start } else { start_id + 1 };
+                    state.objects.get_point_info(end_id).unwrap()
+                };
+                
+                // Determine mode and handles for the path to not change
+                let (mode, lh, rh, start_rh, end_lh) = {
+                    // If both are linear, this should be linear.
+                    if let ControlPointMode::Linear = start.mode() && let ControlPointMode::Linear = end.mode() {
+                        (ControlPointMode::Linear, None, None, None, None)
+                    } 
+                    
+                    // Otherwise it should be continuous. You can split a cubic bezier curve at some t into
+                    // two cubic bezier curves such that the overall curve is continuous.
+                    else {
+                        let p0 = start.position();
+                        let p1 = start.right_handle();
+                        let p2 = end.left_handle();
+                        let p3 = end.position();
+
+                        let p11 = Vec2::lerp(p0, p1, t); // right handle of start
+                        let p21 = Vec2::lerp(p1, p2, t);
+                        let p31 = Vec2::lerp(p2, p3, t); // left handle of end
+
+                        let p12 = Vec2::lerp(p11, p21, t); // left handle of new
+                        let p22 = Vec2::lerp(p21, p31, t); // right handle of new
+
+                        (
+                            ControlPointMode::Continuous,
+                            Some(p12 - corrected),
+                            Some(p22 - corrected),
+                            Some(p11 - p0),
+                            Some(p31 - p3),
+                        )
+                    }
+                };
+
+                // Add the point and update its mode/handles
+                let point_id = state.objects.insert_point(zone_id, start_id + 1, corrected)?; // Insert after start of segment
+                state.objects.update_point(point_id, None, Some(mode), lh, rh)?;
+
+                // Also update the right and left handles of previous and next points, respectively.
+                // Theoretically they should be on the same lines, so even if continuous they shouldn't affect other parts of the curve
+                if let Some(handle) = start_rh {
+                    state.objects.update_point(start_id, None, None, None, Some(handle))?;
+                }
+                if let Some(handle) = end_lh {
+                    let end_id = {
+                        let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+                        if point_id + 1 == start + count { start } else { point_id + 1 }
+                    };
+                    state.objects.update_point(end_id, None, None, Some(handle), None)?;
+                }
+
+                // Select and return
+                self.selected_zone = Some(zone_id);
+                self.selected_point = Some(point_id);
+                return Ok(EditorToolActionResult::new(EditorToolKind::Point, true))
+            }
+
+            // Otherwise start creating a new path from a continuous node
+            else {
+                let zone_id = state.objects.create_zone()?;
+                self.selected_zone = Some(zone_id);
+                let point_id = state.objects.create_point(zone_id, pos)?;
+                self.selected_point = Some(point_id);
+                state.objects.update_point(point_id, None, Some(ControlPointMode::Continuous), None, None)?;
+                self.handle = Some(true);
+            }
         }
         self.ok()
     }
