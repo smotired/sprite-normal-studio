@@ -30,9 +30,12 @@ impl Controller {
                 self.dragging_handle = None;
             }
             EditorTool::Pen => {
-                if let Some(_selection) = self.selected_zone {
-                    // Delete the shape we are currently creating
+                if let Some(zone_id) = self.selected_zone {
+                    let _ = self.objects.delete_zone(zone_id);
                 }
+                self.selected_zone = None;
+                self.selected_point = None;
+                self.dragging_handle = None;
             },
             _ => { },
         }
