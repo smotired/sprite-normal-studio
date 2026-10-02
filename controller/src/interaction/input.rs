@@ -41,6 +41,12 @@ pub enum Input {
     /// Altitude is changed (i.e. page up/down is pressed). True if going up.
     Altitude(bool),
 
+    /// Cancel the current action (esc)
+    Cancel,
+
+    /// Delete key is pressed
+    Delete,
+
     /// Overlay is toggled on or off. Maybe later I will add an enum for OverlayComponentKind which is passed here.
     OverlayToggled,
 
@@ -59,7 +65,7 @@ impl Controller {
     fn get_clicked_control_point(&self, zone_id: Option<u16>, pos: Vec2) -> Option<(u16, u16)> {
         if let Some((zone_id, point_id)) = self.objects.get_closest_point(zone_id, pos) {
             let distance = self.objects.get_point(point_id).unwrap().absolute_axis_distance(pos);
-            if distance <= 4.0 * self.camera.inv_scale() { // size of control point boxes in the overlay, plus 1 pixel
+            if distance <= 5.0 * self.camera.inv_scale() { // size of control point boxes in the overlay, plus 2 pixels
                 return Some((zone_id, point_id));
             }
         }
@@ -74,12 +80,12 @@ impl Controller {
             if let ControlPointMode::Linear = point.mode() { return None; }
 
             // Check the left handle
-            if point.left_handle().distance(pos) <= 4.0 * self.camera.inv_scale() {
+            if point.left_handle().distance(pos) <= 5.0 * self.camera.inv_scale() {
                 return Some(false); // left handle clicked
             }
 
             // Check the right handle
-            if point.right_handle().distance(pos) <= 4.0 * self.camera.inv_scale() {
+            if point.right_handle().distance(pos) <= 5.0 * self.camera.inv_scale() {
                 return Some(true); // right handle clicked
             }
         }
@@ -143,8 +149,8 @@ impl Controller {
                                 if let Some((other_zone_id, point_id)) = self.get_clicked_control_point(Some(zone_id), pos) {
                                     // If it's the same zone, only do anything if we clicked the first point
                                     if other_zone_id == zone_id {
-                                        let (first_point, _) = self.objects.get_zone(zone_id).unwrap().range();
-                                        if point_id == first_point {
+                                        let (first_point, count) = self.objects.get_zone(zone_id).unwrap().range();
+                                        if point_id == first_point && count > 1 {
                                             let point = self.objects.get_point(point_id).unwrap();
                                             // If the point is continuous, update it to be broken and make its left handle linear
                                             if let ControlPointMode::Continuous = point.mode() {
@@ -232,10 +238,10 @@ impl Controller {
                                 if let Some(zone_id) = self.selected_zone {
                                     // If we clicked a point, check if it's the first point of the zone
                                     if let Some((other_zone_id, point_id)) = self.get_clicked_control_point(Some(zone_id), pos) {
-                                        // If it's the same zone, only do anything if we clicked the first point
+                                        // If it's the same zone, only do anything if we clicked the first point and have more than one point
                                         if other_zone_id == zone_id {
-                                            let (first_point, _) = self.objects.get_zone(zone_id).unwrap().range();
-                                            if point_id == first_point {
+                                            let (first_point, count) = self.objects.get_zone(zone_id).unwrap().range();
+                                            if point_id == first_point && count > 1 {
                                                 let point = self.objects.get_point(point_id).unwrap();
                                                 // If the point is linear, update it to be broken and select it. We will start dragging its left handle.
                                                 if let ControlPointMode::Linear = point.mode() {
@@ -359,10 +365,67 @@ impl Controller {
                 }
             },
 
+            Input::Cancel => {
+                // In pen tool, if we are creating a zone, delete the whole zone.
+                match self.tool {
+                    EditorTool::Pen => {
+                        if let Some(zone_id) = self.selected_zone {
+                            if let Ok(()) = self.objects.delete_zone(zone_id) {
+                                self.selected_zone = None;
+                                self.selected_point = None;
+                                self.dragging_handle = None;
+                            }
+                        }
+                    }
+
+                    _ => { },
+                }
+            },
+
+            Input::Delete => {
+                match self.tool {
+                    EditorTool::Zone => {
+                        if let Some(zone_id) = self.selected_zone {
+                            if let Ok(()) = self.objects.delete_zone(zone_id) {
+                                self.selected_zone = None;
+                                self.selected_point = None;
+                                self.normals_stale = true;
+                            }
+                        }
+                    },
+                    EditorTool::Point => {
+                        if let Some(point_id) = self.selected_point {
+                            if let Ok(()) = self.objects.delete_point(point_id) {
+                                self.selected_zone = None;
+                                self.selected_point = None;
+                                self.dragging_handle = None;
+                                self.normals_stale = true;
+                            }
+                        }
+                    },
+                    // Delete the previous point in the path
+                    EditorTool::Pen => {
+                        if let Some(_) = self.selected_zone {
+                            if let Ok(zone_deleted) = self.objects.delete_point_in_wip_path(self.selected_point.unwrap()) {
+                                self.selected_point = Some(self.selected_point.unwrap() - 1); // should be the previous point
+                                self.dragging_handle = None;
+                                self.normals_stale = true;
+                                if zone_deleted {
+                                    self.selected_zone = None;
+                                    self.selected_point = None;
+                                }
+                            } 
+                        }
+                    },
+                }
+            },
+
             Input::Altitude(up) => {
                 if self.overlay_state.dragging_light {
                     self.light.adjust_height(if up { 100.0 } else { -100.0 });
                 }
+
+                // todo: maybe move a zone between layers?
             },
 
             Input::OverlayToggled => {
