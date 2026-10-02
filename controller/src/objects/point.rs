@@ -1,4 +1,4 @@
-use vector::Vec2;
+use studio_math::Vec2;
 
 /// Defines the mode of a control point. Kind of works like bitflags,
 /// where first bit = "moving 1 control point moves both"

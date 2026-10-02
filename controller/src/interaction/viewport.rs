@@ -1,4 +1,4 @@
-use vector::Vec2;
+use studio_math::Vec2;
 use wgpu::{Device, util::DeviceExt};
 
 use crate::{interaction::{camera::Camera, light::Light, overlay::OverlayState, tools::EditorTool}};

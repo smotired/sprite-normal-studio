@@ -8,7 +8,7 @@ pub use pen::EditorToolPen;
 pub use point::EditorToolPoint;
 use result::{ToolResult, EditorToolActionResult};
 
-use vector::Vec2;
+use studio_math::Vec2;
 use crate::{Controller, ObjectBuffers};
 
 /// Options for which tool we are using in the editor.

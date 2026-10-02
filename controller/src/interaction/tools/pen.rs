@@ -1,4 +1,5 @@
-use vector::Vec2;
+use studio_math::Vec2;
+use studio_math::bezier::bezier_split_at;
 
 use crate::objects::ControlPointMode;
 
@@ -29,7 +30,7 @@ impl EditorTool for EditorToolPen {
     fn kind(&self) -> EditorToolKind { EditorToolKind::Pen }
     fn selection(&self) -> (Option<u16>, Option<u16>) { (self.selected_zone, self.selected_point) }
 
-    fn handle_click(&mut self, mut state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_click(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // If we have a zone selected, we are already creating one, so add a linear node
         if let Some(zone_id) = self.selected_zone {
             // If we clicked a point, see if we should end the path
@@ -102,24 +103,20 @@ impl EditorTool for EditorToolPen {
                     // that takes in pos0-pos3 and t and returns all 6 interpolated points. expose a `curve_point` that just returns middle
                     // and a `curve_split` that returns the 5 middle control points
                     else {
-                        let p0 = start.position();
-                        let p1 = start.right_handle();
-                        let p2 = end.left_handle();
-                        let p3 = end.position();
-
-                        let p11 = Vec2::lerp(p0, p1, t); // right handle of start
-                        let p21 = Vec2::lerp(p1, p2, t);
-                        let p31 = Vec2::lerp(p2, p3, t); // left handle of end
-
-                        let p12 = Vec2::lerp(p11, p21, t); // left handle of new
-                        let p22 = Vec2::lerp(p21, p31, t); // right handle of new
+                        let (start_r, new_l, _, new_r, end_l) = bezier_split_at(
+                            start.position(),
+                            start.right_handle(),
+                            end.left_handle(),
+                            end.position(),
+                            t
+                        );
 
                         (
                             ControlPointMode::Continuous,
-                            Some(p12 - corrected),
-                            Some(p22 - corrected),
-                            Some(p11 - p0),
-                            Some(p31 - p3),
+                            Some(new_l - corrected),
+                            Some(new_r - corrected),
+                            Some(start_r - start.position()),
+                            Some(end_l - end.position()),
                         )
                     }
                 };
@@ -157,7 +154,7 @@ impl EditorTool for EditorToolPen {
         self.ok()
     }
 
-    fn handle_drag_start(&mut self, mut state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_drag_start(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // If we have a zone selected, we are already creating one, so add a continuous point
         if let Some(zone_id) = self.selected_zone {
             // If we clicked a point, check if it's the first point of the zone
@@ -217,24 +214,20 @@ impl EditorTool for EditorToolPen {
                     // Otherwise it should be continuous. You can split a cubic bezier curve at some t into
                     // two cubic bezier curves such that the overall curve is continuous.
                     else {
-                        let p0 = start.position();
-                        let p1 = start.right_handle();
-                        let p2 = end.left_handle();
-                        let p3 = end.position();
-
-                        let p11 = Vec2::lerp(p0, p1, t); // right handle of start
-                        let p21 = Vec2::lerp(p1, p2, t);
-                        let p31 = Vec2::lerp(p2, p3, t); // left handle of end
-
-                        let p12 = Vec2::lerp(p11, p21, t); // left handle of new
-                        let p22 = Vec2::lerp(p21, p31, t); // right handle of new
+                        let (start_r, new_l, _, new_r, end_l) = bezier_split_at(
+                            start.position(),
+                            start.right_handle(),
+                            end.left_handle(),
+                            end.position(),
+                            t
+                        );
 
                         (
                             ControlPointMode::Continuous,
-                            Some(p12 - corrected),
-                            Some(p22 - corrected),
-                            Some(p11 - p0),
-                            Some(p31 - p3),
+                            Some(new_l - corrected),
+                            Some(new_r - corrected),
+                            Some(start_r - start.position()),
+                            Some(end_l - end.position()),
                         )
                     }
                 };
@@ -275,7 +268,7 @@ impl EditorTool for EditorToolPen {
         self.ok()
     }
 
-    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // Assume we are dragging the handle of the currently selected point
         if let Some(point_id) = self.selected_point {
             let point_pos = state.objects.get_point_info(point_id).unwrap().position();

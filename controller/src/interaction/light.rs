@@ -1,4 +1,4 @@
-use vector::Vec2;
+use studio_math::Vec2;
 
 #[derive(Copy, Clone)]
 pub struct Light {

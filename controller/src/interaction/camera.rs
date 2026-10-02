@@ -1,4 +1,4 @@
-use vector::Vec2;
+use studio_math::Vec2;
 
 /// Defines the current state of the camera.
 #[derive(Copy, Clone, Default)]

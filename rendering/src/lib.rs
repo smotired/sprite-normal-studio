@@ -1,4 +1,4 @@
-use vector::Vec2;
+use studio_math::Vec2;
 use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture, TextureView};
 use controller::{BufferStates, Controller, ViewportDataUniform};
 

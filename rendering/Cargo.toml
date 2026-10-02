@@ -7,6 +7,6 @@ authors = ["Sam Hill <smotired@gmail.com>"]
 description = "Library crate for rendering the sprite, normal map, and UI tools"
 
 [dependencies]
-vector = { workspace = true }
+studio_math = { workspace = true }
 controller = { workspace = true }
 wgpu = { workspace = true }

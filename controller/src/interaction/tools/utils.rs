@@ -1,4 +1,4 @@
-use vector::Vec2;
+use studio_math::Vec2;
 use crate::interaction::tools::ControllerStateInput;
 use crate::objects::ControlPointMode;
 
