@@ -3,7 +3,7 @@ mod point;
 
 use std::{cell::RefCell, rc::Rc};
 
-use vector::{Vec2, Vec3};
+use studio_math::{Vec2, Vec3};
 use wgpu::{Buffer, Device, Queue};
 
 use zone::Zone;
@@ -423,7 +423,7 @@ fn correct_to_line_segment(pos: Vec2, pos0: Vec2, pos1: Vec2) -> (f32, Vec2, f32
 
 /// Return scalar distance to a bezier curve based on shortest distance to a line segment.
 fn correct_to_bezier(pos: Vec2, pos0: Vec2, pos1: Vec2, pos2: Vec2, pos3: Vec2, scale: f32) -> (f32, Vec2, f32) {
-// Split the curve into individual lines with de Casteljau's method.
+    // Split the curve into individual lines with de Casteljau's method.
     // Determine segment count from curvature. For a cubic, deviation is at most M / 8n^2.
     // Chord error = 0.25px means largest distance from polyline to curve is at most 0.25px.
     // M is the largest magnitude of d^2B(t)/dt^2 where B is the curve. Acceleration/tightness.
@@ -447,15 +447,7 @@ fn correct_to_bezier(pos: Vec2, pos0: Vec2, pos1: Vec2, pos2: Vec2, pos3: Vec2, 
     let segment_length = 1.0 / segment_count as f32;
     for i in 1..=segment_count {
         let t = i as f32 * segment_length;
-
-        let a0 = Vec2::lerp(pos0, pos1, t);
-        let a1 = Vec2::lerp(pos1, pos2, t);
-        let a2 = Vec2::lerp(pos2, pos3, t);
-
-        let b0 = Vec2::lerp(a0, a1, t);
-        let b1 = Vec2::lerp(a1, a2, t);
-
-        let point = Vec2::lerp(b0, b1, t);
+        let point = studio_math::bezier::bezier_point_at(pos0, pos1, pos2, pos3, t);
 
         let (distance, corrected_to_line, corrected_t) = correct_to_line_segment(pos, last_point, point);
         if distance < min_dist {

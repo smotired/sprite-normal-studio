@@ -28,7 +28,7 @@ impl EditorTool for EditorToolPoint {
     fn kind(&self) -> EditorToolKind { EditorToolKind::Point }
     fn selection(&self) -> (Option<u16>, Option<u16>) { (self.selected_zone, self.selected_point) }
 
-    fn handle_click(&mut self, state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // Reselect unless we clicked the current control point's handle
         if self.selected_point.is_none() || get_clicked_handle(self.selected_point.unwrap(), &state, pos).is_none()
         {
@@ -42,7 +42,7 @@ impl EditorTool for EditorToolPoint {
         self.ok()
     }
 
-    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // If we select a handle of the control point start dragging it
         if let Some(point_id) = self.selected_point && let Some(right) = get_clicked_handle(point_id, &state, pos) {
             self.handle = Some(right);
@@ -57,7 +57,7 @@ impl EditorTool for EditorToolPoint {
         self.ok()
     }
 
-    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // Drag selected point
         if let Some(point_id) = self.selected_point {
             // If we are dragging the handle, adjust that

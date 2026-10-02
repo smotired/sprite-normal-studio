@@ -1,6 +1,6 @@
 use controller::{Axis, Input};
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
-use vector::Vec2;
+use studio_math::Vec2;
 
 use crate::app::StudioApp;
 

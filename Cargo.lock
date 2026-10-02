@@ -859,7 +859,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
- "vector",
+ "studio_math",
  "wgpu",
 ]
 
@@ -3574,7 +3574,7 @@ name = "rendering"
 version = "0.1.0"
 dependencies = [
  "controller",
- "vector",
+ "studio_math",
  "wgpu",
 ]
 
@@ -4030,7 +4030,17 @@ dependencies = [
  "image",
  "rendering",
  "rfd",
- "vector",
+ "studio_math",
+]
+
+[[package]]
+name = "studio_math"
+version = "0.2.0"
+dependencies = [
+ "bytemuck",
+ "egui",
+ "rand 0.10.3",
+ "wgpu",
 ]
 
 [[package]]
@@ -4419,16 +4429,6 @@ dependencies = [
  "aligned-vec",
  "num-traits",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "vector"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "egui",
- "rand 0.10.3",
- "wgpu",
 ]
 
 [[package]]

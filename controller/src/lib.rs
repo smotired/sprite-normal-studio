@@ -38,7 +38,7 @@ pub struct Controller {
     objects: objects::ObjectBuffers,
 
     /// The current cursor position in world space.
-    cursor_pos: vector::Vec2,
+    cursor_pos: studio_math::Vec2,
 
     /// The tool we currently have selected
     tool: Box<dyn EditorTool>,

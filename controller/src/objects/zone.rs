@@ -1,4 +1,4 @@
-use vector::Vec3;
+use studio_math::Vec3;
 
 /// A Zone is made up of a list of control points and a list of shapes.
 #[repr(C)]

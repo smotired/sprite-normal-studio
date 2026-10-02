@@ -170,7 +170,7 @@ impl eframe::App for StudioApp {
                 .filter(|pos| viewport_rect.contains(*pos))
                 .map(|pos| {
                     let local = (pos - viewport_rect.min) * ppp; // egui::Vec2, points -> local origin
-                    self.controller.screen_to_world(vector::Vec2::from(local), viewport_size)
+                    self.controller.screen_to_world(studio_math::Vec2::from(local), viewport_size)
                 })
             {
                 self.controller.set_cursor_pos(mouse_world);

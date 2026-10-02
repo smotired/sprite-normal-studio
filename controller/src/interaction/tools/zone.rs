@@ -23,7 +23,7 @@ impl EditorTool for EditorToolZone {
     fn kind(&self) -> EditorToolKind { EditorToolKind::Zone }
     fn selection(&self) -> (Option<u16>, Option<u16>) { (self.selected_zone, self.selected_point) }
 
-    fn handle_click(&mut self, state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // Select the zone if a control point was clicked
         (self.selected_zone, self.selected_point) = 
             if let Some((zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos) {
@@ -34,7 +34,7 @@ impl EditorTool for EditorToolZone {
         self.ok()
     }
 
-    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // Select the zone if a control point was clicked
         (self.selected_zone, self.selected_point) = 
             if let Some((zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos) {
@@ -45,7 +45,7 @@ impl EditorTool for EditorToolZone {
         self.ok()
     }
 
-    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: vector::Vec2) -> ToolResult {
+    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // Drag selected zone
         if let Some(zone_id) = self.selected_zone {
             // Drag from selected point or first point
