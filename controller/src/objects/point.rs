@@ -153,6 +153,16 @@ impl ControlPoint {
         self.left_handle = Vec2::ZERO;
     }
 
+    /// Force a point into synced mode to another ID. Should only be used when inserting between synced points.
+    pub fn force_synced(&mut self, point_id: u16) {
+        self.mode = u8::from(ControlPointMode::Broken); // all synced points must be broken
+        self.sync_mode = u8::from(ControlPointSyncMode::Synced);
+        self.sync_id = point_id;
+    }
+
+    /// Force set the sibling id. Makes no guarantees about the integrity of the sibling chain after this, so be careful.
+    pub fn set_sibling_id(&mut self, sibling_id: u16) { self.sibling_id = sibling_id; }
+
     /// Get world space position of the left handle unless linear.
     pub fn left_handle(&self) -> Vec2 { if let ControlPointMode::Linear = self.mode() { self.position } else { self.left_handle + self.position } }
 
@@ -275,14 +285,47 @@ impl ControlPoint {
     /// Set a zone ID. Should be called when zone ordering changes.
     pub fn set_zone_id(&mut self, zone_id: u16) { self.zone_id = zone_id; }
 
-    /// Run a function across all siblings until we make it back to the start sibling
-    fn traverse_siblings<F>(start_id: u16, points: &mut Vec<ControlPoint>, mut action: F) -> anyhow::Result<()>
+    /// Run a function across all siblings until we make it back to the start sibling, which does not change the control points
+    fn traverse_siblings<F>(start_id: u16, points: &Vec<ControlPoint>, mut action: F) -> anyhow::Result<()>
+        where F: FnMut(&Self, u16)
+    {
+        // Traverse through the list
+        let mut id = start_id;
+        let mut visited = vec![];
+        let point_count = points.len();
+        while !visited.contains(&id) {
+            visited.push(id);
+
+            if (id as usize) >= point_count {
+                anyhow::bail!("Point {} does not exist!", id);
+            }
+
+            // Run the action on the current node
+            let node = &points[id as usize];
+            action(node, id);
+
+            // Stop traversal if we reach the start point
+            if node.sibling_id == start_id {
+                return Ok(());
+            }
+
+            // Continue traversal
+            id = node.sibling_id;
+        }
+        anyhow::bail!("Infinite loop in traverse_siblings around {}.", id);
+    }
+
+    /// Run a function across all siblings until we make it back to the start sibling, which may change the control points
+    fn traverse_siblings_mut<F>(start_id: u16, points: &mut Vec<ControlPoint>, mut action: F) -> anyhow::Result<()>
         where F: FnMut(&mut Self, u16)
     {
         // Traverse through the list
         let mut id = start_id;
+        let mut visited = vec![];
         let point_count = points.len();
-        loop {
+        while !visited.contains(&id) {
+            visited.push(id);
+
             if (id as usize) >= point_count {
                 anyhow::bail!("Point {} does not exist!", id);
             }
@@ -293,18 +336,29 @@ impl ControlPoint {
 
             // Stop traversal if we reach the start point
             if node.sibling_id == start_id {
-                break;
+                return Ok(());
             }
 
             // Continue traversal
             id = node.sibling_id;
         }
+        anyhow::bail!("Infinite loop in traverse_siblings around {}.", id);
+    }
 
-        Ok(())
+    /// Get a list of IDs of points that are siblings with a given point.
+    /// Doesn't include the sibling itself
+    pub fn get_siblings(point_id: u16, points: &Vec<ControlPoint>) -> Vec<u16> {
+        let mut siblings = vec![];
+        Self::traverse_siblings(point_id, points, |_, sibling_id| {
+            if sibling_id != point_id {
+                siblings.push(sibling_id);
+            }
+        }).unwrap();
+        siblings
     }
 
     /// Get a list of IDs of points that watch a given point
-    fn get_watchers(target_id: u16, points: &mut Vec<ControlPoint>) -> Vec<(u16, ControlPointSyncMode)> {
+    fn get_watchers(target_id: u16, points: &Vec<ControlPoint>) -> Vec<(u16, ControlPointSyncMode)> {
         let mut watchers = vec![];
         Self::traverse_siblings(target_id, points, |point, point_id| {
             if point_id != target_id && point.sync_id == target_id {
@@ -316,12 +370,12 @@ impl ControlPoint {
 
     /// Set the position of a control point. Updates its siblings as well.
     pub fn set_position(point_id: u16, position: Vec2, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
-        Self::traverse_siblings(point_id, points, |point, _| { point.position = position; })
+        Self::traverse_siblings_mut(point_id, points, |point, _| { point.position = position; })
     }
 
     /// Add a delta to the position of a control point. Updates its siblings as well.
     pub fn add_position_delta(point_id: u16, delta: Vec2, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
-        Self::traverse_siblings(point_id, points, |point, _| { point.position += delta; })
+        Self::traverse_siblings_mut(point_id, points, |point, _| { point.position += delta; })
     }
 
     /// Set the handle mode of a control point. Updates siblings only if changing to linear
@@ -469,7 +523,7 @@ impl ControlPoint {
         let index = point_id as usize;
         if index >= points.len() { anyhow::bail!("Point {} does not exist!", index); }
         let sibling_id = points[index].sibling_id;
-        Self::traverse_siblings(sibling_id, points, |point, _| {
+        Self::traverse_siblings_mut(sibling_id, points, |point, _| {
             if point.sibling_id == point_id { point.sibling_id = sibling_id; }
         })?;
 
@@ -509,7 +563,7 @@ impl ControlPoint {
     }
 
     /// Find the sibling to a point that's in a zone.
-    pub fn find_in_zone(sibling_id: u16, zone_id: u16, points: &mut Vec<ControlPoint>) -> anyhow::Result<Option<u16>> {
+    pub fn find_in_zone(sibling_id: u16, zone_id: u16, points: &Vec<ControlPoint>) -> anyhow::Result<Option<u16>> {
         let mut point_id = None;
         Self::traverse_siblings(sibling_id, points, |point, id| {
             if point.zone_id() == zone_id {
@@ -517,5 +571,33 @@ impl ControlPoint {
             }
         })?;
         Ok(point_id)
+    }
+
+    /// Get the ID of the point we are eventually syncing to in a direction.
+    pub fn get_sync_id(point_id: u16, right: bool, points: &Vec<ControlPoint>) -> anyhow::Result<u16> {
+        // Helper to return true if a control point's mode syncs in a given direction
+        let mode_syncs_in = |mode: ControlPointSyncMode, right: bool| {
+            if right { mode.syncing_right() }
+            else     { mode.syncing_left() }
+        };
+
+        let mut id = point_id;
+        let mut visited = vec![];
+        let point_count = points.len();
+        while !visited.contains(&id) {
+            visited.push(id);
+
+            if (id as usize) >= point_count { anyhow::bail!("Point {} does not exist!", id); }
+            let point = points[id as usize];
+
+            // If the point doesn't sync in this direction, or it references itself, this is our target point
+            if !mode_syncs_in(point.sync_mode(), right) || point.sync_id == id {
+                return Ok(id);
+            }
+
+            // Otherwise traverse to sync target
+            id = point.sync_id;
+        }
+        anyhow::bail!("Infinite loop in get_sync_id around {}.", id);
     }
 }

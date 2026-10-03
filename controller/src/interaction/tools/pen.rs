@@ -1,5 +1,4 @@
 use studio_math::Vec2;
-use studio_math::bezier::bezier_split_at;
 
 use crate::objects::ControlPointMode;
 
@@ -224,58 +223,9 @@ impl EditorToolPen {
             }
 
             // If we clicked a path, add a vertex to that zone, select it, and move to Point tool
-            else if let Some((zone_id, start_id, corrected, t)) = utils::get_clicked_zone_path(&state, pos) {
-                // Get the points at the start and end of the zone
-                let start = state.objects.get_point_info(start_id).unwrap();
-                let end = {
-                    let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
-                    let end_id = if start_id + 1 == start + count { start } else { start_id + 1 };
-                    state.objects.get_point_info(end_id).unwrap()
-                };
-                
-                // Determine mode and handles for the path to not change
-                let (mode, left_handle, right_handle, start_rh, end_lh) = {
-                    // If both are linear, this should be linear.
-                    if let ControlPointMode::Linear = start.mode() && let ControlPointMode::Linear = end.mode() {
-                        (ControlPointMode::Linear, None, None, None, None)
-                    } 
-                    
-                    // Otherwise it should be continuous.
-                    else {
-                        let (start_r, new_l, _, new_r, end_l) = bezier_split_at(
-                            start.position(),
-                            start.right_handle(),
-                            end.left_handle(),
-                            end.position(),
-                            t
-                        );
-
-                        (
-                            ControlPointMode::Continuous,
-                            Some(new_l - corrected),
-                            Some(new_r - corrected),
-                            Some(start_r - start.position()),
-                            Some(end_l - end.position()),
-                        )
-                    }
-                };
-
-                // Add the point and update its mode/handles
-                let point_id = state.objects.insert_point(zone_id, start_id + 1, corrected)?; // Insert after start of segment
-                state.objects.update_point(point_id, None, Some(mode), left_handle, right_handle)?;
-
-                // Also update the right and left handles of previous and next points, respectively.
-                // Theoretically they should be on the same lines, so even if continuous they shouldn't affect other parts of the curve
-                if let Some(handle) = start_rh {
-                    state.objects.update_point(start_id, None, None, None, Some(handle))?;
-                }
-                if let Some(handle) = end_lh {
-                    let end_id = {
-                        let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
-                        if point_id + 1 == start + count { start } else { point_id + 1 }
-                    };
-                    state.objects.update_point(end_id, None, None, Some(handle), None)?;
-                }
+            else if let Some((zone_id, start_id, _, t)) = utils::get_clicked_zone_path(&state, pos) {
+                // Add the point, which should also fix its handles
+                let point_id = state.objects.insert_point(zone_id, start_id, t)?[0];
 
                 // Select and return
                 self.selected_zone = Some(zone_id);
