@@ -287,10 +287,9 @@ impl ObjectBuffers {
         Ok(())
     }
 
-    pub fn update_zone_position(&mut self, point_id: u16, position: Vec2) -> anyhow::Result<()> {
-        let point = self.get_point_info(point_id).unwrap();
-        let delta = position - point.position();
-        let (start, count) = self.get_zone_info(point.zone_id()).unwrap().range();
+    pub fn update_zone_position(&mut self, zone_id: u16, first_point_position: Vec2) -> anyhow::Result<()> {
+        let (start, count) = self.get_zone_info(zone_id).unwrap().range();
+        let delta = first_point_position - self.get_point_info(start).unwrap().position();
         for i in 0..count {
             ControlPoint::add_position_delta(start + i, delta, &mut self.points.borrow_mut().items)?;
         }
