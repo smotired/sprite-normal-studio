@@ -246,15 +246,19 @@ impl ObjectBuffers {
             anyhow::bail!("Invalid point id {}: must be within range {}..={}", point_id, start, start + count);
         }
         
-        // Add the point
+        // Create the point
         let point = ControlPoint::new_solo(point_id, zone_id, position);
         let points = &mut self.points.borrow_mut().items;
+        
+        // Push point IDs ahead, then add the point
+        let points_after = point_count - point_id;
+        for i in 0..points_after {
+            let index = point_count - i;
+            ControlPoint::update_id(index - 1, index, points);
+        }
         points.insert(point_id as usize, point);
 
-        // Push the rest of the points and zones backwards
-        for i in (point_id as usize + 1)..(point_count as usize + 1) {
-            ControlPoint::update_id(i as u16, i as u16 - 1, i as u16, points)?;
-        }
+        // Push zone ranges ahead
         let zones = &mut self.zones.borrow_mut().items;
         zones[zone_id as usize].add_point();
         for i in (zone_id as usize + 1)..(zone_count as usize) {
@@ -300,7 +304,7 @@ impl ObjectBuffers {
         // Validate
         let zone_count = self.zone_count();
         let point_count = self.point_count();
-        if point_count >= MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); } // We almost definitely need more room as well
+        if point_count >= MAX_OBJECT_ID - 1 { anyhow::bail!("No room to create another control point!"); } // Need 65535 to be free for path flipping. We almost definitely need more room as well
         if sibling_id >= point_count { anyhow::bail!("Sibling point {} does not exist!", sibling_id); }
         if source_point_id >= point_count { anyhow::bail!("Source point {} does not exist!", source_point_id); }
         if creating_zone_id >= zone_count { anyhow::bail!("Current zone {} does not exist!", creating_zone_id); }
@@ -323,7 +327,7 @@ impl ObjectBuffers {
         if source_point_id == sibling_id {
             let (first_id, _) = self.get_zone_info(creating_zone_id).unwrap().range();
             let first_point = &mut self.points.borrow_mut().items[first_id as usize];
-            first_point.force_free();
+            first_point.force_free(first_id);
 
             return Ok(vec![]);
         }
@@ -422,10 +426,10 @@ impl ObjectBuffers {
                 points[last_id as usize] = points[first_id as usize];
                 points[first_id as usize] = last_point;
 
-                // Swap the sibling IDs. The first and last points will never be siblings of one another, so this should(TM) cause no issues.
-                // But that TM is doing so much fucking heavy lifting.
-                ControlPoint::update_id(first_id, last_id, first_id, points)?;
-                ControlPoint::update_id(last_id, first_id, last_id, points)?;
+                // Swap the sibling IDs. Use id 65535 as a swap space which we checked earlier.
+                ControlPoint::update_id(last_id, 65535, points);
+                ControlPoint::update_id(first_id, last_id, points);
+                ControlPoint::update_id(65535, first_id, points);
             }
 
             // Flip middle point if it didn't get flipped
