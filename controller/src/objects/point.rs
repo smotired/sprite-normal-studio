@@ -142,7 +142,13 @@ impl ControlPoint {
 
     pub fn sync_id(&self) -> u16 { self.sync_id }
     pub fn sync_mode(&self) -> ControlPointSyncMode { ControlPointSyncMode::from(self.sync_mode) }
-    pub fn force_free(&mut self) { self.sync_mode = u8::from(ControlPointSyncMode::Free); self.left_handle = Vec2::ZERO; }
+
+    /// Force a point into free mode, syncing to its own ID. Should only be used when joining a branch path to itself.
+    pub fn force_free(&mut self, point_id: u16) {
+        self.sync_mode = u8::from(ControlPointSyncMode::Free);
+        self.sync_id = point_id;
+        self.left_handle = Vec2::ZERO;
+    }
 
     /// Get world space position of the left handle unless linear.
     pub fn left_handle(&self) -> Vec2 { if let ControlPointMode::Linear = self.mode() { self.position } else { self.left_handle + self.position } }
@@ -282,7 +288,7 @@ impl ControlPoint {
             let node = &mut points[id as usize];
             action(node, id);
 
-            // Stop traversal if we reach the 
+            // Stop traversal if we reach the start point
             if node.sibling_id == start_id {
                 break;
             }
@@ -385,14 +391,14 @@ impl ControlPoint {
         Ok(())
     }
 
-    /// Update an ID for a point
-    pub fn update_id(start_id: u16, point_id: u16, new_point_id: u16, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
-        // When this is called in create_ insert_ or remove_point, the indices are already updated, so this should be correct.
-        // We take in our corrected start ID, and we always update our target before traversing to it.
-        Self::traverse_siblings(start_id, points, |point, _| {
+    /// Replace IDs for points by going through the whole list globally. Doesn't move the point.
+    pub fn update_id(point_id: u16, new_point_id: u16, points: &mut Vec<ControlPoint>) {
+        let point_count = points.len();
+        for i in 0..point_count {
+            let point = &mut points[i];
             if point.sibling_id == point_id { point.sibling_id = new_point_id; }
             if point.sync_id == point_id { point.sync_id = new_point_id; }
-        })
+        }
     }
 
     /// Remove a point ID from the point list
@@ -402,34 +408,58 @@ impl ControlPoint {
 
         // Remove syncing dependency on this point without breaking anything else.
         let watchers = Self::get_watchers(point_id, points);
-        
-        // Find a reference point to sync everything else to.
-        let mut candidate: Option<(u16, ControlPointSyncMode)> = None;
-        for (watcher_id, sync_mode) in &watchers[..] {
-            if *sync_mode == ControlPointSyncMode::Free { continue; }
-            if *sync_mode == ControlPointSyncMode::Synced {
-                candidate = Some((*watcher_id, *sync_mode));
-                break;
-            }
-            if candidate.is_none() {
-                candidate = Some((*watcher_id, *sync_mode));
+        let mut targets = [removing_info.sync_id; 2]; // Targets for sync in both directions, defaulting to what the removed point syncs to.
+
+        // Helper function to determine if the removed point syncs in a direction.
+        let mode_syncs_in = |mode: &ControlPointSyncMode, right: bool| {
+            if right { mode.syncing_right() }
+            else     { mode.syncing_left() }
+        };
+        let removed_syncs_in = |right: bool| mode_syncs_in(&removing_info.sync_mode(), right);
+
+        // Find a candidate sync point for each handle direction from watchers
+        for right in [false, true] {
+            // If this was syncing in that direction, that is our target.
+            if removed_syncs_in(right) { continue; }
+
+            // Find a candidate that syncs to this point in the target direction
+            // Filter anything that matches but prioritize something that syncs both ways.
+            let candidate = watchers.iter()
+                .filter(|(_, mode)| mode_syncs_in(mode, right))
+                .max_by_key(|(_, mode)| *mode == ControlPointSyncMode::Synced);
+
+            // If we found a target, promote it to not sync this side by giving it the handle
+            if let Some(&(id, _)) = candidate {
+                let promoted = &mut points[id as usize];
+                let still_syncs_other_side = mode_syncs_in(&promoted.sync_mode(), !right);
+
+                // Stop syncing this side
+                let solo_sync_mode = if right { ControlPointSyncMode::SyncLeft } else { ControlPointSyncMode::SyncRight };
+                promoted.sync_mode = u8::from(if still_syncs_other_side { solo_sync_mode } else { ControlPointSyncMode::Free });
+
+                // Update the handle, as well as the mode if it's now a free point
+                if right { promoted.right_handle = removing_info.right_handle; } else { promoted.left_handle = removing_info.left_handle; }
+                promoted.set_mode(if still_syncs_other_side { ControlPointMode::Broken } else { removing_info.mode() });
+
+                // Add to targets
+                targets[right as usize] = id;
             }
         }
-        
-        // If we don't have a candidate, everything is syncing as free so leave them be.
-        // Otherwise, put everything else to sync to the reference point.
-        if let Some((sync_id, sync_mode)) = candidate {
-            // Put this to Free mode and update accordingly
-            let point = &mut points[sync_id as usize];
-            point.sync_mode = u8::from(ControlPointSyncMode::Free);
-            if sync_mode.syncing_left() { point.left_handle = removing_info.left_handle; }
-            if sync_mode.syncing_right() { point.right_handle = removing_info.right_handle; }
-            point.set_mode(removing_info.mode());
 
-            // Make all watchers sync to this point instead, without changing anything else
-            for (watcher_id, _) in watchers {
-                points[watcher_id as usize].sync_id = sync_id;
-            }
+        // Retarget every watcher. A target we promoted a watcher for wins over a target we forwarded from the removed point.
+        // A watcher left with no synced sides becomes self-referential and free.
+        for &(id, _) in &watchers {
+            let watcher = &mut points[id as usize];
+            let mode = watcher.sync_mode(); // may have updated since getting watchers
+
+            // Determine the sync ID from target direction, or sync to itself if we aren't syncing in either direction.
+            let side = [false, true].into_iter()
+                .filter(|&right| mode_syncs_in(&mode, right))
+                .max_by_key(|&right| !removed_syncs_in(right));
+            watcher.sync_id = side.map_or(id, |right| targets[right as usize]);
+
+            // Ensure if we sync to ourself, we are made free
+            if watcher.sync_id == id { watcher.sync_mode = u8::from(ControlPointSyncMode::Free); }
         }
 
         // Skip the point in the siblings loop
@@ -446,7 +476,7 @@ impl ControlPoint {
         // Shift every point ID back one
         let new_count = points.len();
         for i in index..new_count {
-            Self::update_id(i as u16, i as u16 + 1, i as u16, points)?;
+            Self::update_id(i as u16 + 1, i as u16, points);
         }
 
         Ok(())
