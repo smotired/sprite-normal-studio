@@ -111,6 +111,22 @@ impl StudioApp {
                             } else { Input::NoInput }
                         },
 
+                        // Tool selection
+                        Key::V => {
+                            if pressed && !repeat {
+                                if modifiers.shift {
+                                    Input::ToolSelected(controller::EditorToolKind::Point)
+                                } else {
+                                    Input::ToolSelected(controller::EditorToolKind::Zone)
+                                }
+                            } else { Input::NoInput }
+                        },
+                        Key::P => {
+                            if pressed && !repeat {
+                                Input::ToolSelected(controller::EditorToolKind::Pen)
+                            } else { Input::NoInput }
+                        },
+
                         // Toggling lighting
                         Key::L => {
                             if pressed && !repeat {

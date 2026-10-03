@@ -149,6 +149,12 @@ Will probably remove the GPL 3.0 license.
 
 This section will be added to as I add keybinds (and remember).
 
+### Select tools
+
+> `V` - Zone selection tool  
+> `Shift + V` - Anchor point selection tool  
+> `P` - Pen tool  
+
 ### Camera
 
 > `WASD` - Pan camera. Hold shift to pan more quickly.  
@@ -157,6 +163,14 @@ This section will be added to as I add keybinds (and remember).
 > `Shift + Scroll` - Zoom in or out.  
 > `Ctrl + Plus` - Zoom in.  
 > `Ctrl + Minus` - Zoom out.  
+
+### Objects
+
+> `Left Click + Drag` - Drag light or selected zones/control points/shapes.
+> `PageUp/PageDown` - Adjust light height while dragging it.  
+> `Escape` - Cancel zone path or shape creation.  
+> `Delete` - Delete selected zone path/vertex or shape.
+
 
 ### Rendering
 
@@ -167,10 +181,3 @@ This section will be added to as I add keybinds (and remember).
 ### Overlay
 
 > `O` - Toggle entire overlay.  
-
-### Objects
-
-> `Left Click + Drag` - Drag light or selected zones/control points/shapes.
-> `PageUp/PageDown` - Adjust light height while dragging it.  
-> `Escape` - Cancel zone path or shape creation.  
-> `Delete` - Delete selected zone path/vertex or shape.

@@ -1,6 +1,6 @@
 use studio_math::Vec2;
 
-use crate::Controller;
+use crate::{Controller, EditorToolKind};
 
 pub enum Axis {
     Vertical,
@@ -48,6 +48,9 @@ pub enum Input {
 
     /// Overlay is toggled on or off. Maybe later I will add an enum for OverlayComponentKind which is passed here.
     OverlayToggled,
+
+    /// A specific editor tool is selected.
+    ToolSelected(EditorToolKind),
 
     /// Lighting/shading is toggled.
     /// If none, toggle both. If true, toggling lighting, otherwise toggling normal.
@@ -153,6 +156,10 @@ impl Controller {
 
             Input::OverlayToggled => {
                 self.overlay_state.toggle_overlay();
+            },
+
+            Input::ToolSelected(tool) => {
+                self.select_tool(tool);
             },
 
             Input::CameraDragged(delta) => {
