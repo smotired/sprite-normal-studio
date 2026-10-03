@@ -626,11 +626,22 @@ impl ObjectBuffers {
         if let Some(mode) = mode {
             ControlPoint::set_handle_mode(point_id, mode, points)?;
         }
+        
+        let mode = mode.unwrap_or(points[point_id as usize].mode());
+
         if let Some(left_handle) = left_handle {
             ControlPoint::set_left_handle(point_id, left_handle, points)?;
+            if right_handle.is_none() && mode == ControlPointMode::Continuous {
+                let current_right_handle = points[point_id as usize].right_handle() - points[point_id as usize].position();
+                ControlPoint::set_right_handle(point_id, -left_handle.normalized() * current_right_handle.magnitude(), points)?;
+            }
         }
         if let Some(right_handle) = right_handle {
             ControlPoint::set_right_handle(point_id, right_handle, points)?;
+            if left_handle.is_none() && mode == ControlPointMode::Continuous {
+                let current_left_handle = points[point_id as usize].left_handle() - points[point_id as usize].position();
+                ControlPoint::set_left_handle(point_id, -right_handle.normalized() * current_left_handle.magnitude(), points)?;
+            }
         }
 
         Ok(())
