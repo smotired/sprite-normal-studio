@@ -341,7 +341,7 @@ impl ObjectBuffers {
         let mut path_1 = vec![];
         for i in 1..source_count {
             let path_id = source_start + (sibling_id - source_start + i) % source_count;
-            if path_id == sibling_id { break; } // this will definitely hit
+            if path_id == source_point_id { break; } // this will definitely hit
             path_1.push(path_id);
         }
         
@@ -349,7 +349,7 @@ impl ObjectBuffers {
         let mut path_2 = vec![];
         for i in 1..source_count {
             let path_id = source_start + (sibling_id - source_start + source_count - i) % source_count;
-            if path_id == sibling_id { break; } // this will definitely hit
+            if path_id == source_point_id { break; } // this will definitely hit
             path_2.push(path_id);
         }
 
@@ -393,7 +393,7 @@ impl ObjectBuffers {
             }
 
             // Join final curve
-            let point = self.get_point_info(creating_start).unwrap();
+            let point = self.get_point_info(source_start).unwrap(); // right handle of start point points into the creating path -- this correctly points toward the source zone path
             signed_area += bezier_signed_area(prev_point.position(), prev_point.left_handle(), point.right_handle(), point.position());
 
             signed_area.abs()
@@ -427,10 +427,21 @@ impl ObjectBuffers {
                 ControlPoint::update_id(first_id, last_id, first_id, points)?;
                 ControlPoint::update_id(last_id, first_id, last_id, points)?;
             }
+
+            // Flip middle point if it didn't get flipped
+            if creating_count % 2 == 1 {
+                let middle_id = creating_start + creating_count / 2 + 1;
+                let sync_id = points[middle_id as usize].sync_id();
+                let sync_target = points[sync_id as usize].clone();
+                points[middle_id as usize].flip(sync_target);
+                // don't need to swap anything around
+            }
             
+            path_2.reverse();
             path_2
         };
 
+        // TODO: state is already mutated but we can't fix this until later when we have our multi zone path finding
         if point_count + 1 >= MAX_OBJECT_ID - path.len() as u16 { anyhow::bail!("No room to create another control point!"); }
 
         // Create interior points for everything along the chosen path
@@ -439,7 +450,7 @@ impl ObjectBuffers {
             let interior_id = creating_zone.add_point();
             let point = ControlPoint::new_sibling_branch_interior(interior_id, creating_zone_id, path_id, points);
             points.push(point);
-            created.push(path_id);
+            created.push(interior_id);
         }
 
         Ok(created)

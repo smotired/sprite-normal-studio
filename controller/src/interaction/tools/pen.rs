@@ -218,6 +218,7 @@ impl EditorTool for EditorToolPen {
                 let (zone_id, point_id) = state.objects.create_branching_zone(sibling_id)?;
                 self.selected_zone = Some(zone_id);
                 self.selected_point = Some(point_id);
+                self.handle = Some(true);
                 self.branch_point_id = Some(sibling_id);
             }
 

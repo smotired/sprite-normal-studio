@@ -40,7 +40,7 @@ fn overlay_light(
 /***********************************/
 
 // Constants for the light overlay
-const PATH_HALF_WIDTH = 1.0;                 // Width of the line drawn for control point paths
+const PATH_HALF_WIDTH = 0.0;                 // Width of the line drawn for control point paths
 const CONTROL_POINT_HALF_WIDTH = 3.0;        // Width of the square drawn for control points
 const CONTROL_POINT_HANDLE_HALF_WIDTH = 1.0; // Width of the line drawn for handles of control points
 const CONTROL_POINT_HANDLE_RADIUS = 2.0;     // Radius of the circle drawn for handles of control points
