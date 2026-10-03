@@ -369,7 +369,7 @@ impl ObjectBuffers {
         // Determine mode and handles for the path to not change
         let (mode, left_handle, right_handle, start_rh, end_lh) = {
             let start_sync_point_mode = self.get_point_info(start_sync_id).unwrap().mode();
-            let end_sync_point_mode = self.get_point_info(start_sync_id).unwrap().mode();
+            let end_sync_point_mode = self.get_point_info(end_sync_id).unwrap().mode();
 
             // If both are linear, this should be linear.
             if start_sync_point_mode == ControlPointMode::Linear && end_sync_point_mode == ControlPointMode::Linear {
