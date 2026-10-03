@@ -3,7 +3,7 @@ mod point;
 
 use std::{cell::RefCell, rc::Rc};
 
-use studio_math::{Vec2, Vec3};
+use studio_math::{Vec2, Vec3, bezier::bezier_signed_area};
 use wgpu::{Buffer, Device, Queue};
 
 use zone::Zone;
@@ -190,17 +190,19 @@ impl ObjectBuffers {
             if count == 0 { panic!("Zone {} has zero points!", i); } // should never hit. could just continue but i want to catch 0-len zones
 
             // Check each point to the previous point on the path
-            let mut last_point = self.get_point_info(start + count - 1).unwrap();
-            let mut best_start_id = last_point.id();
+            let mut start_point = self.get_point_info(start + count - 1).unwrap();
+            let mut start_id = start + count - 1;
+            let mut best_start_id = start_id;
             let mut min_point_dist = f32::MAX;
             let mut corrected_to_path= Vec2::ZERO;
             let mut path_t = 0.5;
             for j in 0..count {
-                let point = self.get_point_info(start + j).unwrap();
+                let end_id = start + j;
+                let end_point = self.get_point_info(end_id).unwrap();
                 let (distance, corrected_to_curve, curve_t) = correct_to_bezier(
                     position, 
-                    last_point.position(), last_point.right_handle(),
-                    point.left_handle(), point.position(),
+                    start_point.position(), start_point.right_handle(),
+                    end_point.left_handle(), end_point.position(),
                     scale
                 );
 
@@ -208,10 +210,11 @@ impl ObjectBuffers {
                     min_point_dist = distance;
                     corrected_to_path = corrected_to_curve;
                     path_t = curve_t;
-                    best_start_id = last_point.id();
+                    best_start_id = start_id;
                 }
 
-                last_point = point;
+                start_point = end_point;
+                start_id = end_id;
             }
 
             // Check if this is the closest path
@@ -267,6 +270,179 @@ impl ObjectBuffers {
         if zone_id >= self.zone_count() { anyhow::bail!("Zone {} does not exist!", zone_id); }
         let (start, count) = self.get_zone_info(zone_id).unwrap().range();
         self.insert_point(zone_id, start + count, position)
+    }
+
+    /// Add a broken control point to some other path, to create a new zone branching from this path.
+    /// Returns the ID of the the created zone and point.
+    pub fn create_branching_zone(&mut self, sibling_id: u16) -> anyhow::Result<(u16, u16)> {
+        // Create the zone
+        let zone_count = self.zone_count();
+        let point_count = self.point_count();
+        if zone_count >= MAX_OBJECT_ID { anyhow::bail!("No room to create another zone!"); }
+        if point_count >= MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
+        if sibling_id >= point_count { anyhow::bail!("Sibling point {} does not exist!", sibling_id); }
+        let zone_id = self.create_zone()?;
+
+        // Create a point branching off the sibling point toward the right
+        let point_id = point_count;
+        let points = &mut self.points.borrow_mut().items;
+        let point = ControlPoint::new_sibling_branch_start(point_id, zone_id, sibling_id, points);
+        points.push(point);
+        self.zones.borrow_mut().items[zone_id as usize].add_point();
+
+        Ok((zone_id, point_id))
+    }
+
+    /// Add a broken control point to some other path, to create a new zone branching from this path.
+    /// Returns the IDs of all points created to complete the zone.
+    /// Takes in the point we first branched off of (not the sibling we created), the ID of the zone we are creating, and the ID of the point we are merging back into.
+    pub fn complete_branching_zone(&mut self, source_point_id: u16, creating_zone_id: u16, sibling_id: u16) -> anyhow::Result<Vec<u16>> {
+        // Validate
+        let zone_count = self.zone_count();
+        let point_count = self.point_count();
+        if point_count >= MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); } // We almost definitely need more room as well
+        if sibling_id >= point_count { anyhow::bail!("Sibling point {} does not exist!", sibling_id); }
+        if source_point_id >= point_count { anyhow::bail!("Source point {} does not exist!", source_point_id); }
+        if creating_zone_id >= zone_count { anyhow::bail!("Current zone {} does not exist!", creating_zone_id); }
+        let source_zone_id = self.get_point_info(source_point_id).unwrap().zone_id();
+        
+        let (source_start, source_count) = self.get_zone_info(source_zone_id).unwrap().range();
+
+        // Find the sibling that's actually in our target zone.
+        // TODO: Only bail if they aren't connected at all. Make like a find_exterior_path helper.
+        let sibling_id = {
+            let result = ControlPoint::find_in_zone(sibling_id, source_zone_id, &mut self.points.borrow_mut().items)?;
+            if result.is_none() {
+                let sibling_zone_id = self.get_point_info(sibling_id).unwrap().zone_id();
+                anyhow::bail!("Must connect back to the same zone path! Started on {}, ended on {}.", source_zone_id, sibling_zone_id);
+            }
+            result.unwrap()
+        };
+
+        // When source = sibling, convert first point to a free node with a broken handle instead and don't add any other points.
+        if source_point_id == sibling_id {
+            let (first_id, _) = self.get_zone_info(creating_zone_id).unwrap().range();
+            let first_point = &mut self.points.borrow_mut().items[first_id as usize];
+            first_point.force_free();
+
+            return Ok(vec![]);
+        }
+
+        // Create a point branching off the sibling point toward the left
+        let creating_zone = &mut self.zones.borrow_mut().items[creating_zone_id as usize];
+        let point_id = creating_zone.add_point();
+        {
+            let points = &mut self.points.borrow_mut().items;
+            let point = ControlPoint::new_sibling_branch_end(point_id, creating_zone_id, sibling_id, points);
+            points.push(point); // goes on the end of the list because we are creating a zone
+        }
+        
+        // Find the path from the sibling point to the original point going forward
+        let mut path_1 = vec![];
+        for i in 1..source_count {
+            let path_id = source_start + (sibling_id - source_start + i) % source_count;
+            if path_id == sibling_id { break; } // this will definitely hit
+            path_1.push(path_id);
+        }
+        
+        // Find the path from the sibling point to the original point going backward
+        let mut path_2 = vec![];
+        for i in 1..source_count {
+            let path_id = source_start + (sibling_id - source_start + source_count - i) % source_count;
+            if path_id == sibling_id { break; } // this will definitely hit
+            path_2.push(path_id);
+        }
+
+        // Find the signed area of each path
+        let (creating_start, creating_count) = creating_zone.range();
+        let mut signed_area = 0.0;
+        let mut prev_point = self.get_point_info(creating_start).unwrap();
+        for i in 1..creating_count {
+            let point = self.get_point_info(creating_start + i).unwrap();
+            signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
+            prev_point = point;
+        }
+
+        let path_1_area = {
+            let mut signed_area = signed_area;
+            let mut prev_point = prev_point; // right handle is correctly pointing into the path
+
+            // Path 1 goes around toward right handles
+            for point_id in &path_1[..] {
+                let point = self.get_point_info(*point_id).unwrap();
+                signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
+                prev_point = point;
+            }
+
+            // Join final curve
+            let point = self.get_point_info(creating_start).unwrap();
+            signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
+
+            signed_area.abs()
+        };
+
+        let path_2_area = {
+            let mut signed_area = signed_area;
+            let mut prev_point = self.get_point_info(sibling_id).unwrap(); // left handle of final point points into the creating path -- this correctly points toward the source zone path
+
+            // Path 2 goes around toward left handles
+            for point_id in &path_2[..] {
+                let point = self.get_point_info(*point_id).unwrap();
+                signed_area += bezier_signed_area(prev_point.position(), prev_point.left_handle(), point.right_handle(), point.position());
+                prev_point = point;
+            }
+
+            // Join final curve
+            let point = self.get_point_info(creating_start).unwrap();
+            signed_area += bezier_signed_area(prev_point.position(), prev_point.left_handle(), point.right_handle(), point.position());
+
+            signed_area.abs()
+        };
+
+        // If path 2 has a smaller absolute area, flip the existing path and go around backwards. Area should never be equal.
+        let points = &mut self.points.borrow_mut().items;
+        let path = if path_1_area < path_2_area { path_1 } else {
+
+            for i in 0..(creating_count / 2) {
+                let first_id = creating_start + i;
+                let last_id = creating_start + creating_count - 1 - i;
+
+                // Flip the first point
+                let sync_id = points[first_id as usize].sync_id();
+                let sync_target = points[sync_id as usize].clone();
+                points[first_id as usize].flip(sync_target);
+
+                // Flip the last point
+                let sync_id = points[last_id as usize].sync_id();
+                let sync_target = points[sync_id as usize].clone();
+                points[last_id as usize].flip(sync_target);
+
+                // Swap the points themselves
+                let last_point = points[last_id as usize];
+                points[last_id as usize] = points[first_id as usize];
+                points[first_id as usize] = last_point;
+
+                // Swap the sibling IDs. The first and last points will never be siblings of one another, so this should(TM) cause no issues.
+                // But that TM is doing so much fucking heavy lifting.
+                ControlPoint::update_id(first_id, last_id, first_id, points)?;
+                ControlPoint::update_id(last_id, first_id, last_id, points)?;
+            }
+            
+            path_2
+        };
+
+        if point_count + 1 >= MAX_OBJECT_ID - path.len() as u16 { anyhow::bail!("No room to create another control point!"); }
+
+        // Create interior points for everything along the chosen path
+        let mut created = vec![point_id];
+        for path_id in path {
+            let interior_id = creating_zone.add_point();
+            let point = ControlPoint::new_sibling_branch_interior(interior_id, creating_zone_id, path_id, points);
+            points.push(point);
+            created.push(path_id);
+        }
+
+        Ok(created)
     }
 
     pub fn update_point(&mut self, point_id: u16, position: Option<Vec2>, mode: Option<ControlPointMode>, left_handle: Option<Vec2>, right_handle: Option<Vec2>) -> anyhow::Result<()> {
