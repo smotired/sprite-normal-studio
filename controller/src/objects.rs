@@ -7,7 +7,7 @@ use studio_math::{Vec2, Vec3, bezier::bezier_signed_area};
 use wgpu::{Buffer, Device, Queue};
 
 use zone::Zone;
-use point::ControlPoint;
+pub use point::ControlPoint;
 pub use point::ControlPointMode;
 
 use crate::Controller;
@@ -334,10 +334,10 @@ impl ObjectBuffers {
 
         // Create a point branching off the sibling point toward the left
         let creating_zone = &mut self.zones.borrow_mut().items[creating_zone_id as usize];
-        let point_id = creating_zone.add_point();
+        let mut created_point_id = creating_zone.add_point();
         {
             let points = &mut self.points.borrow_mut().items;
-            let point = ControlPoint::new_sibling_branch_end(point_id, creating_zone_id, sibling_id, points);
+            let point = ControlPoint::new_sibling_branch_end(created_point_id, creating_zone_id, sibling_id, points);
             points.push(point); // goes on the end of the list because we are creating a zone
         }
         
@@ -434,12 +434,15 @@ impl ObjectBuffers {
 
             // Flip middle point if it didn't get flipped
             if creating_count % 2 == 1 {
-                let middle_id = creating_start + creating_count / 2 + 1;
+                let middle_id = creating_start + creating_count / 2;
                 let sync_id = points[middle_id as usize].sync_id();
                 let sync_target = points[sync_id as usize].clone();
                 points[middle_id as usize].flip(sync_target);
                 // don't need to swap anything around
             }
+
+            // point_id is also stale because the point we just created swapped with the first point in the path, so replace that
+            created_point_id = creating_start;
             
             path_2.reverse();
             path_2
@@ -449,7 +452,7 @@ impl ObjectBuffers {
         if point_count + 1 >= MAX_OBJECT_ID - path.len() as u16 { anyhow::bail!("No room to create another control point!"); }
 
         // Create interior points for everything along the chosen path
-        let mut created = vec![point_id];
+        let mut created = vec![created_point_id];
         for path_id in path {
             let interior_id = creating_zone.add_point();
             let point = ControlPoint::new_sibling_branch_interior(interior_id, creating_zone_id, path_id, points);
@@ -545,6 +548,11 @@ impl ObjectBuffers {
         }
 
         Ok(())
+    }
+
+    /// Find a sibling to the control point in the selected zone.
+    pub fn sibling_in_zone(&self, point_id: u16, zone_id: u16) -> Option<u16> {
+        ControlPoint::find_in_zone(point_id, zone_id, &mut self.points.borrow_mut().items).unwrap()
     }
 
     /// Get references to the buffers and their sizes. Recreates the buffers if needed.
