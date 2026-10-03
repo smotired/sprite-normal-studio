@@ -136,6 +136,9 @@ impl ControlPoint {
     /// Get the zone ID of this control point.
     pub fn zone_id(&self) -> u16 { self.zone_id }
 
+    /// Get the sibling ID of this control point.
+    pub fn sibling_id(&self) -> u16 { self.sibling_id }
+
     /// Get the mode of this control point.
     pub fn mode(&self) -> ControlPointMode { ControlPointMode::from(self.mode) }
     fn set_mode(&mut self, mode: ControlPointMode) { self.mode = u8::from(mode); } 

@@ -154,10 +154,10 @@ struct ControlPointPacked {
     // u16: The index of the zone this control point is a part of.
     mode_and_sync_mode_and_zone_id: u32,
 
-    // The index of this control point in the list.
+    // The next index of the control point, just looping around. Shares position. Not used here.
     // --------
     // The index of another control point. If this point is updated, its sibling must also be updated equivalently. Not used here.
-    id_and_sibling_id: u32,
+    sibling_id_and_sync_id: u32,
 }
 @group(1) @binding(1) var<storage, read> points: array<ControlPointPacked>;
 
@@ -175,20 +175,27 @@ struct ControlPoint {
     // This is the only reason we care about mode.
     no_handles: bool,
 
+    // Part of the sync mode of the control point. Used for drawing the ghost when connecting
+    // a path to another path.
+    is_free: bool,
+
     // The index of the zone this control point is a part of.
     zone_id: u32,
+    
     // Don't care about sibling ID or sync ID for now.
 }
 
 fn unpack_point(point: ControlPointPacked) -> ControlPoint {
     let mode_and_sync_mode = unpack_fst(point.mode_and_sync_mode_and_zone_id);
     let no_handles = (mode_and_sync_mode & 0x2u) > 0u;
+    let is_free = (mode_and_sync_mode & 0x300u) == 0u;
 
     return ControlPoint(
         point.position,
         point.left_handle,
         point.right_handle,
         no_handles,
+        is_free,
         unpack_snd(point.mode_and_sync_mode_and_zone_id),
         // leave sibling ID and sync id
     );

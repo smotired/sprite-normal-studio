@@ -22,11 +22,21 @@ pub struct EditorToolPen {
 
     /// Only used when joining multiple source paths.
     joined_source: bool,
+
+    /// If dragging a point sets the handle to the opposite position. Only used when rejoining to a broken path.
+    dragging_reversed: bool,
 }
 
 impl EditorTool for EditorToolPen {
     fn select(_: SelectionType) -> Box<Self> where Self : Sized {
-        Box::new(Self { selected_zone: None, selected_point: None, handle: None, branch_point_id: None, joined_source: false })
+        Box::new(Self {
+            selected_zone: None,
+            selected_point: None,
+            handle: None,
+            branch_point_id: None,
+            joined_source: false,
+            dragging_reversed: false,
+        })
     }
 
     fn deselect(&mut self) -> SelectionType {
@@ -41,6 +51,7 @@ impl EditorTool for EditorToolPen {
     }
 
     fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+        self.dragging_reversed = false;
         self.handle_create_point(state, pos, true)
     }
 
@@ -49,7 +60,7 @@ impl EditorTool for EditorToolPen {
         if let Some(point_id) = self.selected_point {
             let point_pos = state.objects.get_point_info(point_id).unwrap().position();
             let (first_point_id, _) = state.objects.get_zone_info(self.selected_zone.unwrap()).unwrap().range();
-            let handle = pos - point_pos;
+            let handle = if !self.dragging_reversed { pos - point_pos } else { point_pos - pos };
             let (lh, rh) = if point_id == first_point_id {
                 if self.handle.unwrap() { (None, Some(handle)) } else { (Some(handle), None) }
             } else {
@@ -61,6 +72,7 @@ impl EditorTool for EditorToolPen {
     }
 
     fn handle_drag_released(&mut self, state: ControllerStateInput) -> ToolResult {
+        self.dragging_reversed = false;
         self.handle = None;
 
         // If the path has more than one point, and some other condition is met, finalize the path creation
@@ -152,6 +164,7 @@ impl EditorToolPen {
                             }
                             self.selected_point = Some(point_id);
                             self.handle = Some(false);
+                            self.dragging_reversed = true;
                         }
                     }
                 }
@@ -181,6 +194,7 @@ impl EditorToolPen {
                         self.selected_point = Some(point_id);
                         self.handle = Some(right);
                         self.joined_source = true;
+                        self.dragging_reversed = true;
                     }
                 }
             }
