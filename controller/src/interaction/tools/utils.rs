@@ -2,11 +2,13 @@ use studio_math::Vec2;
 use crate::interaction::tools::ControllerStateInput;
 use crate::objects::ControlPointMode;
 
+const CLICK_TOLERANCE: f32 = 6.0; // since of control point boxes in the overlay plus 3 pixels
+
 /// Get the closest control point to a click position, if it's in the click range corrected for camera scale.
 pub fn get_clicked_control_point(state: &ControllerStateInput, zone_id: Option<u16>, pos: Vec2) -> Option<(u16, u16)> {
     if let Some((zone_id, point_id)) = state.objects.get_closest_point(zone_id, pos) {
         let distance = state.objects.get_point_info(point_id).unwrap().absolute_axis_distance(pos);
-        if distance <= 6.0 * state.camera_inv_scale { // size of control point boxes in the overlay, plus 3 pixels
+        if distance <= CLICK_TOLERANCE * state.camera_inv_scale { // size of control point boxes in the overlay, plus 3 pixels
             return Some((zone_id, point_id));
         }
     }
@@ -20,12 +22,12 @@ pub fn get_clicked_handle(point_id: u16, state: &ControllerStateInput, pos: Vec2
     if let ControlPointMode::Linear = point.mode() { return None; }
 
     // Check the left handle
-    if point.left_handle().distance(pos) <= 6.0 * state.camera_inv_scale {
+    if point.left_handle().distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
         return Some(false); // left handle clicked
     }
 
     // Check the right handle
-    if point.right_handle().distance(pos) <= 6.0 * state.camera_inv_scale {
+    if point.right_handle().distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
         return Some(true); // right handle clicked
     }
 
@@ -38,7 +40,7 @@ pub fn get_clicked_handle(point_id: u16, state: &ControllerStateInput, pos: Vec2
 /// If inserting a point into the zone path, it would go after the returned point.
 pub fn get_clicked_zone_path(state: &ControllerStateInput, pos: Vec2) -> Option<(u16, u16, Vec2, f32)> {
     if let Some((zone_id, point_id, corrected, t)) = state.objects.get_closest_path_point(pos, state.camera_inv_scale) {
-        if corrected.distance(pos) <= 6.0 * state.camera_inv_scale {
+        if corrected.distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
             return Some((zone_id, point_id, corrected, t));
         }
     }

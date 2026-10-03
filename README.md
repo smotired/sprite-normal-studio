@@ -75,6 +75,8 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [ ] Undo/redo with history. Use a stack like Unity's Undo class. Look for an
     external crate first.
 [ ] Copy and paste selected zones.
+[ ] Rotate/scale selection
+[ ] Holding shift/alt/etc while rotate/scale to snap/keep ratio/etc. All the things.
 [ ] Saving workspace files (with path to sprite and normal map, all shapes,
     zones, and lights, but not camera)
 [ ] Loading workspace files
