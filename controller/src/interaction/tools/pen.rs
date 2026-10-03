@@ -16,11 +16,17 @@ pub struct EditorToolPen {
 
     /// The handle we are manipulating, if any. True == right handle.
     handle: Option<bool>,
+
+    /// ID of the point we are branching off of if we are creating a connected zone
+    branch_point_id: Option<u16>,
+
+    /// Only used when joining multiple source paths.
+    joined_source: bool,
 }
 
 impl EditorTool for EditorToolPen {
     fn select(_: SelectionType) -> Box<Self> where Self : Sized {
-        Box::new(Self { selected_zone: None, selected_point: None, handle: None })
+        Box::new(Self { selected_zone: None, selected_point: None, handle: None, branch_point_id: None, joined_source: false })
     }
 
     fn deselect(&mut self) -> SelectionType {
@@ -34,7 +40,7 @@ impl EditorTool for EditorToolPen {
         // If we have a zone selected, we are already creating one, so add a linear node
         if let Some(zone_id) = self.selected_zone {
             // If we clicked a point, see if we should end the path
-            if let Some((other_zone_id, point_id)) = utils::get_clicked_control_point(&state, Some(zone_id), pos) {
+            if let Some((other_zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos) {
                 // If it's the same zone, only do anything if we clicked the first point
                 if other_zone_id == zone_id {
                     let (first_point, count) = state.objects.get_zone_info(zone_id).unwrap().range();
@@ -52,16 +58,22 @@ impl EditorTool for EditorToolPen {
                         }
                         self.selected_point = Some(point_id);
 
-                        // Go to the Zone tool. Should keep the zone selected.
+                        // Go to the Point tool. Should keep the zone and point selected.
                         return self.path_complete();
                     }
                 }
 
                 // Otherwise, join the path if a path can be made to our original point via sibling points
-                else {
-                    // TODO
+                else if let Some(source_id) = self.branch_point_id {
+                    let created_ids = state.objects.complete_branching_zone(source_id, zone_id, point_id)?;
+                    // If nothing was created, we have joined our original point.
+                    let point_id = if created_ids.is_empty() {
+                        state.objects.get_zone_info(zone_id).unwrap().range().0
+                    } else { created_ids[0] };
 
-                    // Go to the Zone tool. Should keep the zone selected.
+                    self.selected_point = Some(point_id);
+
+                    // Go to the Point tool. Should keep the zone and point selected.
                     return self.path_complete();
                 }
             }
@@ -75,8 +87,11 @@ impl EditorTool for EditorToolPen {
         // Otherwise, we should try to create a zone by adding a linear point
         else {
             // If we clicked a point, start a path with a sibling node
-            if let Some((_zone_id, _point_id)) = utils::get_clicked_control_point(&state, None, pos) {
-                // TODO
+            if let Some((_, sibling_id)) = utils::get_clicked_control_point(&state, None, pos) {
+                let (zone_id, point_id) = state.objects.create_branching_zone(sibling_id)?;
+                self.selected_zone = Some(zone_id);
+                self.selected_point = Some(point_id);
+                self.branch_point_id = Some(sibling_id);
             }
 
             // If we clicked a path, add a vertex to that zone, select it, and move to Point tool
@@ -96,12 +111,7 @@ impl EditorTool for EditorToolPen {
                         (ControlPointMode::Linear, None, None, None, None)
                     } 
                     
-                    // Otherwise it should be continuous. You can split a cubic bezier curve at some t into
-                    // two cubic bezier curves such that the overall curve is continuous.
-
-                    // TODO: Rename `vector` crate to `studio_math` and just add a `curves` module with a `de_casteljau` method
-                    // that takes in pos0-pos3 and t and returns all 6 interpolated points. expose a `curve_point` that just returns middle
-                    // and a `curve_split` that returns the 5 middle control points
+                    // Otherwise it should be continuous.
                     else {
                         let (start_r, new_l, _, new_r, end_l) = bezier_split_at(
                             start.position(),
@@ -158,7 +168,7 @@ impl EditorTool for EditorToolPen {
         // If we have a zone selected, we are already creating one, so add a continuous point
         if let Some(zone_id) = self.selected_zone {
             // If we clicked a point, check if it's the first point of the zone
-            if let Some((other_zone_id, point_id)) = utils::get_clicked_control_point(&state, Some(zone_id), pos) {
+            if let Some((other_zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos) {
                 // If it's the same zone, only do anything if we clicked the first point and have more than one point
                 if other_zone_id == zone_id {
                     let (first_point, count) = state.objects.get_zone_info(zone_id).unwrap().range();
@@ -174,8 +184,22 @@ impl EditorTool for EditorToolPen {
                 }
 
                 // Otherwise, join the path if a path can be made to our original point via sibling points
-                else {
-                    // TODO
+                else if let Some(source_id) = self.branch_point_id {
+                    let created_ids = state.objects.complete_branching_zone(source_id, zone_id, point_id)?;
+                    // If nothing was created, we have joined our original point.
+                    let point_id = if created_ids.is_empty() {
+                        state.objects.get_zone_info(zone_id).unwrap().range().0
+                    } else { created_ids[0] };
+
+                    // Determine which handle to drag
+                    let right = {
+                        let point = state.objects.get_point_info(point_id).unwrap();
+                        point.sync_mode().syncing_left()
+                    };
+
+                    self.selected_point = Some(point_id);
+                    self.handle = Some(right);
+                    self.joined_source = true;
                 }
             }
 
@@ -190,8 +214,11 @@ impl EditorTool for EditorToolPen {
         // Otherwise, we should try to create a zone by adding a continuous point
         else {
             // If we clicked a point, start a path with a continuous sibling node and start dragging it
-            if let Some((_zone_id, _point_id)) = utils::get_clicked_control_point(&state, None, pos) {
-                // TODO
+            if let Some((_, sibling_id)) = utils::get_clicked_control_point(&state, None, pos) {
+                let (zone_id, point_id) = state.objects.create_branching_zone(sibling_id)?;
+                self.selected_zone = Some(zone_id);
+                self.selected_point = Some(point_id);
+                self.branch_point_id = Some(sibling_id);
             }
 
             // If we clicked a path, add a vertex to that zone, select it, and move to Point tool
@@ -211,8 +238,7 @@ impl EditorTool for EditorToolPen {
                         (ControlPointMode::Linear, None, None, None, None)
                     } 
                     
-                    // Otherwise it should be continuous. You can split a cubic bezier curve at some t into
-                    // two cubic bezier curves such that the overall curve is continuous.
+                    // Otherwise it should be continuous.
                     else {
                         let (start_r, new_l, _, new_r, end_l) = bezier_split_at(
                             start.position(),
@@ -287,11 +313,13 @@ impl EditorTool for EditorToolPen {
     fn handle_drag_released(&mut self, state: ControllerStateInput) -> ToolResult {
         self.handle = None;
 
-        // If the selected point is the first point of the path, and the path has more than one point, finalize the path creation
+        // If the path has more than one point, and some other condition is met, finalize the path creation
         if let Some(zone_id) = self.selected_zone && let Some(point_id) = self.selected_point {
             let (start_point, point_count) = state.objects.get_zone_info(zone_id).unwrap().range();
-            if point_id == start_point && point_count > 1 {
-                return self.path_complete();
+            if point_count > 1 {
+                if point_id == start_point || self.joined_source {
+                    return self.path_complete();
+                }
             }
         }
         self.ok()

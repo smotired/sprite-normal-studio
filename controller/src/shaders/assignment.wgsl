@@ -127,7 +127,7 @@ struct ControlPointPacked {
     // For our purposes, continuous == broken
     // --------
     // The index of the zone this control point is a part of.
-    mode_and_zone_id: u32,
+    mode_and_sync_mode_and_zone_id: u32,
 
     // The index of this control point in the list.
     // --------
@@ -167,8 +167,8 @@ fn unpack_point(point: ControlPointPacked) -> ControlPoint {
         point.position,
         point.left_handle,
         point.right_handle,
-        unpack_fst(point.mode_and_zone_id),
-        unpack_snd(point.mode_and_zone_id),
+        unpack_fst(point.mode_and_sync_mode_and_zone_id) & 0xFFu, // second byte is sync mode which we don't care about here
+        unpack_snd(point.mode_and_sync_mode_and_zone_id),
         unpack_fst(point.id_and_sibling_id),
         // leave sibling ID
     );

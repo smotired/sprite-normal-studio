@@ -143,14 +143,16 @@ struct ControlPointPacked {
     // Relative position of outgoing handle
     right_handle: vec2<f32>,
     
-    // The handle mode of the control point, used for rendering and control.
+    // u8: The handle mode of the control point, used for rendering and control.
     // 0 = Continuous
     // 1 = Broken
     // 2 = Linear
     // For our purposes, continuous == broken
+    // -------
+    // u8: The sync mode of the control point, unused in rendering
     // --------
-    // The index of the zone this control point is a part of.
-    mode_and_zone_id: u32,
+    // u16: The index of the zone this control point is a part of.
+    mode_and_sync_mode_and_zone_id: u32,
 
     // The index of this control point in the list.
     // --------
@@ -169,30 +171,26 @@ struct ControlPoint {
     // Relative position of outgoing handle
     right_handle: vec2<f32>,
     
-    // Part of the handle mode of the control point. Controls if handles should be rendered
+    // Part of the handle mode of the control point. Controls if handles should be rendered.
+    // This is the only reason we care about mode.
     no_handles: bool,
 
     // The index of the zone this control point is a part of.
     zone_id: u32,
-
-    // The index of this control point.
-    id: u32,
-
-    // Don't care about sibling ID for now.
+    // Don't care about sibling ID or sync ID for now.
 }
 
 fn unpack_point(point: ControlPointPacked) -> ControlPoint {
-    let mode = unpack_fst(point.mode_and_zone_id);
-    let no_handles = (mode & 0x2u) > 0u;
+    let mode_and_sync_mode = unpack_fst(point.mode_and_sync_mode_and_zone_id);
+    let no_handles = (mode_and_sync_mode & 0x2u) > 0u;
 
     return ControlPoint(
         point.position,
         point.left_handle,
         point.right_handle,
         no_handles,
-        unpack_snd(point.mode_and_zone_id),
-        unpack_fst(point.id_and_sibling_id),
-        // leave sibling ID
+        unpack_snd(point.mode_and_sync_mode_and_zone_id),
+        // leave sibling ID and sync id
     );
 }
 
