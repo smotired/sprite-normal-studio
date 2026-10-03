@@ -29,7 +29,7 @@ impl EditorTool for EditorToolZone {
         // Select the zone if a control point or the path was clicked
         self.selected_zone = 
             if let Some((zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos) {
-                // If the start point has a sibling in the selected zone, select that point's sibling's zone instead.
+                // If the clicked point has a sibling in the selected zone, select that point's sibling's zone instead.
                 if let Some(selected_id) = self.selected_zone && let Some(sibling_id) = state.objects.sibling_in_zone(point_id, selected_id) {
                     let sibling_info = state.objects.get_point_info(sibling_id).unwrap();
                     let next_zone_id = state.objects.get_point_info(sibling_info.sibling_id()).unwrap().zone_id();

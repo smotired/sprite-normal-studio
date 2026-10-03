@@ -55,8 +55,9 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Read zones in map generation pipeline and set some base normal.
 [x] Allow creating zones with bezier paths
 [x] Modify zone paths, at path and vertex level, including deletion and insertion
-[ ] Joining zone paths at certain vertices, which should update both paths
+[x] Joining zone paths at certain vertices, which should update both paths
     when manipulated
+[ ] Joining zone paths across multiple shapes
 [ ] Selecting and manipulating multiple zones/vertices at once
     Shift+select in zone mode should select all connected zones.
     Shift+select in point mode should select all points in the clicked zone.
@@ -65,6 +66,9 @@ Basically, other software is to Photoshop what this is to Illustrator.
     which will be applied before all shapes. Shapes will not influence past this
     base layer
 [ ] Changing vertex mode in tool panel, and changing coupling with siblings.
+    Changing out of linear mode should retain handle states if set, and if either
+    is at 0, should infer a new handle. Either flipping other, or pointing into path.
+    Even though that would change the path.
 [ ] Joining selected vertices as siblings in tool panel (moves to avg. pos).
 [x] Window preview mode for working normal map
 ```
