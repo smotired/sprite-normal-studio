@@ -120,7 +120,8 @@ struct Zone {
     point_count: u32,
 }
 
-fn unpack_zone(zone: ZonePacked) -> Zone {
+fn get_zone(zone_id: u32) -> Zone {
+    let zone = zones[zone_id];
     return Zone(
         zone.normal,
         unpack_fst(zone.points_start_and_point_count),
@@ -154,10 +155,13 @@ struct ControlPointPacked {
     // u16: The index of the zone this control point is a part of.
     mode_and_sync_mode_and_zone_id: u32,
 
-    // The next index of the control point, just looping around. Shares position. Not used here.
+    // The index of the control point to share the left handle with.
     // --------
-    // The index of another control point. If this point is updated, its sibling must also be updated equivalently. Not used here.
-    sibling_id_and_sync_id: u32,
+    // The index of the control point to share the right handle with.
+    left_and_right_sync_ids: u32,
+
+    // The next index of the control point, just looping around. Shares position. Not used here.
+    sibling_id_and_padding_start: u32,
 }
 @group(1) @binding(1) var<storage, read> points: array<ControlPointPacked>;
 
@@ -176,26 +180,37 @@ struct ControlPoint {
     no_handles: bool,
 
     // Part of the sync mode of the control point. Used for drawing the ghost when connecting
-    // a path to another path.
-    is_free: bool,
+    // a path to another path, and for drawing the handles of a selected point.
+    syncs_left: bool,
+
+    // Part of the sync mode of the control point. Used for drawing the ghost when connecting
+    // a path to another path, and for drawing the handles of a selected point.
+    syncs_right: bool,
 
     // The index of the zone this control point is a part of.
     zone_id: u32,
     
-    // Don't care about sibling ID or sync ID for now.
+    // Don't care about sibling ID or sync IDs for now.
 }
 
-fn unpack_point(point: ControlPointPacked) -> ControlPoint {
+fn get_point(point_id: u32) -> ControlPoint {
+    let point = points[point_id];
+
     let mode_and_sync_mode = unpack_fst(point.mode_and_sync_mode_and_zone_id);
     let no_handles = (mode_and_sync_mode & 0x2u) > 0u;
-    let is_free = (mode_and_sync_mode & 0x300u) == 0u;
+
+    let left_sync_id = unpack_fst(point.left_and_right_sync_ids);
+    let right_sync_id = unpack_snd(point.left_and_right_sync_ids);
+    let syncs_left = left_sync_id != point_id;
+    let syncs_right = right_sync_id != point_id;
 
     return ControlPoint(
         point.position,
         point.left_handle,
         point.right_handle,
         no_handles,
-        is_free,
+        syncs_left,
+        syncs_right,
         unpack_snd(point.mode_and_sync_mode_and_zone_id),
         // leave sibling ID and sync id
     );

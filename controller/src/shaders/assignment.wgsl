@@ -97,7 +97,8 @@ struct Zone {
     point_count: u32,
 }
 
-fn unpack_zone(zone: ZonePacked) -> Zone {
+fn get_zone(zone_id: u32) -> Zone {
+    let zone = zones[zone_id];
     return Zone(
         zone.normal,
         unpack_fst(zone.points_start_and_point_count),
@@ -120,19 +121,24 @@ struct ControlPointPacked {
     // Relative position of outgoing handle
     right_handle: vec2<f32>,
     
-    // The handle mode of the control point, used for rendering and control.
+    // u8: The handle mode of the control point, used for rendering and control.
     // 0 = Continuous
     // 1 = Broken
     // 2 = Linear
     // For our purposes, continuous == broken
+    // -------
+    // u8: The sync mode of the control point, unused in rendering
     // --------
-    // The index of the zone this control point is a part of.
+    // u16: The index of the zone this control point is a part of.
     mode_and_sync_mode_and_zone_id: u32,
 
-    // The index of this control point in the list.
+    // The index of the control point to share the left handle with.
     // --------
-    // The index of another control point. If this point is updated, its sibling must also be updated equivalently. Not used here.
-    id_and_sibling_id: u32,
+    // The index of the control point to share the right handle with.
+    left_and_right_sync_ids: u32,
+
+    // The next index of the control point, just looping around. Shares position. Not used here.
+    sibling_id_and_padding_start: u32,
 }
 @group(1) @binding(1) var<storage, read> points: array<ControlPointPacked>;
 
@@ -146,38 +152,44 @@ struct ControlPoint {
     // Relative position of outgoing handle
     right_handle: vec2<f32>,
     
-    // The handle mode of the control point, used for rendering and control.
-    // 0 = Continuous
-    // 1 = Broken
-    // 2 = Linear
-    // For our purposes, continuous == broken
-    mode: u32,
+    // Part of the handle mode of the control point. Controls if handles should be rendered.
+    // This is the only reason we care about mode.
+    no_handles: bool,
+
+    // Part of the sync mode of the control point. Used for drawing the ghost when connecting
+    // a path to another path.
+    is_free: bool,
 
     // The index of the zone this control point is a part of.
     zone_id: u32,
-
-    // The index of this control point.
-    id: u32,
-
-    // Don't care about sibling ID for now.
+    
+    // Don't care about sibling ID or sync IDs for now.
 }
 
-fn unpack_point(point: ControlPointPacked) -> ControlPoint {
+fn get_point(point_id: u32) -> ControlPoint {
+    let point = points[point_id];
+    let mode_and_sync_mode = unpack_fst(point.mode_and_sync_mode_and_zone_id);
+    let no_handles = (mode_and_sync_mode & 0x2u) > 0u;
+
+    let left_sync_id = unpack_fst(point.left_and_right_sync_ids);
+    let right_sync_id = unpack_snd(point.left_and_right_sync_ids);
+    let is_free = left_sync_id == point_id && right_sync_id == point_id;
+
     return ControlPoint(
         point.position,
         point.left_handle,
         point.right_handle,
-        unpack_fst(point.mode_and_sync_mode_and_zone_id) & 0xFFu, // second byte is sync mode which we don't care about here
+        no_handles,
+        is_free,
         unpack_snd(point.mode_and_sync_mode_and_zone_id),
-        unpack_fst(point.id_and_sibling_id),
-        // leave sibling ID
+        // leave sibling ID and sync id
     );
 }
 
 // Get the actual position of a control point's left handle
 fn left_handle(point: ControlPoint) -> vec2<f32> {
     // Don't add the handle if it's linear
-    if ((point.mode & 0x2u) > 0u) {
+    if (point.no_handles) {
         return point.position;
     } else {
         return point.position + point.left_handle;
@@ -187,7 +199,7 @@ fn left_handle(point: ControlPoint) -> vec2<f32> {
 // Get the actual position of a control point's right handle
 fn right_handle(point: ControlPoint) -> vec2<f32> {
     // Don't add the handle if it's linear
-    if ((point.mode & 0x2u) > 0u) {
+    if (point.no_handles) {
         return point.position;
     } else {
         return point.position + point.right_handle;
@@ -285,9 +297,9 @@ fn check_point_in_zone(
 
     // Sum up intersections for curves at each control point
     var sum = 0u;
-    var last_point = unpack_point(points[zone.points_start + zone.point_count - 1]);
+    var last_point = get_point(zone.points_start + zone.point_count - 1);
     for (var j = 0u; j < zone.point_count; j += 1u) {
-        let point = unpack_point(points[zone.points_start + j]);
+        let point = get_point(zone.points_start + j);
         sum += count_ray_intersect_bezier(
             pos, direction,
             last_point.position,
@@ -375,7 +387,7 @@ fn main(
     // Loop through and evaluate all zones
     for (var i = 0u; i < params.zone_count; i += 1u) {
         if (i != params.zone_ignore) {
-            result = evaluate_zone(id.xy, i, unpack_zone(zones[i]), result);
+            result = evaluate_zone(id.xy, i, get_zone(i), result);
         }
     }
 
