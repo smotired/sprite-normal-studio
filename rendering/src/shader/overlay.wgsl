@@ -65,13 +65,13 @@ fn overlay_zone_paths(
             continue;
         }
 
-        let zone = unpack_zone(zones[i]);
-        let first_point = unpack_point(points[zone.points_start]);
-        var last_point = unpack_point(points[zone.points_start + zone.point_count - 1]);
+        let zone = get_zone(i);
+        let first_point = get_point(zone.points_start);
+        var last_point = get_point(zone.points_start + zone.point_count - 1);
 
         // Draw the path between control points
         for (var j = 0u; j < zone.point_count; j += 1u) {
-            let point = unpack_point(points[zone.points_start + j]);
+            let point = get_point(zone.points_start + j);
 
             col = draw_bezier(
                 col,
@@ -90,7 +90,7 @@ fn overlay_zone_paths(
         // If flag 5 is set, also draw the control points on top of the path
         if (flag(5)) {
             for (var j = 0u; j < zone.point_count; j += 1u) {
-                let point = unpack_point(points[zone.points_start + j]);
+                let point = get_point(zone.points_start + j);
 
                 // Path is not selected, so assume point is not selected and just draw a box.
                 col = draw_box(col, pos, base_color, point.position, CONTROL_POINT_HALF_WIDTH);
@@ -100,12 +100,12 @@ fn overlay_zone_paths(
 
     // Draw the selected path on top of the other paths
     if (found_selected) {
-        let zone = unpack_zone(zones[params.selected_zone]);
-        let first_point = unpack_point(points[zone.points_start]);
-        var last_point = unpack_point(points[zone.points_start + zone.point_count - 1]);
+        let zone = get_zone(params.selected_zone);
+        let first_point = get_point(zone.points_start);
+        var last_point = get_point(zone.points_start + zone.point_count - 1);
 
         // Determine if we have joined with another path.
-        let joined = zone.point_count > 1 && !last_point.is_free;
+        let joined = zone.point_count > 1 && (last_point.syncs_left || last_point.syncs_right);
 
         // Check completion flag, and that we haven't joined with some other path
         var start = 0u;
@@ -116,7 +116,7 @@ fn overlay_zone_paths(
 
         // Draw the path between control points
         for (var j = start; j < zone.point_count; j += 1u) {
-            let point = unpack_point(points[zone.points_start + j]);
+            let point = get_point(zone.points_start + j);
 
             col = draw_bezier(
                 col,
@@ -158,7 +158,7 @@ fn overlay_zone_paths(
         // If flag 5 is set, also draw the control points on top of the path
         if (flag(5)) {
             for (var j = 0u; j < zone.point_count; j += 1u) {
-                let point = unpack_point(points[zone.points_start + j]);
+                let point = get_point(zone.points_start + j);
 
                 // If the point is not selected just draw a box
                 if (j + zone.points_start != params.selected_point) {
@@ -168,13 +168,15 @@ fn overlay_zone_paths(
                 // Otherwise, draw the handles and then the box
                 else {
                     if (!point.no_handles) {
-                        let left_handle = left_handle(point);
+                        // Don't draw the left handle if we are branching off a path
+                        if (params.selected_point != zone.points_start || !point.syncs_left) {
+                            let left_handle = left_handle(point);
+                            col = draw_line(col, pos, left_handle_color, point.position, left_handle, CONTROL_POINT_HANDLE_HALF_WIDTH);
+                            col = draw_circle(col, pos, left_handle_color, left_handle, CONTROL_POINT_HANDLE_RADIUS, 0.0, true);
+                        }
+
                         let right_handle = right_handle(point);
-
-                        col = draw_line(col, pos, left_handle_color, point.position, left_handle, CONTROL_POINT_HANDLE_HALF_WIDTH);
                         col = draw_line(col, pos, right_handle_color, point.position, right_handle, CONTROL_POINT_HANDLE_HALF_WIDTH);
-
-                        col = draw_circle(col, pos, left_handle_color, left_handle, CONTROL_POINT_HANDLE_RADIUS, 0.0, true);
                         col = draw_circle(col, pos, right_handle_color, right_handle, CONTROL_POINT_HANDLE_RADIUS, 0.0, true);
                     }
 

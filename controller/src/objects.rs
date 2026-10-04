@@ -12,7 +12,6 @@ pub use point::ControlPoint;
 pub use point::ControlPointMode;
 
 use crate::Controller;
-use crate::objects::point::ControlPointSyncMode;
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
@@ -287,10 +286,10 @@ impl ObjectBuffers {
 
         // Get left sync target for the path end node.
         let start_info = self.get_point_info(start_id).unwrap();
-        let start_sync_id = ControlPoint::get_sync_id(start_id, true, &self.points.borrow().items)?;
+        let (start_sync_id, _) = ControlPoint::get_sync_id(start_id, true, &self.points.borrow().items)?; // TODO: what to do with flips
         let mut end_id = start + (start_id - start + 1) % count;
         let end_info = self.get_point_info(end_id).unwrap();
-        let end_sync_id = ControlPoint::get_sync_id(end_id, false, &self.points.borrow().items)?;
+        let (end_sync_id, _) = ControlPoint::get_sync_id(end_id, false, &self.points.borrow().items)?; // TODO: what to do with flips
         
         // First determine how many siblings need to be created, and ensure we have room.
         let mut synced_start_ids = {
@@ -312,15 +311,15 @@ impl ObjectBuffers {
                     if sibling_end_id != projected_sibling_end_id { return false; } // there is something else between
 
                     // Determine what the start and end sync to
-                    let ss_right = ControlPoint::get_sync_id(sibling_start_id, true, immut_points);
-                    let se_left  = ControlPoint::get_sync_id(sibling_end_id, false, immut_points);
+                    let ss_right = ControlPoint::get_sync_id(sibling_start_id, true, immut_points); // TODO: what to do with flips
+                    let se_left  = ControlPoint::get_sync_id(sibling_end_id, false, immut_points); // TODO: what to do with flips
                     if ss_right.is_err() || se_left.is_err() { return false; }
 
                     // We must add a synced pair here IF:
                     // The start's right syncs to the same eventual thing as the real start's right
                     // AND
                     // The end's left syncs to the same eventual thing as the real end's left
-                    ss_right.unwrap() == start_sync_id && se_left.unwrap() == end_sync_id
+                    ss_right.unwrap().0 == start_sync_id && se_left.unwrap().0 == end_sync_id
                 }).collect();
             ids.sort();
             ids
@@ -641,19 +640,7 @@ impl ObjectBuffers {
     /// When a branch is encountered, returns the node with one handle synced, so that we can sync directly to it and have both handles synced.
     /// Bails if a path can't be found, i.e. the zones aren't connected or either point isn't on the outside.
     /// If start or end ID have siblings, traversal will start by going down to their free node.
-    fn find_exterior_path(&self, mut start_id: u16, mut end_id: u16, zone_id: u16) -> anyhow::Result<(Vec<u16>, bool)> {
-        // Get the real start or end positions by going down to their free nodes.
-        loop {
-            let start = self.get_point_info(start_id).unwrap();
-            if start.sync_mode() == ControlPointSyncMode::Free { break; }
-            start_id = start.sync_id();
-        }
-        loop {
-            let end = self.get_point_info(end_id).unwrap();
-            if end.sync_mode() == ControlPointSyncMode::Free { break; }
-            end_id = end.sync_id();
-        }
-
+    fn find_exterior_path(&self, start_id: u16, end_id: u16, zone_id: u16) -> anyhow::Result<(Vec<u16>, bool)> {
         // Temporary: Ensure the start and end IDs are in the same zones
         let source_zone_id = self.get_point_info(start_id).unwrap().zone_id();
         let end_id = ControlPoint::find_in_zone(end_id, source_zone_id, &self.points.borrow().items)?;
@@ -765,14 +752,10 @@ impl ObjectBuffers {
             let last_id = start + count - 1 - i;
 
             // Flip the first point
-            let sync_id = points[first_id as usize].sync_id();
-            let sync_target = points[sync_id as usize].clone();
-            points[first_id as usize].flip(sync_target);
+            points[first_id as usize].flip();
 
             // Flip the last point
-            let sync_id = points[last_id as usize].sync_id();
-            let sync_target = points[sync_id as usize].clone();
-            points[last_id as usize].flip(sync_target);
+            points[last_id as usize].flip();
 
             // Swap the points themselves
             let last_point = points[last_id as usize];
@@ -788,10 +771,13 @@ impl ObjectBuffers {
         // Flip middle point if it didn't get flipped
         if count % 2 == 1 {
             let middle_id = start + count / 2;
-            let sync_id = points[middle_id as usize].sync_id();
-            let sync_target = points[sync_id as usize].clone();
-            points[middle_id as usize].flip(sync_target);
+            points[middle_id as usize].flip();
             // don't need to move it
+        }
+
+        // Resync all the handles
+        for id in start..(start + count) {
+            ControlPoint::resync_handles(id, points)?;
         }
 
         Ok((start, start + count - 1))
