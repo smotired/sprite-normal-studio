@@ -97,7 +97,7 @@ impl ZoneAssigner {
     /// Should be run whenever the zones change.
     /// TODO: Give it a bounding box, and only update assignments within that bounding box.
     ///       The bounding box should be the bounding box of the zone's old path and its new path
-    pub fn assign_zones(&mut self, device: &Device, queue: &Queue, object_buffers: BufferStates, zone_ignore: Option<u16>) {
+    pub fn assign_zones(&mut self, device: &Device, queue: &Queue, object_buffers: BufferStates, object_counts: (usize, usize), zone_ignore: Option<u16>) {
         // Skip if we haven't set up the texture bind group yet
         let Some(output_bind_group) = &self.output_bind_group else { return };
 
@@ -121,7 +121,7 @@ impl ZoneAssigner {
         }
 
         // Write uniforms
-        let uniform = ZoneAssignerUniform::new(self.object_buffer_sizes, zone_ignore);
+        let uniform = ZoneAssignerUniform::new(object_counts, zone_ignore);
         queue.write_buffer(&self.uniform_buffer, 0, uniform.bytes());
 
         // Submit the command
