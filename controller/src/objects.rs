@@ -12,6 +12,7 @@ pub use point::ControlPoint;
 pub use point::ControlPointMode;
 
 use crate::Controller;
+use crate::objects::point::ControlPointSyncMode;
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
@@ -464,151 +465,44 @@ impl ObjectBuffers {
         if source_point_id >= point_count { anyhow::bail!("Source point {} does not exist!", source_point_id); }
         if creating_zone_id >= zone_count { anyhow::bail!("Current zone {} does not exist!", creating_zone_id); }
         let source_zone_id = self.get_point_info(source_point_id).unwrap().zone_id();
-        
-        let (source_start, source_count) = self.get_zone_info(source_zone_id).unwrap().range();
 
-        // Find the sibling that's actually in our target zone.
-        // TODO: Only bail if they aren't connected at all. Make like a find_exterior_path helper.
-        let sibling_id = {
-            let result = ControlPoint::find_in_zone(sibling_id, source_zone_id, &mut self.points.borrow_mut().items)?;
-            if result.is_none() {
-                let sibling_zone_id = self.get_point_info(sibling_id).unwrap().zone_id();
-                anyhow::bail!("Must connect back to the same zone path! Started on {}, ended on {}.", source_zone_id, sibling_zone_id);
-            }
-            result.unwrap()
-        };
+        // TODO: remove
+        let sibling_id = ControlPoint::find_in_zone(sibling_id, source_zone_id, &mut self.points.borrow_mut().items)?
+            .ok_or_else(|| anyhow::anyhow!("Must connect back to the same zone path!"))?;
 
         // When source = sibling, convert first point to a free node with a broken handle instead and don't add any other points.
+        // This also means we don't have to flip
         if source_point_id == sibling_id {
             let (first_id, _) = self.get_zone_info(creating_zone_id).unwrap().range();
-            let first_point = &mut self.points.borrow_mut().items[first_id as usize];
-            first_point.force_free(first_id);
-
+            self.points.borrow_mut().items[first_id as usize].force_free(first_id);
             return Ok(vec![]);
         }
 
+        // Find the exterior path to take and bail if there isn't one
+        let (exterior_path, requires_flip) = self.find_exterior_path(source_point_id, sibling_id, creating_zone_id)?;
+        if point_count >= MAX_OBJECT_ID - exterior_path.len() as u16 - 1 { anyhow::bail!("No room to create interior control points!"); }
+
         // Create a point branching off the sibling point toward the left
-        let creating_zone = &mut self.zones.borrow_mut().items[creating_zone_id as usize];
-        let mut created_point_id = creating_zone.add_point();
-        {
+        let mut created_point_id = {
+            let created_point_id = self.zones.borrow_mut().items[creating_zone_id as usize].add_point();
             let points = &mut self.points.borrow_mut().items;
+
             let point = ControlPoint::new_sibling_branch_end(created_point_id, creating_zone_id, sibling_id, points);
             points.push(point); // goes on the end of the list because we are creating a zone
-        }
-        
-        // Find the path from the sibling point to the original point going forward
-        let mut path_1 = vec![];
-        for i in 1..source_count {
-            let path_id = source_start + (sibling_id - source_start + i) % source_count;
-            if path_id == source_point_id { break; } // this will definitely hit
-            path_1.push(path_id);
-        }
-        
-        // Find the path from the sibling point to the original point going backward
-        let mut path_2 = vec![];
-        for i in 1..source_count {
-            let path_id = source_start + (sibling_id - source_start + source_count - i) % source_count;
-            if path_id == source_point_id { break; } // this will definitely hit
-            path_2.push(path_id);
-        }
-
-        // Find the signed area of each path
-        let (creating_start, creating_count) = creating_zone.range();
-        let mut signed_area = 0.0;
-        let mut prev_point = self.get_point_info(creating_start).unwrap();
-        for i in 1..creating_count {
-            let point = self.get_point_info(creating_start + i).unwrap();
-            signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
-            prev_point = point;
-        }
-
-        let path_1_area = {
-            let mut signed_area = signed_area;
-            let mut prev_point = prev_point; // right handle is correctly pointing into the path
-
-            // Path 1 goes around toward right handles
-            for point_id in &path_1[..] {
-                let point = self.get_point_info(*point_id).unwrap();
-                signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
-                prev_point = point;
-            }
-
-            // Join final curve
-            let point = self.get_point_info(creating_start).unwrap();
-            signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
-
-            signed_area.abs()
+            created_point_id
         };
 
-        let path_2_area = {
-            let mut signed_area = signed_area;
-            let mut prev_point = self.get_point_info(sibling_id).unwrap(); // left handle of final point points into the creating path -- this correctly points toward the source zone path
-
-            // Path 2 goes around toward left handles
-            for point_id in &path_2[..] {
-                let point = self.get_point_info(*point_id).unwrap();
-                signed_area += bezier_signed_area(prev_point.position(), prev_point.left_handle(), point.right_handle(), point.position());
-                prev_point = point;
-            }
-
-            // Join final curve
-            let point = self.get_point_info(source_start).unwrap(); // right handle of start point points into the creating path -- this correctly points toward the source zone path
-            signed_area += bezier_signed_area(prev_point.position(), prev_point.left_handle(), point.right_handle(), point.position());
-
-            signed_area.abs()
-        };
-
-        // If path 2 has a smaller absolute area, flip the existing path and go around backwards. Area should never be equal.
-        let points = &mut self.points.borrow_mut().items;
-        let path = if path_1_area < path_2_area { path_1 } else {
-
-            for i in 0..(creating_count / 2) {
-                let first_id = creating_start + i;
-                let last_id = creating_start + creating_count - 1 - i;
-
-                // Flip the first point
-                let sync_id = points[first_id as usize].sync_id();
-                let sync_target = points[sync_id as usize].clone();
-                points[first_id as usize].flip(sync_target);
-
-                // Flip the last point
-                let sync_id = points[last_id as usize].sync_id();
-                let sync_target = points[sync_id as usize].clone();
-                points[last_id as usize].flip(sync_target);
-
-                // Swap the points themselves
-                let last_point = points[last_id as usize];
-                points[last_id as usize] = points[first_id as usize];
-                points[first_id as usize] = last_point;
-
-                // Swap the sibling IDs. Use id 65535 as a swap space which we checked earlier.
-                ControlPoint::update_id(last_id, 65535, points);
-                ControlPoint::update_id(first_id, last_id, points);
-                ControlPoint::update_id(65535, first_id, points);
-            }
-
-            // Flip middle point if it didn't get flipped
-            if creating_count % 2 == 1 {
-                let middle_id = creating_start + creating_count / 2;
-                let sync_id = points[middle_id as usize].sync_id();
-                let sync_target = points[sync_id as usize].clone();
-                points[middle_id as usize].flip(sync_target);
-                // don't need to swap anything around
-            }
-
-            // point_id is also stale because the point we just created swapped with the first point in the path, so replace that
-            created_point_id = creating_start;
-            
-            path_2.reverse();
-            path_2
-        };
-
-        // TODO: state is already mutated but we can't fix this until later when we have our multi zone path finding
-        if point_count + 1 >= MAX_OBJECT_ID - path.len() as u16 { anyhow::bail!("No room to create another control point!"); }
+        // Flip the path we're creating if necessary
+        if requires_flip {
+            (created_point_id, _) = self.flip_zone(creating_zone_id)?;
+        }
 
         // Create interior points for everything along the chosen path
         let mut created = vec![created_point_id];
-        for path_id in path {
+        let creating_zone = &mut self.zones.borrow_mut().items[creating_zone_id as usize];
+        let points = &mut self.points.borrow_mut().items;
+
+        for path_id in exterior_path {
             let interior_id = creating_zone.add_point();
             let point = ControlPoint::new_sibling_branch_interior(interior_id, creating_zone_id, path_id, points);
             points.push(point);
@@ -737,6 +631,171 @@ impl ObjectBuffers {
     }
 
     pub fn object_counts(&self) -> (usize, usize) { (self.zone_count() as usize, self.point_count() as usize) }
+
+    /// Find an exterior path for a zone along another zone.
+    /// Searches for siblings from the start point to the end point, where a continuous exterior path could
+    /// be created if the points from zone_id were to be added 
+    /// Returns the IDs of the nodes along the path that should have interior nodes. Also returns true if the creating zone should be flipped.
+    /// Does not traverse any interior nodes, meaning the path will only be on the outside.
+    /// This means that as long as start_id and end_id are both on the outside of the overall zone, there is exactly one correct path.
+    /// When a branch is encountered, returns the node with one handle synced, so that we can sync directly to it and have both handles synced.
+    /// Bails if a path can't be found, i.e. the zones aren't connected or either point isn't on the outside.
+    /// If start or end ID have siblings, traversal will start by going down to their free node.
+    fn find_exterior_path(&self, mut start_id: u16, mut end_id: u16, zone_id: u16) -> anyhow::Result<(Vec<u16>, bool)> {
+        // Get the real start or end positions by going down to their free nodes.
+        loop {
+            let start = self.get_point_info(start_id).unwrap();
+            if start.sync_mode() == ControlPointSyncMode::Free { break; }
+            start_id = start.sync_id();
+        }
+        loop {
+            let end = self.get_point_info(end_id).unwrap();
+            if end.sync_mode() == ControlPointSyncMode::Free { break; }
+            end_id = end.sync_id();
+        }
+
+        // Temporary: Ensure the start and end IDs are in the same zones
+        let source_zone_id = self.get_point_info(start_id).unwrap().zone_id();
+        let end_id = ControlPoint::find_in_zone(end_id, source_zone_id, &self.points.borrow().items)?;
+        if end_id.is_none() { anyhow::bail!("Start ID and end ID must be in the same zone for now!"); }
+        let end_id = end_id.unwrap();
+
+        // Find the signed area of the part we are creating, up to the endpoint
+        let (creating_start, creating_count) = self.get_zone_info(zone_id).unwrap().range();
+        let mut signed_area = 0.0;
+        let mut prev_point = self.get_point_info(creating_start).unwrap();
+        for i in 1..creating_count {
+            let point = self.get_point_info(creating_start + i).unwrap();
+            signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
+            prev_point = point;
+        }
+
+        // Tack on the endpoint as linear which would be correct when this is being created
+        {
+            let end = self.get_point_info(end_id).unwrap();
+            signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), end.position(), end.position());
+            prev_point = end;
+        }
+
+        // TEMP until multiple zones are viable
+        let (source_start, source_count) = self.get_zone_info(source_zone_id).unwrap().range();
+
+        // Find the path along the exterior from end to start, incrementing IDs.
+        // This travels along right handles and doesn't require a flip. Does not include end or start.
+        let (path_1, area_1) = {
+            // Traverse
+            let mut path = vec![];
+
+            // TEMP: Loop forward in the source zone
+            for i in 1..source_count {
+                let id = source_start + (end_id - source_start + i) % source_count;
+                if id == start_id { break; } // this will definitely hit
+                path.push(id);
+            }
+
+            // Calculate area
+            let mut signed_area = signed_area;
+            let mut prev_point = prev_point; // right handle is correctly pointing into the path
+
+            // Sum up area going around right handles
+            for point_id in &path[..] {
+                let point = self.get_point_info(*point_id).unwrap();
+                signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
+                prev_point = point;
+            }
+
+            // Join at the creation point
+            let point = self.get_point_info(creating_start).unwrap();
+            signed_area += bezier_signed_area(prev_point.position(), prev_point.right_handle(), point.left_handle(), point.position());
+
+            (path, signed_area.abs())
+        };
+
+        // Find the path along the exterior from end to start, decrementing IDs.
+        // This travels along left handles and would require a flip. Does not include end or start.
+        let (mut path_2, area_2) = {
+            // Traverse
+            let mut path = vec![];
+
+            // TEMP: Loop backward in the source zone
+            for i in 1..source_count {
+                let id = source_start + (end_id - source_start + source_count - i) % source_count;
+                if id == start_id { break; } // this will definitely hit
+                path.push(id);
+            }
+
+            // Calculate area
+            let mut signed_area = signed_area;
+            let mut prev_point = prev_point;
+
+            // Sum up area going around left handles
+            for point_id in &path[..] {
+                let point = self.get_point_info(*point_id).unwrap();
+                signed_area += bezier_signed_area(prev_point.position(), prev_point.left_handle(), point.right_handle(), point.position());
+                prev_point = point;
+            }
+
+            // Join final curve
+            let point = self.get_point_info(start_id).unwrap(); // right handle of start point points into the creating path -- this correctly points toward the source zone path
+            signed_area += bezier_signed_area(prev_point.position(), prev_point.left_handle(), point.right_handle(), point.position());
+
+            (path, signed_area.abs())
+        };
+        
+        // If path 2 has a smaller absolute area, flip it, pick it, and mark the zone for flipping. Area should never be equal.
+        let (path, flip) = if area_1 < area_2 { (path_1, false) } else {
+            path_2.reverse();
+            (path_2, true)
+        };
+
+        Ok((path, flip))
+    }
+
+    /// Flip the zone with the requested ID. Reverses all handles and point order.
+    /// Returns the new IDs of the start and end points.
+    /// Should only be used for a brand new zone, that doesn't have anything synced to it.
+    fn flip_zone(&mut self, zone_id: u16) -> anyhow::Result<(u16, u16)> {
+        if zone_id != self.zone_count() - 1 { anyhow::bail!("Can only run flip_zone on the final zone, not zone {}!", zone_id); }
+        if self.point_count() >= MAX_OBJECT_ID { anyhow::bail!("No space to flip the points in a zone!"); } // we should have checked at the beginning of whatever function
+        let (start, count) = self.get_zone_info(zone_id).unwrap().range();
+        let points = &mut self.points.borrow_mut().items;
+
+        for i in 0..(count / 2) {
+            let first_id = start + i;
+            let last_id = start + count - 1 - i;
+
+            // Flip the first point
+            let sync_id = points[first_id as usize].sync_id();
+            let sync_target = points[sync_id as usize].clone();
+            points[first_id as usize].flip(sync_target);
+
+            // Flip the last point
+            let sync_id = points[last_id as usize].sync_id();
+            let sync_target = points[sync_id as usize].clone();
+            points[last_id as usize].flip(sync_target);
+
+            // Swap the points themselves
+            let last_point = points[last_id as usize];
+            points[last_id as usize] = points[first_id as usize];
+            points[first_id as usize] = last_point;
+
+            // Swap the sibling IDs. Use id 65535 as a swap space which we checked earlier.
+            ControlPoint::update_id(last_id, 65535, points);
+            ControlPoint::update_id(first_id, last_id, points);
+            ControlPoint::update_id(65535, first_id, points);
+        }
+
+        // Flip middle point if it didn't get flipped
+        if count % 2 == 1 {
+            let middle_id = start + count / 2;
+            let sync_id = points[middle_id as usize].sync_id();
+            let sync_target = points[sync_id as usize].clone();
+            points[middle_id as usize].flip(sync_target);
+            // don't need to move it
+        }
+
+        Ok((start, start + count - 1))
+    }
 }
 
 /// Create a buffer for use with a VecWithBuffer. Return the buffer and its size of the buffer.
