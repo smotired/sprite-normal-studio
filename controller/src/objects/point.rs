@@ -52,6 +52,15 @@ impl From<u8> for ControlPointHandleSyncMode {
     }
 }
 
+impl From<bool> for ControlPointHandleSyncMode {
+    fn from(value: bool) -> Self {
+        match value {
+            false => Self::Synced,
+            true => Self::Flipped,
+        }
+    }
+}
+
 impl From<ControlPointHandleSyncMode> for u8 {
     fn from(value: ControlPointHandleSyncMode) -> Self { value as Self }
 }
@@ -148,12 +157,18 @@ impl ControlPoint {
     pub fn left_sync_id(&self) -> u16 { self.left_sync_id }
     pub fn right_sync_id(&self) -> u16 { self.right_sync_id }
     pub fn sync_modes(&self) -> (ControlPointHandleSyncMode, ControlPointHandleSyncMode) { ControlPointHandleSyncMode::from_flags(self.flags) }
-    pub fn syncs_in(&self, point_id: u16, right: bool) -> bool { if right { self.right_sync_id != point_id } else { self.left_sync_id != point_id } }
+    pub fn self_syncs_in(&self, point_id: u16, right: bool) -> bool { if right { self.right_sync_id != point_id } else { self.left_sync_id != point_id } }
     fn set_sync_modes(&mut self, flags: u8) { self.flags = (self.flags & 0b11111100) | flags; }
     fn set_sync_mode(&mut self, right: bool, mode: ControlPointHandleSyncMode) {
         let (left_mode, right_mode) = self.sync_modes();
         let flags = if right { (left_mode, mode) } else { (mode, right_mode) };
         self.set_sync_modes(ControlPointHandleSyncMode::create_flags(flags));
+    }
+
+    // Return true if any handle syncs to the same handle as this one.
+    pub fn any_syncs_in(point_id: u16, right: bool, points: &Vec<ControlPoint>) -> bool {
+        if points[point_id as usize].self_syncs_in(point_id, right) { return true; }
+        Self::get_watchers(point_id, points, right).len() > 0
     }
 
     /// Force a point into free mode, syncing to its own ID for both handles. Should only be used when joining a branch path to itself.
@@ -271,26 +286,13 @@ impl ControlPoint {
         }
     }
 
-    /// Create a new node from a sibling node, where we are in the shared path
-    pub fn new_sibling_branch_interior(id: u16, zone_id: u16, sibling_id: u16, points: &mut Vec<ControlPoint>) -> Self {
-        // Bubble sync targets down to what they're actually syncing to
-        let mut left_sync_id = sibling_id;
-        let mut right_sync_id = sibling_id; 
-
-        while points[left_sync_id as usize].left_sync_id != left_sync_id {
-            left_sync_id = points[left_sync_id as usize].left_sync_id;
-        }
-        if points[left_sync_id as usize].sync_modes().0.is_flipped() {
-            panic!("Point {left_sync_id} is syncing flipped right to itself!");
-        }
-
-        while points[right_sync_id as usize].right_sync_id != right_sync_id {
-            right_sync_id = points[right_sync_id as usize].right_sync_id;
-        }
-        if points[right_sync_id as usize].sync_modes().1.is_flipped() {
-            panic!("Point {right_sync_id} is syncing flipped right to itself!");
-        }
-
+    /// Create a new node from a sibling node, where we are in the shared path.
+    pub fn new_sibling_branch_interior(
+        id: u16, zone_id: u16, sibling_id: u16,
+        left_sync_id: u16, left_sync_handle: bool,
+        right_sync_id: u16, right_sync_handle: bool,
+        points: &mut Vec<ControlPoint>,
+    ) -> Self {
         // Find whatever points to the sibling, and make it point to the new node instead.
         let mut precursor_id = sibling_id;
         Self::traverse_siblings(sibling_id, points, |point, point_id| {
@@ -300,15 +302,22 @@ impl ControlPoint {
         }).unwrap();
         points[precursor_id as usize].sibling_id = id;
         
-        // Get a reference to the sibling to complete setup
+        // Get a reference to the sibling and sync targets to complete setup
         let sibling = points[sibling_id as usize];
+        let left_sync = points[left_sync_id as usize];
+        let right_sync = points[right_sync_id as usize];
+
+        let left_flipped = left_sync_handle;
+        let right_flipped = !right_sync_handle;
+        let left_mode = ControlPointHandleSyncMode::from(left_flipped);
+        let right_mode = ControlPointHandleSyncMode::from(right_flipped);
 
         Self {
             position: sibling.position,
-            left_handle: sibling.left_handle,
-            right_handle: sibling.right_handle,
+            left_handle: if left_flipped { left_sync.right_handle } else { left_sync.left_handle },
+            right_handle: if right_flipped { right_sync.left_handle } else { right_sync.right_handle },
             mode: sibling.mode,
-            flags: ControlPointHandleSyncMode::both_synced(),
+            flags: ControlPointHandleSyncMode::create_flags((left_mode, right_mode)),
             zone_id,
             left_sync_id,
             right_sync_id,
