@@ -1,7 +1,10 @@
 [package]
 name = "controller"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
+publish = false
+authors = ["Sam Hill <smotired@gmail.com>"]
+description = "Defines and manages zones and shapes, and generates the normal map."
 
 [dependencies]
 studio_math = { workspace = true }

@@ -2,11 +2,14 @@
 name = "studio_math"
 version = "0.2.0"
 edition = "2024"
+publish = false
+authors = ["Sam Hill <smotired@gmail.com>"]
+description = "Additional math helpers for vectors and cubic bezier curves."
 
 [dependencies]
 bytemuck = { workspace = true }
+rand = "0.10.3"
 
 # for Froms
 egui = { workspace = true }
-rand = "0.10.3"
 wgpu = { workspace = true }
