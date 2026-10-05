@@ -187,7 +187,7 @@ impl EditorToolPen {
                     else {
                         let right = {
                             let point = state.objects.get_point_info(point_id).unwrap();
-                            point.syncs_in(point_id, false)
+                            point.self_syncs_in(point_id, false)
                         };
 
                         self.selected_point = Some(point_id);
