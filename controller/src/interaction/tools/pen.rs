@@ -283,3 +283,234 @@ impl EditorToolPen {
         self.ok()
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use crate::ObjectBuffers;
+    use crate::objects::test_utils::add_square;
+
+    use super::*;
+    use super::super::test_utils::state;
+
+    /// Click three points far apart to start a path
+    fn start_triangle(tool: &mut EditorToolPen, objects: &ObjectBuffers) {
+        tool.handle_click(state(objects), Vec2::new(0.0, 0.0)).unwrap();
+        tool.handle_click(state(objects), Vec2::new(50.0, 0.0)).unwrap();
+        tool.handle_click(state(objects), Vec2::new(50.0, 50.0)).unwrap();
+    }
+
+    /// A tool that is not creating anything
+    #[test]
+    fn init() {
+        let tool = EditorToolPen::init();
+        assert_eq!(tool.kind(), EditorToolKind::Pen);
+        assert!(tool.selection().is_empty());
+        assert_eq!(tool.creating_path(), None);
+    }
+
+    /// Clicking empty space starts a new zone, and further clicks add points to it
+    #[test]
+    fn click_creates_points() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+
+        let result = tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Pen);
+        assert_eq!(objects.object_counts(), (1, 1));
+        assert_eq!(tool.creating_path(), Some(true)); // the latest point is the first point
+
+        tool.handle_click(state(&objects), Vec2::new(50.0, 0.0)).unwrap();
+        assert_eq!(tool.creating_path(), Some(false));
+        tool.handle_click(state(&objects), Vec2::new(50.0, 50.0)).unwrap();
+        assert_eq!(objects.object_counts(), (1, 3));
+        assert_eq!(tool.selection(), &[0, 1, 2]);
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(50.0, 50.0));
+    }
+
+    /// Clicking the first point completes the path and moves to the zone tool
+    #[test]
+    fn click_first_point_completes_path() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        start_triangle(&mut tool, &objects);
+
+        let result = tool.handle_click(state(&objects), Vec2::new(1.0, 1.0)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Zone);
+        assert!(result.normals_stale);
+        assert_eq!(objects.object_counts(), (1, 3));
+
+        // Deselecting should not delete the finished zone
+        tool.deselect(state(&objects));
+        assert_eq!(objects.object_counts(), (1, 3));
+    }
+
+    /// Clicking the first point when there is only one point doesn't finish anything
+    #[test]
+    fn click_first_point_needs_more_points() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+
+        let result = tool.handle_click(state(&objects), Vec2::new(1.0, 1.0)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Pen);
+        assert_eq!(objects.point_count(), 1);
+    }
+
+    /// Dragging out a new point makes it continuous and drags its handle
+    #[test]
+    fn drag_creates_continuous_point() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0)).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().mode(), ControlPointMode::Continuous);
+        assert_eq!(tool.handle, Some(true));
+
+        tool.handle_dragging_to(state(&objects), Vec2::new(30.0, 10.0)).unwrap();
+        let point = objects.get_point_info(0).unwrap();
+        assert_eq!(point.right_handle(), Vec2::new(30.0, 10.0));
+
+        tool.handle_drag_released(state(&objects)).unwrap();
+        assert_eq!(tool.handle, None);
+    }
+
+    /// Dragging a later point sets both handles opposite to each other
+    #[test]
+    fn drag_sets_opposite_handles() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0)).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 5.0)).unwrap();
+
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.right_handle(), Vec2::new(60.0, 5.0));
+        assert_eq!(point.left_handle(), Vec2::new(40.0, -5.0));
+    }
+
+    /// Dragging off of the first point closes the path, and releasing finishes it
+    #[test]
+    fn drag_first_point_closes_path() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        start_triangle(&mut tool, &objects);
+
+        tool.handle_drag_start(state(&objects), Vec2::new(1.0, 1.0)).unwrap();
+        assert_eq!(tool.creating_path(), Some(true));
+        assert_eq!(objects.get_point_info(0).unwrap().mode(), ControlPointMode::Broken);
+
+        let result = tool.handle_drag_released(state(&objects)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Zone);
+        assert!(result.normals_stale);
+    }
+
+    /// Releasing a drag on the first point of a path with a single point doesn't finish it
+    #[test]
+    fn release_needs_more_points() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.handle_drag_start(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+
+        let result = tool.handle_drag_released(state(&objects)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Pen);
+    }
+
+    /// Cancelling throws away the path being created
+    #[test]
+    fn cancel_deletes_path() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        start_triangle(&mut tool, &objects);
+
+        let result = tool.handle_cancel(state(&objects)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Pen);
+        assert_eq!(objects.object_counts(), (0, 0));
+        assert_eq!(tool.creating_path(), None);
+        assert!(tool.selection().is_empty());
+    }
+
+    /// Deselecting throws away an unfinished path
+    #[test]
+    fn deselect_deletes_path() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        start_triangle(&mut tool, &objects);
+
+        assert!(tool.deselect(state(&objects)).is_empty());
+        assert_eq!(objects.object_counts(), (0, 0));
+    }
+
+    /// Deleting removes the latest point, and the zone with it if it was the only one
+    #[test]
+    fn delete_latest_point() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        start_triangle(&mut tool, &objects);
+
+        tool.handle_delete(state(&objects)).unwrap();
+        assert_eq!(objects.object_counts(), (1, 2));
+        assert_eq!(tool.selection(), &[0, 1]);
+
+        tool.handle_delete(state(&objects)).unwrap();
+        tool.handle_delete(state(&objects)).unwrap();
+        assert_eq!(objects.object_counts(), (0, 0));
+        assert_eq!(tool.creating_path(), None);
+    }
+
+    /// Deleting when there is no path does nothing
+    #[test]
+    fn delete_nothing() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPen::init();
+        tool.handle_delete(state(&objects)).unwrap();
+        assert_eq!(objects.object_counts(), (1, 4));
+    }
+
+    /// Clicking an existing path adds a point to it, and moves to the point tool
+    #[test]
+    fn click_path_inserts_point() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let mut tool = EditorToolPen::init();
+
+        let result = tool.handle_click(state(&objects), Vec2::new(50.0, 1.0)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Point);
+        assert!(result.normals_stale);
+        assert_eq!(objects.point_count(), 5);
+        assert_eq!(tool.selection(), &[1]);
+
+        // Deselecting should not delete the zone we added to
+        tool.deselect(state(&objects));
+        assert_eq!(objects.zone_count(), 1);
+    }
+
+    /// Clicking an existing point starts a zone branching off of it
+    #[test]
+    fn click_point_branches() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_click(state(&objects), Vec2::new(100.0, 0.0)).unwrap();
+        assert_eq!(objects.object_counts(), (2, 5));
+        assert_eq!(tool.creating_path(), Some(true));
+        assert_eq!(objects.get_sibling(1).unwrap(), 4);
+    }
+
+    /// Branching off of a point then clicking another one joins the zones together
+    #[test]
+    fn click_second_point_joins() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(-100.0, 50.0)).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(0.0, 100.0)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Zone);
+        assert!(result.normals_stale);
+        assert_eq!(objects.zone_count(), 2);
+        assert_eq!(objects.get_zone_info(1).unwrap().range().1, 3);
+    }
+}

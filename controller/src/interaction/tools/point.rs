@@ -184,3 +184,160 @@ fn points_in_zone(zone_id: u16, state: &ControllerStateInput) -> Vec<u16> {
     let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
     (start..start + count).collect()
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use studio_math::Vec2;
+
+    use crate::ObjectBuffers;
+    use crate::objects::ControlPointMode;
+    use crate::objects::test_utils::add_square;
+
+    use super::*;
+    use super::super::test_utils::state;
+
+    /// A tool with nothing selected
+    #[test]
+    fn init() {
+        let tool = EditorToolPoint::init();
+        assert_eq!(tool.kind(), EditorToolKind::Point);
+        assert!(tool.selection().is_empty());
+    }
+
+    /// Selecting keeps the selected points
+    #[test]
+    fn select_keeps_points() {
+        let objects = ObjectBuffers::headless();
+        let tool = EditorToolPoint::select(&[2, 3], state(&objects));
+        assert_eq!(tool.selection(), &[2, 3]);
+    }
+
+    /// Clicking a point selects it, a path selects its whole zone, and nothing deselects
+    #[test]
+    fn click_selects() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let mut tool = EditorToolPoint::init();
+
+        tool.handle_click(state(&objects), Vec2::new(100.0, 100.5)).unwrap();
+        assert_eq!(tool.selection(), &[2]);
+
+        tool.handle_click(state(&objects), Vec2::new(50.0, -1.0)).unwrap();
+        assert_eq!(tool.selection(), &[0, 1, 2, 3]);
+
+        tool.handle_click(state(&objects), Vec2::new(500.0, 500.0)).unwrap();
+        assert!(tool.selection().is_empty());
+    }
+
+    /// Clicking the handle of the selected point should keep it selected
+    #[test]
+    fn click_handle_keeps_selection() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(1, None, Some(ControlPointMode::Broken), None, Some(Vec2::new(0.0, 30.0))).unwrap();
+        let mut tool = EditorToolPoint::select(&[1], state(&objects));
+
+        tool.handle_click(state(&objects), Vec2::new(10.0, 30.0)).unwrap();
+        assert_eq!(tool.selection(), &[1]);
+    }
+
+    /// Clicking a point shared with another zone selects its sibling in the other zone
+    #[test]
+    fn click_selects_sibling() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (_, branch_id) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(1, Vec2::new(20.0, 0.0)).unwrap();
+        let mut tool = EditorToolPoint::select(&[1], state(&objects));
+
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        assert_eq!(tool.selection(), &[branch_id]);
+    }
+
+    /// Dragging a point moves it, and marks the normals stale
+    #[test]
+    fn drag_moves_point() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::init();
+
+        let result = tool.handle_drag_start(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        assert!(!result.normals_stale);
+        assert_eq!(tool.selection(), &[1]);
+
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(14.0, 3.0)).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(14.0, 3.0));
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
+    }
+
+    /// Dragging several points keeps them arranged the same way
+    #[test]
+    fn drag_moves_selection_together() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::select(&[0, 1, 2, 3], state(&objects));
+
+        tool.handle_dragging_to(state(&objects), Vec2::new(5.0, 5.0)).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 5.0));
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 15.0));
+    }
+
+    /// Dragging a handle of the selected point moves the handle and not the point
+    #[test]
+    fn drag_moves_handle() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(1, None, Some(ControlPointMode::Broken), None, Some(Vec2::new(0.0, 30.0))).unwrap();
+        let mut tool = EditorToolPoint::select(&[1], state(&objects));
+
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 30.0)).unwrap();
+        assert_eq!(tool.handle, Some(true));
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(25.0, 10.0)).unwrap();
+        assert!(result.normals_stale);
+
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.position(), Vec2::new(10.0, 0.0));
+        assert_eq!(point.right_handle(), Vec2::new(25.0, 10.0));
+
+        tool.handle_drag_released(state(&objects)).unwrap();
+        assert_eq!(tool.handle, None);
+    }
+
+    /// Dragging with nothing selected does nothing
+    #[test]
+    fn drag_nothing() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::init();
+
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0)).unwrap();
+        assert!(!tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0)).unwrap().normals_stale);
+    }
+
+    /// Deleting removes every selected point, even though IDs shift as they go
+    #[test]
+    fn delete_points() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.insert_point(0, 0, 0.5).unwrap();
+        let mut tool = EditorToolPoint::select(&[1, 2], state(&objects));
+
+        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert_eq!(objects.point_count(), 3);
+        assert!(tool.selection().is_empty());
+        assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(10.0, 10.0));
+    }
+
+    /// Deleting with nothing selected does nothing
+    #[test]
+    fn delete_nothing() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::init();
+        assert!(!tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert_eq!(objects.point_count(), 4);
+    }
+}

@@ -102,3 +102,142 @@ impl ObjectBuffers {
         Ok(())
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::test_utils::{add_zone, add_square};
+
+    /// Position changes should apply to the point
+    #[test]
+    fn update_point_position() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        objects.update_point(2, Some(Vec2::new(12.0, 13.0)), None, None, None).unwrap();
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(12.0, 13.0));
+        assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(10.0, 0.0));
+    }
+
+    /// Mode and handle changes should apply to the point
+    #[test]
+    fn update_point_mode_and_handles() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(0.0, 3.0))).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.mode(), ControlPointMode::Broken);
+        assert_eq!(point.left_handle(), Vec2::new(8.0, 0.0));
+        assert_eq!(point.right_handle(), Vec2::new(10.0, 3.0));
+    }
+
+    /// Continuous points keep the opposite handle on the line, with its own length
+    #[test]
+    fn update_point_continuous_mirrors_handle() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(1, None, Some(ControlPointMode::Continuous), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(4.0, 0.0))).unwrap();
+
+        objects.update_point(1, None, None, None, Some(Vec2::new(0.0, 5.0))).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.right_handle(), Vec2::new(10.0, 5.0));
+        assert_eq!(point.left_handle(), Vec2::new(10.0, -2.0));
+
+        objects.update_point(1, None, None, Some(Vec2::new(-3.0, 0.0)), None).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.left_handle(), Vec2::new(7.0, 0.0));
+        assert_eq!(point.right_handle(), Vec2::new(15.0, 0.0));
+    }
+
+    /// Moving a zone moves its first point to the target, and everything else along with it
+    #[test]
+    fn update_zone_position() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
+
+        objects.update_zone_position(0, Vec2::new(5.0, 5.0)).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 5.0));
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 15.0));
+        assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(20.0, 0.0));
+    }
+
+    /// Deleting a point removes it and shifts later points and zones back
+    #[test]
+    fn delete_point() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
+
+        objects.delete_point(1).unwrap();
+        assert_eq!(objects.object_counts(), (2, 5));
+        assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 3));
+        assert_eq!(objects.get_zone_info(1).unwrap().range(), (3, 2));
+        assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(10.0, 10.0));
+        assert_eq!(objects.get_point_info(3).unwrap().position(), Vec2::new(20.0, 0.0));
+        assert_eq!(objects.get_point_info(3).unwrap().zone_id(), 1);
+    }
+
+    /// A zone with only two points is deleted entirely when one of its points is
+    #[test]
+    fn delete_point_deletes_small_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(0.0, 0.0), (1.0, 0.0)]);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+
+        objects.delete_point(0).unwrap();
+        assert_eq!(objects.object_counts(), (1, 3));
+        assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 3));
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(20.0, 0.0));
+        assert_eq!(objects.get_point_info(0).unwrap().zone_id(), 0);
+    }
+
+    /// A path still being created is only deleted once its last point is
+    #[test]
+    fn delete_point_in_wip_path() {
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(0.0, 0.0), (1.0, 0.0)]);
+
+        assert!(!objects.delete_point_in_wip_path(1).unwrap());
+        assert_eq!(objects.object_counts(), (1, 1));
+        assert!(objects.delete_point_in_wip_path(0).unwrap());
+        assert_eq!(objects.object_counts(), (0, 0));
+    }
+
+    /// Deleting a zone removes its points, and renumbers the zones after it
+    #[test]
+    fn delete_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+        add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
+
+        objects.delete_zone(0).unwrap();
+        assert_eq!(objects.object_counts(), (2, 6));
+        assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 3));
+        assert_eq!(objects.get_zone_info(1).unwrap().range(), (3, 3));
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(20.0, 0.0));
+        assert_eq!(objects.get_point_info(3).unwrap().position(), Vec2::new(40.0, 0.0));
+        assert_eq!(objects.get_point_info(0).unwrap().zone_id(), 0);
+        assert_eq!(objects.get_point_info(5).unwrap().zone_id(), 1);
+        assert_eq!(objects.get_sibling(4).unwrap(), 4);
+    }
+
+    /// Deleting a zone should leave the zones it shared points with intact, but unsynced
+    #[test]
+    fn delete_zone_with_siblings() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (zone_id, _) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(zone_id, Vec2::new(20.0, 0.0)).unwrap();
+
+        objects.delete_zone(zone_id).unwrap();
+        assert_eq!(objects.object_counts(), (1, 4));
+        for id in 0..4 {
+            assert_eq!(objects.get_sibling(id).unwrap(), id);
+        }
+    }
+}

@@ -209,4 +209,77 @@ mod tests {
         assert!((distance - 5.0).abs() < 1e-3);
         assert_close(corrected, pos0);
     }
+
+use super::super::test_utils::{add_zone, add_square};
+    use crate::objects::ObjectBuffers;
+
+    /// With no zone given, the closest point across every zone is found
+    #[test]
+    fn closest_point_any_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
+
+        assert_eq!(objects.get_closest_point(None, Vec2::new(11.0, 1.0)), Some((0, 1)));
+        assert_eq!(objects.get_closest_point(None, Vec2::new(28.0, 1.0)), Some((1, 5)));
+    }
+
+    /// With a zone given, only its points are searched
+    #[test]
+    fn closest_point_in_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
+
+        assert_eq!(objects.get_closest_point(Some(0), Vec2::new(28.0, 1.0)), Some((0, 1)));
+        assert_eq!(objects.get_closest_point(Some(1), Vec2::new(0.0, 0.0)), Some((1, 4)));
+    }
+
+    /// Nothing is found if there are no points, or if the zone is missing
+    #[test]
+    fn closest_point_none() {
+        let mut objects = ObjectBuffers::headless();
+        assert_eq!(objects.get_closest_point(None, Vec2::ZERO), None);
+
+        add_square(&mut objects, 10.0);
+        assert_eq!(objects.get_closest_point(Some(5), Vec2::ZERO), None);
+        objects.create_zone().unwrap();
+        assert_eq!(objects.get_closest_point(Some(1), Vec2::ZERO), None);
+    }
+
+    /// The closest path point is on the nearest edge, and starts at the right point
+    #[test]
+    fn closest_path_point() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        let (zone_id, start_id, corrected, t) = objects.get_closest_path_point(Vec2::new(5.0, -1.0), 1.0).unwrap();
+        assert_eq!((zone_id, start_id), (0, 0));
+        assert!(corrected.distance(Vec2::new(5.0, 0.0)) < 1e-3);
+        assert!((t - 0.5).abs() < 1e-3);
+
+        // The closing edge starts at the last point
+        let (zone_id, start_id, corrected, t) = objects.get_closest_path_point(Vec2::new(-1.0, 2.5), 1.0).unwrap();
+        assert_eq!((zone_id, start_id), (0, 3));
+        assert!(corrected.distance(Vec2::new(0.0, 2.5)) < 1e-3);
+        assert!((3.0 * t * t - 2.0 * t * t * t - 0.75).abs() < 1e-2); // linear points still use the curve parameter, which eases in and out
+    }
+
+    /// The closest path across zones wins
+    #[test]
+    fn closest_path_point_across_zones() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+
+        let (zone_id, start_id, _, _) = objects.get_closest_path_point(Vec2::new(25.0, -1.0), 1.0).unwrap();
+        assert_eq!((zone_id, start_id), (1, 4));
+    }
+
+    /// No paths means nothing to find
+    #[test]
+    fn closest_path_point_none() {
+        let objects = ObjectBuffers::headless();
+        assert!(objects.get_closest_path_point(Vec2::ZERO, 1.0).is_none());
+    }
 }
