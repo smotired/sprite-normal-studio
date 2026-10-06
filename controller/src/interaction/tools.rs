@@ -117,3 +117,23 @@ impl Controller {
         }
     }
 }
+
+
+/// Helpers for running tools against objects in tests
+#[cfg(test)]
+mod test_utils {
+    use studio_math::Vec2;
+
+    use crate::ObjectBuffers;
+    use super::ControllerStateInput;
+
+    /// Create the input state for a tool, as if the camera is at 1:1 scale
+    pub(super) fn state(objects: &ObjectBuffers) -> ControllerStateInput {
+        state_scaled(objects, 1.0)
+    }
+
+    /// Create the input state for a tool with a specific inverse camera scale
+    pub(super) fn state_scaled(objects: &ObjectBuffers, camera_inv_scale: f32) -> ControllerStateInput {
+        ControllerStateInput { mouse: Vec2::ZERO, objects: objects.clone(), camera_inv_scale }
+    }
+}

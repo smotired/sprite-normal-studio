@@ -223,3 +223,143 @@ impl ObjectBuffers {
         Ok(point_id)
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::test_utils::{add_zone, add_square};
+
+    /// Zones are numbered in order, and start after the existing points
+    #[test]
+    fn create_zone() {
+        let mut objects = ObjectBuffers::headless();
+        assert_eq!(objects.create_zone().unwrap(), 0);
+        objects.create_point(0, Vec2::ZERO).unwrap();
+        objects.create_point(0, Vec2::ONE).unwrap();
+
+        assert_eq!(objects.create_zone().unwrap(), 1);
+        assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 2));
+        assert_eq!(objects.get_zone_info(1).unwrap().range(), (2, 0));
+    }
+
+    /// Created points are linear, solo, and added to the end of the zone
+    #[test]
+    fn create_point() {
+        let mut objects = ObjectBuffers::headless();
+        let zone_id = objects.create_zone().unwrap();
+        assert_eq!(objects.create_point(zone_id, Vec2::new(1.0, 2.0)).unwrap(), 0);
+        assert_eq!(objects.create_point(zone_id, Vec2::new(3.0, 4.0)).unwrap(), 1);
+
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.position(), Vec2::new(3.0, 4.0));
+        assert_eq!(point.zone_id(), zone_id);
+        assert_eq!(point.mode(), ControlPointMode::Linear);
+        assert_eq!(objects.get_sibling(1).unwrap(), 1);
+        assert_eq!(objects.get_zone_info(zone_id).unwrap().range(), (0, 2));
+    }
+
+    /// Points can only be created in the last zone
+    #[test]
+    fn create_point_in_earlier_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.create_zone().unwrap();
+        assert!(objects.create_point(0, Vec2::ZERO).is_err());
+        assert_eq!(objects.point_count(), 4);
+    }
+
+    /// Inserting at the halfway point of a straight edge adds a linear point in the middle
+    #[test]
+    fn insert_point() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        let created = objects.insert_point(0, 0, 0.5).unwrap();
+        assert_eq!(created, vec![1]);
+        assert_eq!(objects.point_count(), 5);
+        assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 5));
+        assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(5.0, 0.0));
+        assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Linear);
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 0.0));
+        assert_eq!(objects.get_sibling(1).unwrap(), 1);
+    }
+
+    /// Inserting on the closing edge of a zone adds the point on the end
+    #[test]
+    fn insert_point_on_closing_edge() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        let created = objects.insert_point(0, 3, 0.5).unwrap();
+        assert_eq!(created, vec![4]);
+        assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(0.0, 5.0));
+    }
+
+    /// Zones after the insertion should move along and keep pointing at their own points
+    #[test]
+    fn insert_point_shifts_later_zones() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+
+        objects.insert_point(0, 0, 0.5).unwrap();
+        assert_eq!(objects.get_zone_info(1).unwrap().range(), (5, 3));
+        assert_eq!(objects.get_point_info(5).unwrap().position(), Vec2::new(20.0, 0.0));
+        assert_eq!(objects.get_point_info(5).unwrap().zone_id(), 1);
+        assert_eq!(objects.get_sibling(7).unwrap(), 7);
+    }
+
+    /// Inserting into a curved edge splits it into two continuous halves
+    #[test]
+    fn insert_point_on_curve() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(0, None, Some(ControlPointMode::Broken), None, Some(Vec2::new(0.0, -5.0))).unwrap();
+        objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(0.0, -5.0)), None).unwrap();
+
+        objects.insert_point(0, 0, 0.5).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.mode(), ControlPointMode::Continuous);
+
+        // The point is on the original curve, with its handles on a line along the tangent
+        assert!((point.position() - Vec2::new(5.0, -3.75)).magnitude() < 1e-4);
+        let left = point.left_handle() - point.position();
+        let right = point.right_handle() - point.position();
+        assert!(left.cross(right).abs() < 1e-4);
+        assert!(left.dot(right) < 0.0);
+    }
+
+    /// Insertion needs an existing zone and a start point inside of it
+    #[test]
+    fn insert_point_errors() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
+
+        assert!(objects.insert_point(5, 0, 0.5).is_err());
+        assert!(objects.insert_point(0, 4, 0.5).is_err());
+        assert!(objects.insert_point(1, 0, 0.5).is_err());
+        assert_eq!(objects.point_count(), 6);
+    }
+
+    /// Inserting into a shared edge adds a synced point to every zone that shares it
+    #[test]
+    fn insert_point_into_shared_edge() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (zone_id, _) = objects.create_branching_zone(0).unwrap();
+        objects.create_point(zone_id, Vec2::new(-10.0, 5.0)).unwrap();
+        objects.complete_branching_zone(0, zone_id, 3).unwrap();
+
+        // The left edge of the square (3 -> 0) is shared by both zones
+        let created = objects.insert_point(0, 3, 0.5).unwrap();
+        assert_eq!(created.len(), 2);
+        let zones: Vec<u16> = created.iter().map(|&id| objects.get_point_info(id).unwrap().zone_id()).collect();
+        assert!(zones.contains(&0) && zones.contains(&zone_id));
+        for &id in &created {
+            assert_eq!(objects.get_point_info(id).unwrap().position(), Vec2::new(0.0, 5.0));
+        }
+    }
+}

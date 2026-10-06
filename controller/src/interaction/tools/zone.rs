@@ -185,3 +185,130 @@ fn points_from_zone_selection(selected_zones: &[u16], state: ControllerStateInpu
     }
     points
 }
+
+
+#[cfg(test)]
+mod tests {
+    use crate::ObjectBuffers;
+    use crate::objects::test_utils::{add_square, add_zone};
+
+    use super::*;
+    use super::super::test_utils::state;
+
+    /// A tool with nothing selected
+    #[test]
+    fn init() {
+        let tool = EditorToolZone::init();
+        assert_eq!(tool.kind(), EditorToolKind::Zone);
+        assert!(tool.selection().is_empty());
+    }
+
+    /// Selecting from points selects every point of the zones they are in
+    #[test]
+    fn select_from_points() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+
+        let tool = EditorToolZone::select(&[5], state(&objects));
+        assert_eq!(tool.selection(), &[4, 5, 6]);
+    }
+
+    /// Clicking a control point or a path selects the zone, and clicking nothing deselects
+    #[test]
+    fn click_selects_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
+        let mut tool = EditorToolZone::init();
+
+        let result = tool.handle_click(state(&objects), Vec2::new(10.5, 0.0)).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Zone);
+        assert!(!result.normals_stale);
+        assert_eq!(tool.selection(), &[0, 1, 2, 3]);
+
+        tool.handle_click(state(&objects), Vec2::new(90.0, 1.0)).unwrap(); // path
+        assert_eq!(tool.selection(), &[4, 5, 6]);
+
+        tool.handle_click(state(&objects), Vec2::new(25.0, 25.0)).unwrap();
+        assert!(tool.selection().is_empty());
+    }
+
+    /// Clicking a point shared by two zones cycles through them
+    #[test]
+    fn click_cycles_shared_points() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (zone_id, _) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(zone_id, Vec2::new(20.0, 0.0)).unwrap();
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        let first = tool.selection().to_vec();
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        let second = tool.selection().to_vec();
+        assert_ne!(first, second);
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        assert_eq!(tool.selection(), &first[..]);
+    }
+
+    /// Dragging a zone moves it by where it was grabbed, and marks the normals stale
+    #[test]
+    fn drag_moves_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0)).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(15.0, 12.0)).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 2.0));
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
+
+        // Releasing keeps the zone selected but stops the drag
+        tool.handle_drag_released(state(&objects)).unwrap();
+        assert_eq!(tool.selection().len(), 4);
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0)).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
+    }
+
+    /// Dragging with nothing selected does nothing
+    #[test]
+    fn drag_nothing() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0)).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0)).unwrap();
+        assert!(!result.normals_stale);
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
+    }
+
+    /// Deleting removes selected zones, and clears the selection
+    #[test]
+    fn delete_zones() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
+        let mut tool = EditorToolZone::init();
+
+        assert!(!tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert_eq!(objects.zone_count(), 2);
+
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert_eq!(objects.object_counts(), (1, 3));
+        assert!(tool.selection().is_empty());
+    }
+
+    /// Deselecting gives back the selected points
+    #[test]
+    fn deselect_returns_selection() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+        assert_eq!(tool.deselect(state(&objects)), &[0, 1, 2, 3]);
+    }
+}

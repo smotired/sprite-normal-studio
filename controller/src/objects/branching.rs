@@ -120,3 +120,95 @@ impl ObjectBuffers {
         Ok(created)
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use studio_math::Vec2;
+
+    use super::*;
+    use super::super::ControlPointMode;
+    use super::super::test_utils::add_square;
+
+    /// A branch starts a new zone with a broken point on top of the sibling
+    #[test]
+    fn create_branching_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        let (zone_id, point_id) = objects.create_branching_zone(1).unwrap();
+        assert_eq!((zone_id, point_id), (1, 4));
+        assert_eq!(objects.get_zone_info(zone_id).unwrap().range(), (4, 1));
+
+        let point = objects.get_point_info(point_id).unwrap();
+        assert_eq!(point.position(), Vec2::new(10.0, 0.0));
+        assert_eq!(point.zone_id(), zone_id);
+        assert_eq!(point.mode(), ControlPointMode::Broken);
+        assert_eq!(ControlPoint::get_siblings(1, &objects.point_siblings.borrow().items), vec![4]);
+    }
+
+    /// The sibling has to exist
+    #[test]
+    fn create_branching_zone_missing_sibling() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        assert!(objects.create_branching_zone(4).is_err());
+        assert_eq!(objects.zone_count(), 1);
+    }
+
+    /// Joining back to the point we started at makes the first point a free point and creates nothing
+    #[test]
+    fn complete_branching_zone_at_source() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (zone_id, point_id) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(zone_id, Vec2::new(20.0, 5.0)).unwrap();
+        objects.create_point(zone_id, Vec2::new(20.0, -5.0)).unwrap();
+
+        let created = objects.complete_branching_zone(1, zone_id, 1).unwrap();
+        assert!(created.is_empty());
+        let point = objects.get_point_info(point_id).unwrap();
+        assert_eq!((point.left_sync_id(), point.right_sync_id()), (point_id, point_id));
+        assert_eq!(objects.point_count(), 7);
+    }
+
+    /// Joining along a shared edge creates one synced point at the join, and doesn't take the long way around
+    #[test]
+    fn complete_branching_zone_along_edge() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (zone_id, start_id) = objects.create_branching_zone(0).unwrap();
+        objects.create_point(zone_id, Vec2::new(-10.0, 5.0)).unwrap();
+
+        // Join the corner above, which is connected to the start by the left edge
+        let created = objects.complete_branching_zone(0, zone_id, 3).unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(objects.get_zone_info(zone_id).unwrap().range().1, 3);
+
+        // The new zone is a triangle along the left edge with its points synced to the square
+        let (start, count) = objects.get_zone_info(zone_id).unwrap().range();
+        let positions: Vec<Vec2> = (start..start + count).map(|id| objects.get_point_info(id).unwrap().position()).collect();
+        assert!(positions.contains(&Vec2::new(0.0, 0.0)));
+        assert!(positions.contains(&Vec2::new(0.0, 10.0)));
+        assert!(positions.contains(&Vec2::new(-10.0, 5.0)));
+        assert_eq!(ControlPoint::get_siblings(0, &objects.point_siblings.borrow().items).len(), 1);
+        assert_eq!(ControlPoint::get_siblings(3, &objects.point_siblings.borrow().items).len(), 1);
+        let _ = start_id;
+    }
+
+    /// Joining requires the points to exist, and to be connected
+    #[test]
+    fn complete_branching_zone_errors() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (zone_id, _) = objects.create_branching_zone(0).unwrap();
+        let other_zone = objects.create_zone().unwrap();
+        objects.create_point(other_zone, Vec2::new(100.0, 100.0)).unwrap();
+
+        assert!(objects.complete_branching_zone(0, zone_id, 99).is_err());
+        assert!(objects.complete_branching_zone(99, zone_id, 1).is_err());
+        assert!(objects.complete_branching_zone(0, 99, 1).is_err());
+        assert!(objects.complete_branching_zone(0, zone_id, 5).is_err()); // unconnected
+    }
+}

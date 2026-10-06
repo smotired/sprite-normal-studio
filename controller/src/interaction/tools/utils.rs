@@ -45,3 +45,59 @@ pub fn get_clicked_zone_path(state: &ControllerStateInput, pos: Vec2) -> Option<
         }
     None
 }
+
+
+#[cfg(test)]
+mod tests {
+    use crate::ObjectBuffers;
+    use crate::objects::test_utils::add_square;
+
+    use super::*;
+    use super::super::test_utils::{state, state_scaled};
+
+    /// Clicking near a control point finds it, and clicking far from everything does not
+    #[test]
+    fn clicked_control_point() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        assert_eq!(get_clicked_control_point(&state(&objects), None, Vec2::new(11.0, 1.0)), Some((0, 1)));
+        assert_eq!(get_clicked_control_point(&state(&objects), None, Vec2::new(30.0, 30.0)), None);
+    }
+
+    /// The click tolerance is in screen pixels, so it grows when zoomed out
+    #[test]
+    fn clicked_control_point_scales_with_camera() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let click = Vec2::new(10.0, 20.0);
+
+        assert_eq!(get_clicked_control_point(&state(&objects), None, click), None);
+        assert_eq!(get_clicked_control_point(&state_scaled(&objects, 4.0), None, click), Some((0, 2)));
+    }
+
+    /// Handles can be clicked on broken points, but not on linear points
+    #[test]
+    fn clicked_handle() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(10.0, 0.0)), None);
+
+        objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(-20.0, 0.0)), Some(Vec2::new(0.0, 30.0))).unwrap();
+        assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(-10.0, 1.0)), Some(false));
+        assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(10.0, 31.0)), Some(true));
+        assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(50.0, 50.0)), None);
+    }
+
+    /// Clicking near a path finds the zone, the start of the segment, and the position on the path
+    #[test]
+    fn clicked_zone_path() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        let (zone_id, point_id, corrected, _) = get_clicked_zone_path(&state(&objects), Vec2::new(5.0, -2.0)).unwrap();
+        assert_eq!((zone_id, point_id), (0, 0));
+        assert!(corrected.distance(Vec2::new(5.0, 0.0)) < 1e-3);
+        assert!(get_clicked_zone_path(&state(&objects), Vec2::new(5.0, -20.0)).is_none());
+    }
+}

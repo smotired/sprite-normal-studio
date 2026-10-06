@@ -7,8 +7,8 @@ pub(super) struct VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable 
     /// Items in the vector
     pub(super) items: Vec<T>,
 
-    /// Buffer storing these items
-    buffer: Buffer,
+    /// Buffer storing these items. Only None when created without a GPU for tests.
+    buffer: Option<Buffer>,
 
     /// Amount of items the buffer can hold before a resize
     buffer_size: usize,
@@ -23,10 +23,16 @@ impl<T> VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
         let (buffer, buffer_size) = create_buffer(device, &items, label);
         Self {
             items,
-            buffer,
+            buffer: Some(buffer),
             buffer_size,
             label,
         }
+    }
+
+    /// Create a list with no GPU buffer behind it, for testing the CPU side.
+    #[cfg(test)]
+    pub fn headless(label: &'static str) -> Self {
+        Self { items: vec![], buffer: None, buffer_size: MIN_BUFFER_SIZE, label }
     }
 
     /// Get the buffer and its size. Caller should keep track of buffer sizes and recreate bind groups if they change.
@@ -37,15 +43,18 @@ impl<T> VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
         // Recreate the buffer if the length has grown too large or too small
         if !(maintain_range).contains(required_space) {
             println!("Need to recreate {} | Buffer size: {} |  Item count: {}", self.label, self.buffer_size, self.items.len());
-            (self.buffer, self.buffer_size) = create_buffer(device, &self.items, self.label);
+            let (buffer, buffer_size) = create_buffer(device, &self.items, self.label);
+            (self.buffer, self.buffer_size) = (Some(buffer), buffer_size);
         }
 
-        (self.buffer.clone(), self.buffer_size)
+        (self.buffer.clone().expect("Buffer should exist when a device is available"), self.buffer_size)
     }
 
     /// Write the items to the buffer.
     pub fn write(&self, queue: &Queue) {
-        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&self.items[..]));
+        if let Some(buffer) = &self.buffer {
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.items[..]));
+        }
     }
 }
 

@@ -339,4 +339,91 @@ mod tests {
         assert_eq!((segment.start_id, segment.start_handle), (2, false));
         assert_eq!((segment.end_id, segment.end_handle), (1, true));
     }
+
+use studio_math::Vec2;
+
+    use super::super::test_utils::{add_zone, add_square};
+
+    /// Points in the same zone are always connected
+    #[test]
+    fn connected_in_same_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        assert!(objects.check_points_connected(0, 2).unwrap());
+        assert!(objects.check_points_connected(3, 3).unwrap());
+    }
+
+    /// Zones are only connected if they share points, directly or through other zones
+    #[test]
+    fn connected_through_siblings() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (branch_zone, _) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(branch_zone, Vec2::new(20.0, 0.0)).unwrap();
+        let other_zone = add_zone(&mut objects, &[(100.0, 0.0), (110.0, 0.0)]);
+        let (other_start, _) = objects.get_zone_info(other_zone).unwrap().range();
+
+        assert!(objects.check_points_connected(0, 5).unwrap());
+        assert!(objects.check_points_connected(5, 3).unwrap());
+        assert!(!objects.check_points_connected(0, other_start).unwrap());
+        assert!(!objects.check_points_connected(other_start + 1, 5).unwrap());
+    }
+
+    /// A counter-clockwise zone has positive area, equal to its size
+    #[test]
+    fn zone_signed_area() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]);
+
+        assert!((objects.zone_signed_area(0, true) - 100.0).abs() < 1e-3);
+        assert!((objects.zone_signed_area(1, true) + 100.0).abs() < 1e-3);
+    }
+
+    /// An open path only sums the curves between its points, so it has less area than when closed
+    #[test]
+    fn zone_signed_area_open() {
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(1.0, 0.0), (3.0, 0.0), (3.0, 2.0)]);
+
+        assert!((objects.zone_signed_area(0, false) - 3.0).abs() < 1e-3);
+        assert!((objects.zone_signed_area(0, true) - 2.0).abs() < 1e-3);
+    }
+
+    /// Flipping reverses point order, which flips the area, and returns the new start and end
+    #[test]
+    fn flip_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+
+        assert_eq!(objects.flip_zone(1).unwrap(), (4, 6));
+        assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(30.0, 10.0));
+        assert_eq!(objects.get_point_info(5).unwrap().position(), Vec2::new(30.0, 0.0));
+        assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(20.0, 0.0));
+        assert!((objects.zone_signed_area(1, true) + 50.0).abs() < 1e-3);
+    }
+
+    /// Flipping swaps the handles of each point
+    #[test]
+    fn flip_zone_swaps_handles() {
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]);
+        objects.update_point(1, None, Some(crate::objects::ControlPointMode::Broken), Some(Vec2::new(-3.0, 0.0)), Some(Vec2::new(0.0, 4.0))).unwrap();
+
+        objects.flip_zone(0).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.position(), Vec2::new(10.0, 0.0));
+        assert_eq!(point.left_handle(), Vec2::new(10.0, 4.0));
+        assert_eq!(point.right_handle(), Vec2::new(7.0, 0.0));
+    }
+
+    /// Only the final zone can be flipped
+    #[test]
+    fn flip_zone_not_last() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
+        assert!(objects.flip_zone(0).is_err());
+    }
 }
