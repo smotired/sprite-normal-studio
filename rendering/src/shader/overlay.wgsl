@@ -103,10 +103,17 @@ fn overlay_zone_paths(
             }
 
             // Draw the path leading up to the point
+            // The middle of the path is only highlighted if both ends are selected
+            var mid_color = base_color;
+            if (all(last_color == selected_color) && all(new_color == selected_color)) {
+                mid_color = selected_color;
+            }
+
             col = draw_bezier(
                 col,
                 pos,
                 last_color,
+                mid_color,
                 new_color,
                 last_point.position,
                 right_handle(last_point),
@@ -151,6 +158,7 @@ fn overlay_zone_paths(
             col = draw_bezier(
                 col,
                 pos,
+                base_color,
                 base_color,
                 base_color,
                 last_point.position,
