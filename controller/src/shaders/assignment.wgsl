@@ -136,9 +136,6 @@ struct ControlPointPacked {
     // --------
     // The index of the control point to share the right handle with.
     left_and_right_sync_ids: u32,
-
-    // The next index of the control point, just looping around. Shares position. Not used here.
-    sibling_id_and_padding_start: u32,
 }
 @group(1) @binding(1) var<storage, read> points: array<ControlPointPacked>;
 

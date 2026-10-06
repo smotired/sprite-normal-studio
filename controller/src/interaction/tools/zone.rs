@@ -31,8 +31,8 @@ impl EditorTool for EditorToolZone {
             if let Some((zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos) {
                 // If the clicked point has a sibling in the selected zone, select that point's sibling's zone instead.
                 if let Some(selected_id) = self.selected_zone && let Some(sibling_id) = state.objects.sibling_in_zone(point_id, selected_id) {
-                    let sibling_info = state.objects.get_point_info(sibling_id).unwrap();
-                    let next_zone_id = state.objects.get_point_info(sibling_info.sibling_id()).unwrap().zone_id();
+                    let next_sibling_id = state.objects.get_sibling(sibling_id)?;
+                    let next_zone_id = state.objects.get_point_info(next_sibling_id).unwrap().zone_id();
                     Some(next_zone_id)
                 } else {
                     Some(zone_id)
@@ -40,8 +40,8 @@ impl EditorTool for EditorToolZone {
             } else if let Some((zone_id, point_id, _, _)) = utils::get_clicked_zone_path(&state, pos) {
                 // If the start point has a sibling in the selected zone, possibly select that point's sibling's zone instead.
                 if let Some(selected_id) = self.selected_zone && let Some(sibling_id) = state.objects.sibling_in_zone(point_id, selected_id) {
-                    let sibling_info = state.objects.get_point_info(sibling_id).unwrap();
-                    let next_zone_id = state.objects.get_point_info(sibling_info.sibling_id()).unwrap().zone_id();
+                    let next_sibling_id = state.objects.get_sibling(sibling_id)?;
+                    let next_zone_id = state.objects.get_point_info(next_sibling_id).unwrap().zone_id();
 
                     // Only select the next sibling if the full path is shared
                     let (start, count) = state.objects.get_zone_info(selected_id).unwrap().range();

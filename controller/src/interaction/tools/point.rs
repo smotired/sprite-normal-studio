@@ -38,9 +38,9 @@ impl EditorTool for EditorToolPoint {
                     if let Some(selected_zone_id) = self.selected_zone && let Some(sibling_id) = state.objects.sibling_in_zone(point_id, selected_zone_id) {
                         // If the clicked point's sibling in the selected zone IS our selected point (i.e. we clicked our selected point), select its sibling.
                         if let Some(selected_point_id) = self.selected_point && sibling_id == selected_point_id {
-                            let sibling_info = state.objects.get_point_info(sibling_id).unwrap();
-                            let next_zone_id = state.objects.get_point_info(sibling_info.sibling_id()).unwrap().zone_id();
-                            (Some(next_zone_id), Some(sibling_info.sibling_id()))
+                            let next_sibling_id = state.objects.get_sibling(sibling_id)?;
+                            let next_zone_id = state.objects.get_point_info(next_sibling_id).unwrap().zone_id();
+                            (Some(next_zone_id), Some(next_sibling_id))
                         }
 
                         // Otherwise just select the clicked sibling
@@ -55,8 +55,8 @@ impl EditorTool for EditorToolPoint {
                 else if let Some((zone_id, point_id, _, _)) = utils::get_clicked_zone_path(&state, pos) {
                     // If the start point has a sibling in the selected zone, possibly select that point's sibling's zone instead.
                     if let Some(selected_id) = self.selected_zone && let Some(sibling_id) = state.objects.sibling_in_zone(point_id, selected_id) {
-                        let sibling_info = state.objects.get_point_info(sibling_id).unwrap();
-                        let next_zone_id = state.objects.get_point_info(sibling_info.sibling_id()).unwrap().zone_id();
+                        let next_sibling_id = state.objects.get_sibling(sibling_id)?;
+                        let next_zone_id = state.objects.get_point_info(next_sibling_id).unwrap().zone_id();
 
                         // Only select the next sibling if the full path is shared
                         let (start, count) = state.objects.get_zone_info(selected_id).unwrap().range();
