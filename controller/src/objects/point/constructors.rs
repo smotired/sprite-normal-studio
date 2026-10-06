@@ -74,6 +74,7 @@ impl ControlPoint {
     }
 
     /// Create a new node from a sibling node, where we are in the shared path.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_sibling_branch_interior(
         id: u16, zone_id: u16, sibling_id: u16,
         left_sync_id: u16, left_sync_handle: bool,

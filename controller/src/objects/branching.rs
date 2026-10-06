@@ -7,8 +7,8 @@ impl ObjectBuffers {
         // Create the zone
         let zone_count = self.zone_count();
         let point_count = self.point_count();
-        if zone_count >= MAX_OBJECT_ID { anyhow::bail!("No room to create another zone!"); }
-        if point_count >= MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
+        if zone_count == MAX_OBJECT_ID { anyhow::bail!("No room to create another zone!"); }
+        if point_count == MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
         if sibling_id >= point_count { anyhow::bail!("Sibling point {} does not exist!", sibling_id); }
         let zone_id = self.create_zone()?;
 
@@ -29,7 +29,7 @@ impl ObjectBuffers {
         // Validate
         let zone_count = self.zone_count();
         let point_count = self.point_count();
-        if point_count >= MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
+        if point_count == MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
         if sibling_id >= point_count { anyhow::bail!("Sibling point {} does not exist!", sibling_id); }
         if source_point_id >= point_count { anyhow::bail!("Source point {} does not exist!", source_point_id); }
         if creating_zone_id >= zone_count { anyhow::bail!("Current zone {} does not exist!", creating_zone_id); }
@@ -38,13 +38,12 @@ impl ObjectBuffers {
         // When start = end, convert first point to a free node with a broken handle instead and don't add any other points.
         // This also means we don't have to flip
         let same_zone_id = ControlPoint::find_in_zone(sibling_id, source_zone_id, &self.points.borrow().items, &self.point_siblings.borrow().items)?;
-        if let Some(sibling_id) = same_zone_id {
-            if source_point_id == sibling_id {
+        if let Some(sibling_id) = same_zone_id
+            && source_point_id == sibling_id {
                 let (first_id, _) = self.get_zone_info(creating_zone_id).unwrap().range();
                 self.points.borrow_mut().items[first_id as usize].force_free(first_id);
                 return Ok(vec![]);
             }
-        }
 
         // Ensure the points are connected
         if !self.check_points_connected(source_point_id, sibling_id)? {
@@ -96,8 +95,7 @@ impl ObjectBuffers {
 
         // Add an interior control point at the start of each segment
         let mut last_segment = &exterior_path[0]; // exists if start != end which we checked earlier
-        for i in 1..exterior_path.len() {
-            let segment = &exterior_path[i];
+        for segment in &exterior_path[1..] {
 
             // Add a point for the start of the segment
             let interior_id = creating_zone.add_point();

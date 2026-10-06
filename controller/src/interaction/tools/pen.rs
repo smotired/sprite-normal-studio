@@ -31,7 +31,7 @@ pub struct EditorToolPen {
 }
 
 impl EditorTool for EditorToolPen {
-    fn init() -> Box<Self> where Self : Sized { Box::new(Default::default()) }
+    fn init() -> Box<Self> where Self : Sized { Box::default() }
 
     fn select(_selection: SelectionType, _state: ControllerStateInput) -> Box<Self> where Self : Sized {
         Box::new(Self {
@@ -123,7 +123,7 @@ impl EditorTool for EditorToolPen {
     }
 
     fn handle_delete(&mut self, mut state: ControllerStateInput) -> ToolResult {
-        if let Some(_) = self.creating_zone {
+        if self.creating_zone.is_some() {
             if state.objects.delete_point_in_wip_path(self.latest_point.unwrap())? {
                 // The path is now empty, the whole zone was deleted.
                 self.creating_zone = None;

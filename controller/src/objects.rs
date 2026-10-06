@@ -57,7 +57,7 @@ impl ObjectBuffers {
         if zone_id >= self.zone_count() {
             None
         } else {
-            Some(self.zones.borrow().items[zone_id as usize].clone())
+            Some(self.zones.borrow().items[zone_id as usize])
         }
     }
 
@@ -66,7 +66,7 @@ impl ObjectBuffers {
         if point_id >= self.point_count() {
             None
         } else {
-            Some(self.points.borrow().items[point_id as usize].clone())
+            Some(self.points.borrow().items[point_id as usize])
         }
     }
 

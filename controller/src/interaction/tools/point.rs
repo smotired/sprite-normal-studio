@@ -14,7 +14,7 @@ pub struct EditorToolPoint {
 }
 
 impl EditorTool for EditorToolPoint {
-    fn init() -> Box<Self> where Self : Sized { Box::new(Default::default()) }
+    fn init() -> Box<Self> where Self : Sized { Box::default() }
     
     fn select(selected_points: SelectionType, _state: ControllerStateInput) -> Box<Self> where Self : Sized {
         Box::new(Self { selected_points: Vec::from(selected_points), handle: None })
@@ -150,6 +150,7 @@ impl EditorTool for EditorToolPoint {
             // Delete the points one by one, being careful of indices
             self.selected_points.sort();
             let mut offset = 0;
+            #[allow(clippy::explicit_counter_loop)] // offset counts deletions, not iterations
             for point_id in &self.selected_points {
                 state.objects.delete_point(*point_id - offset)?;
                 offset += 1;

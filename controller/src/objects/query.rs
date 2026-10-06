@@ -82,7 +82,7 @@ impl ObjectBuffers {
         }
 
         // Fold in corrected position
-        best.map_or(None, |(z, p)| Some((z, p, corrected, t)))
+        best.map(|(z, p)| (z, p, corrected, t))
     }
 }
 

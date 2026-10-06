@@ -20,7 +20,7 @@ pub(super) struct VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable 
 impl<T> VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
     pub fn new(device: &Device, label: &'static str) -> Self {
         let items = vec![];
-        let (buffer, buffer_size) = create_buffer(device, &items, &label);
+        let (buffer, buffer_size) = create_buffer(device, &items, label);
         Self {
             items,
             buffer,
@@ -69,12 +69,12 @@ impl ObjectBuffers {
 }
 
 /// Create a buffer for use with a VecWithBuffer. Return the buffer and its size of the buffer.
-fn create_buffer<T>(device: &Device, vector: &Vec<T>, label: &str) -> (Buffer, usize) where T : bytemuck::Pod + bytemuck::Zeroable {
+fn create_buffer<T>(device: &Device, vector: &[T], label: &str) -> (Buffer, usize) where T : bytemuck::Pod + bytemuck::Zeroable {
     // Make buffer the smallest power of 2 above 32 that will fit
     let item_count = {
-        let mut size = MIN_BUFFER_SIZE as usize;
+        let mut size = MIN_BUFFER_SIZE;
         let target = vector.len();
-        while size < target { size = size << 1 }
+        while size < target { size <<= 1 }
         size
     };
 

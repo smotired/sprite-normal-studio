@@ -28,7 +28,7 @@ impl Widget for Editor<'_> {
         let view = self.renderer.render(&self.render_state.device, &self.render_state.queue, self.controller, px);
         self.render_state.renderer.write().update_egui_texture_from_wgpu_texture(
             &self.render_state.device,
-            &view,
+            view,
             FilterMode::Nearest,
             self.viewport_texture_id,
         );

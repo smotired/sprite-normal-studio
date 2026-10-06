@@ -18,7 +18,7 @@ pub struct EditorToolZone {
 }
 
 impl EditorTool for EditorToolZone {
-    fn init() -> Box<Self> where Self : Sized { Box::new(Default::default()) }
+    fn init() -> Box<Self> where Self : Sized { Box::default() }
 
     fn select(selected_points: SelectionType, state: ControllerStateInput) -> Box<Self> where Self : Sized {
         // Get all zones with a point in the selected zone
@@ -154,6 +154,7 @@ impl EditorTool for EditorToolZone {
         if !self.selected_zones.is_empty() {
             self.selected_zones.sort();
             let mut offset = 0;
+            #[allow(clippy::explicit_counter_loop)] // offset counts deletions, not iterations
             for zone_id in &self.selected_zones[..] {
                 state.objects.delete_zone(*zone_id - offset)?;
                 offset += 1;

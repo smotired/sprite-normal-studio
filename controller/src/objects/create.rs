@@ -7,7 +7,7 @@ impl ObjectBuffers {
     /// Add a zone to the zones buffer with a random (for now) offset, and return its ID.
     pub fn create_zone(&mut self) -> anyhow::Result<u16> {
         let zone_id = self.zone_count();
-        if zone_id >= MAX_OBJECT_ID {
+        if zone_id == MAX_OBJECT_ID {
             anyhow::bail!("No room to create another zone!");
         }
 
@@ -20,7 +20,7 @@ impl ObjectBuffers {
         // Make sure it would fit in this zone
         let point_count = self.point_count();
         let zone_count = self.zone_count();
-        if point_count >= MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
+        if point_count == MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
         if zone_id >= zone_count { anyhow::bail!("Zone {} does not exist!", zone_id); }
 
         let (start, count) = self.get_zone_info(zone_id).unwrap().range();
@@ -47,8 +47,8 @@ impl ObjectBuffers {
         // Push zone ranges ahead
         let zones = &mut self.zones.borrow_mut().items;
         zones[zone_id as usize].add_point();
-        for i in (zone_id as usize + 1)..(zone_count as usize) {
-            zones[i].add_offset(1);
+        for zone in &mut zones[(zone_id as usize + 1)..(zone_count as usize)] {
+            zone.add_offset(1);
         }
 
         // Add the point
@@ -63,7 +63,7 @@ impl ObjectBuffers {
         // Make sure it would fit in this zone
         let point_count = self.point_count();
         let zone_count = self.zone_count();
-        if point_count >= MAX_OBJECT_ID {
+        if point_count == MAX_OBJECT_ID {
             anyhow::bail!("No room to create another control point!");
         }
         if zone_id >= zone_count {
@@ -124,9 +124,9 @@ impl ObjectBuffers {
 
         // Increase end_id and everything in synced_start_ids if they're after the point
         if end_id >= point_id { end_id += 1; } // only doesn't hit if start_id is the last point
-        for i in 0..sibling_count {
-            if synced_start_ids[i] >= point_id {
-                synced_start_ids[i] += 1;
+        for synced_start_id in &mut synced_start_ids {
+            if *synced_start_id >= point_id {
+                *synced_start_id += 1;
             }
         }
 
@@ -145,8 +145,8 @@ impl ObjectBuffers {
             if point_id >= sibling_id { point_id += 1; }
             if start_id >= sibling_id { start_id += 1; }
             if end_id >= sibling_id { end_id += 1; }
-            for j in (i + 1)..sibling_count {
-                synced_start_ids[j] += 1;
+            for synced_start_id in &mut synced_start_ids[(i + 1)..sibling_count] {
+                *synced_start_id += 1;
             }
 
             // Update the synced point
@@ -212,7 +212,7 @@ impl ObjectBuffers {
     pub fn create_point(&mut self, zone_id: u16, position: Vec2) -> anyhow::Result<u16> {
         // Ensure we can create a point in this zone
         if zone_id != self.zone_count() - 1 { anyhow::bail!("Can only use create_point in the final zone, not {}!", zone_id); }
-        if self.point_count() >= MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
+        if self.point_count() == MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
 
         // Create the point
         let point_id = self.zones.borrow_mut().items[zone_id as usize].add_point();

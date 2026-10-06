@@ -79,7 +79,7 @@ impl ControlPoint {
     // Return true if any handle syncs to the same handle as this one.
     pub fn any_syncs_in(point_id: u16, right: bool, points: &Vec<ControlPoint>, siblings: &SiblingsList) -> bool {
         if points[point_id as usize].self_syncs_in(point_id, right) { return true; }
-        Self::get_watchers(point_id, points, siblings, right).len() > 0
+        !Self::get_watchers(point_id, points, siblings, right).is_empty()
     }
 
     /// Force a point into free mode, syncing to its own ID for both handles. Should only be used when joining a branch path to itself.
