@@ -326,3 +326,17 @@ impl ObjectBuffers {
         Ok((start, start + count - 1))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Flipping a segment swaps its ends and which handles are used
+    #[test]
+    fn segment_flip() {
+        let mut segment = ExteriorPathSegment::new(1, true, 2, false);
+        segment.flip();
+        assert_eq!((segment.start_id, segment.start_handle), (2, false));
+        assert_eq!((segment.end_id, segment.end_handle), (1, true));
+    }
+}

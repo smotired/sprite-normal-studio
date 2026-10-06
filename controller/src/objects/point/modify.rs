@@ -189,3 +189,200 @@ impl ControlPoint {
         Ok(())
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::test_utils::{solo_points, link_ring};
+
+    /// Two points where the left handle of 1 follows the left handle of 0, and handles can be edited
+    fn synced_pair() -> (Vec<ControlPoint>, SiblingsList) {
+        let (mut points, mut siblings) = solo_points(2);
+        link_ring(&[0, 1], &mut siblings);
+        ControlPoint::retarget(1, false, 0, false, &mut points).unwrap();
+        points[0].set_mode(ControlPointMode::Broken);
+        points[1].set_mode(ControlPointMode::Broken);
+        (points, siblings)
+    }
+
+    /// Setting a position should move every sibling but nothing else
+    #[test]
+    fn set_position() {
+        let (mut points, mut siblings) = solo_points(4);
+        link_ring(&[0, 1, 2], &mut siblings);
+
+        ControlPoint::set_position(1, Vec2::new(7.0, 8.0), &mut points, &siblings).unwrap();
+        for point in points.iter().take(3) {
+            assert_eq!(point.position(), Vec2::new(7.0, 8.0));
+        }
+        assert_eq!(points[3].position(), Vec2::new(3.0, 0.0));
+    }
+
+    /// Adding a delta should move every sibling by the same amount
+    #[test]
+    fn add_position_delta() {
+        let (mut points, mut siblings) = solo_points(4);
+        link_ring(&[0, 1, 2], &mut siblings);
+
+        ControlPoint::add_position_delta(0, Vec2::new(1.0, 1.0), &mut points, &siblings).unwrap();
+        assert_eq!(points[0].position(), Vec2::new(1.0, 1.0));
+        assert_eq!(points[1].position(), Vec2::new(2.0, 1.0));
+        assert_eq!(points[2].position(), Vec2::new(3.0, 1.0));
+        assert_eq!(points[3].position(), Vec2::new(3.0, 0.0));
+    }
+
+    /// Moving a point that doesn't exist is an error
+    #[test]
+    fn set_position_missing_point() {
+        let (mut points, siblings) = solo_points(2);
+        assert!(ControlPoint::set_position(5, Vec2::ZERO, &mut points, &siblings).is_err());
+    }
+
+    /// Editing a handle should write to the sync root and push to everything following it
+    #[test]
+    fn set_left_handle_propagates() {
+        let (mut points, siblings) = synced_pair();
+
+        // Editing through the watcher edits the root
+        ControlPoint::set_left_handle(1, Vec2::new(1.0, 2.0), &mut points, &siblings).unwrap();
+        assert_eq!(points[0].left_handle, Vec2::new(1.0, 2.0));
+        assert_eq!(points[1].left_handle, Vec2::new(1.0, 2.0));
+
+        // The right handles are not synced to anything
+        assert_eq!(points[0].right_handle, Vec2::ZERO);
+        assert_eq!(points[1].right_handle, Vec2::ZERO);
+    }
+
+    /// A flipped handle follows the opposite handle of its root
+    #[test]
+    fn set_handle_flipped_propagates() {
+        let (mut points, siblings) = synced_pair();
+        ControlPoint::retarget(1, false, 0, true, &mut points).unwrap(); // 1 left follows 0 right
+
+        ControlPoint::set_right_handle(0, Vec2::new(3.0, 4.0), &mut points, &siblings).unwrap();
+        assert_eq!(points[1].left_handle, Vec2::new(3.0, 4.0));
+
+        // The root's left handle shouldn't affect the watcher anymore
+        ControlPoint::set_left_handle(0, Vec2::new(9.0, 9.0), &mut points, &siblings).unwrap();
+        assert_eq!(points[1].left_handle, Vec2::new(3.0, 4.0));
+    }
+
+    /// Setting the mode to linear should zero handles that follow it
+    #[test]
+    fn set_handle_mode_linear_propagates() {
+        let (mut points, siblings) = synced_pair();
+        ControlPoint::set_left_handle(0, Vec2::new(3.0, 4.0), &mut points, &siblings).unwrap();
+        assert_eq!(points[1].left_handle, Vec2::new(3.0, 4.0));
+
+        ControlPoint::set_handle_mode(0, ControlPointMode::Linear, &mut points, &siblings).unwrap();
+        assert_eq!(points[0].mode(), ControlPointMode::Linear);
+        assert_eq!(points[1].left_handle, Vec2::ZERO);
+    }
+
+    /// Can't change the mode of missing points or points that are synced to something else
+    #[test]
+    fn set_handle_mode_errors() {
+        let (mut points, siblings) = synced_pair();
+        assert!(ControlPoint::set_handle_mode(5, ControlPointMode::Broken, &mut points, &siblings).is_err());
+        assert!(ControlPoint::set_handle_mode(1, ControlPointMode::Linear, &mut points, &siblings).is_err());
+    }
+
+    /// Replacing an ID should update every reference to it, and nothing else
+    #[test]
+    fn update_id() {
+        let (mut points, mut siblings) = solo_points(3);
+        link_ring(&[0, 1, 2], &mut siblings);
+
+        ControlPoint::update_id(2, 5, &mut points, &mut siblings);
+        assert_eq!(siblings, vec![1, 5, 0]);
+        assert_eq!((points[2].left_sync_id(), points[2].right_sync_id()), (5, 5));
+        assert_eq!((points[0].left_sync_id(), points[0].right_sync_id()), (0, 0));
+    }
+
+    /// Removing a point shifts every later point back one
+    #[test]
+    fn remove_point_shifts_ids() {
+        let (mut points, mut siblings) = solo_points(3);
+
+        ControlPoint::remove_point(1, &mut points, &mut siblings).unwrap();
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[1].position(), Vec2::new(2.0, 0.0));
+        assert_eq!((points[1].left_sync_id(), points[1].right_sync_id()), (1, 1));
+        assert_eq!(&siblings[..2], &[0, 1]);
+    }
+
+    /// Removing the root of a synced handle should promote a watcher to be the root
+    #[test]
+    fn remove_point_promotes_watcher() {
+        let (mut points, mut siblings) = synced_pair();
+
+        ControlPoint::remove_point(0, &mut points, &mut siblings).unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!((points[0].left_sync_id(), points[0].right_sync_id()), (0, 0));
+        assert_eq!(siblings[0], 0);
+    }
+
+    /// Can't remove a point that doesn't exist
+    #[test]
+    fn remove_point_missing_point() {
+        let (mut points, mut siblings) = solo_points(2);
+        assert!(ControlPoint::remove_point(5, &mut points, &mut siblings).is_err());
+        assert_eq!(points.len(), 2);
+    }
+
+    /// Flipping a point swaps its handles and which points they sync to
+    #[test]
+    fn flip_solo() {
+        let mut point = ControlPoint::new_solo(0, 0, Vec2::ZERO);
+        point.left_handle = Vec2::new(1.0, 0.0);
+        point.right_handle = Vec2::new(0.0, 2.0);
+
+        point.flip(0);
+        assert_eq!(point.left_handle, Vec2::new(0.0, 2.0));
+        assert_eq!(point.right_handle, Vec2::new(1.0, 0.0));
+        assert_eq!(point.sync_modes(), (ControlPointHandleSyncMode::Synced, ControlPointHandleSyncMode::Synced));
+    }
+
+    /// Flipping a point whose left handle syncs elsewhere makes its right handle sync flipped
+    #[test]
+    fn flip_synced() {
+        let (mut points, _) = synced_pair();
+
+        points[1].flip(1);
+        assert_eq!((points[1].left_sync_id(), points[1].right_sync_id()), (1, 0));
+        assert_eq!(points[1].sync_modes(), (ControlPointHandleSyncMode::Synced, ControlPointHandleSyncMode::Flipped));
+    }
+
+    /// Retargeting should be flipped only if the handles are in different directions
+    #[test]
+    fn retarget() {
+        let (mut points, _) = solo_points(2);
+
+        ControlPoint::retarget(1, true, 0, true, &mut points).unwrap();
+        assert_eq!(points[1].right_sync_id(), 0);
+        assert_eq!(points[1].sync_modes().1, ControlPointHandleSyncMode::Synced);
+
+        ControlPoint::retarget(1, false, 0, true, &mut points).unwrap();
+        assert_eq!(points[1].left_sync_id(), 0);
+        assert_eq!(points[1].sync_modes().0, ControlPointHandleSyncMode::Flipped);
+
+        assert!(ControlPoint::retarget(5, false, 0, false, &mut points).is_err());
+    }
+
+    /// Resyncing refreshes the stored handle from the root, and zeroes it if the root is linear
+    #[test]
+    fn resync_handles() {
+        let (mut points, _) = synced_pair();
+        ControlPoint::retarget(1, false, 0, true, &mut points).unwrap(); // 1 left follows 0 right
+        points[0].right_handle = Vec2::new(3.0, 4.0);
+
+        ControlPoint::resync_handles(1, &mut points).unwrap();
+        assert_eq!(points[1].left_handle, Vec2::new(3.0, 4.0));
+
+        points[0].set_mode(ControlPointMode::Linear);
+        ControlPoint::resync_handles(1, &mut points).unwrap();
+        assert_eq!(points[1].left_handle, Vec2::ZERO);
+    }
+}

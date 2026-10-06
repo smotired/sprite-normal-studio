@@ -145,3 +145,132 @@ impl ControlPoint {
         anyhow::bail!("Infinite loop in get_sync_id around {}.", id);
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::test_utils::{solo_points, link_ring};
+
+    /// Siblings are listed in ring order, not including the point itself
+    #[test]
+    fn get_siblings() {
+        let (_, mut siblings) = solo_points(4);
+        link_ring(&[0, 2, 3], &mut siblings);
+        assert_eq!(ControlPoint::get_siblings(0, &siblings), vec![2, 3]);
+        assert_eq!(ControlPoint::get_siblings(3, &siblings), vec![0, 2]);
+        assert!(ControlPoint::get_siblings(1, &siblings).is_empty());
+    }
+
+    /// The precursor is the point that points to the given point
+    #[test]
+    fn get_precursor() {
+        let (_, mut siblings) = solo_points(4);
+        link_ring(&[0, 2, 3], &mut siblings);
+        assert_eq!(ControlPoint::get_precursor(0, &siblings).unwrap(), 3);
+        assert_eq!(ControlPoint::get_precursor(2, &siblings).unwrap(), 0);
+        assert_eq!(ControlPoint::get_precursor(1, &siblings).unwrap(), 1);
+    }
+
+    /// If the point is not in a loop, there is no precursor
+    #[test]
+    fn get_precursor_broken_ring() {
+        let siblings = vec![1, 1];
+        assert!(ControlPoint::get_precursor(0, &siblings).is_err());
+    }
+
+    /// Traversal starts at the start point and loops through the ring once
+    #[test]
+    fn traverse_siblings() {
+        let (points, mut siblings) = solo_points(4);
+        link_ring(&[0, 2, 3], &mut siblings);
+
+        let mut visited = vec![];
+        ControlPoint::traverse_siblings(2, &points, &siblings, |_, id| visited.push(id)).unwrap();
+        assert_eq!(visited, vec![2, 3, 0]);
+    }
+
+    /// Traversal fails on missing points and on loops that don't return to the start
+    #[test]
+    fn traverse_siblings_errors() {
+        let (points, mut siblings) = solo_points(2);
+        assert!(ControlPoint::traverse_siblings(5, &points, &siblings, |_, _| {}).is_err());
+
+        // 0 -> 1 -> 1 never returns to 0
+        siblings[0] = 1;
+        assert!(ControlPoint::traverse_siblings(0, &points, &siblings, |_, _| {}).is_err());
+    }
+
+    /// Mutable traversal can change every point in the ring
+    #[test]
+    fn traverse_siblings_mut() {
+        let (mut points, mut siblings) = solo_points(4);
+        link_ring(&[0, 2, 3], &mut siblings);
+
+        ControlPoint::traverse_siblings_mut(0, &mut points, &siblings, |point, _| point.set_zone_id(9)).unwrap();
+        let zones: Vec<u16> = points.iter().map(|point| point.zone_id()).collect();
+        assert_eq!(zones, vec![9, 0, 9, 9]);
+    }
+
+    /// Watchers are the siblings whose handle syncs to the target's handle
+    #[test]
+    fn get_watchers() {
+        let (mut points, mut siblings) = solo_points(3);
+        link_ring(&[0, 1, 2], &mut siblings);
+        ControlPoint::retarget(1, false, 0, false, &mut points).unwrap(); // synced
+        ControlPoint::retarget(2, false, 0, true, &mut points).unwrap();  // flipped
+
+        let left = ControlPoint::get_watchers(0, &points, &siblings, false);
+        assert_eq!(left, vec![(1, ControlPointHandleSyncMode::Synced), (2, ControlPointHandleSyncMode::Flipped)]);
+        assert!(ControlPoint::get_watchers(0, &points, &siblings, true).is_empty());
+    }
+
+    /// Find the sibling of a point that is in a given zone
+    #[test]
+    fn find_in_zone() {
+        let (mut points, mut siblings) = solo_points(3);
+        link_ring(&[0, 1, 2], &mut siblings);
+        points[1].set_zone_id(1);
+        points[2].set_zone_id(2);
+
+        assert_eq!(ControlPoint::find_in_zone(0, 1, &points, &siblings).unwrap(), Some(1));
+        assert_eq!(ControlPoint::find_in_zone(2, 0, &points, &siblings).unwrap(), Some(0));
+        assert_eq!(ControlPoint::find_in_zone(0, 7, &points, &siblings).unwrap(), None);
+    }
+
+    /// A handle that doesn't sync to anything is its own sync root
+    #[test]
+    fn get_sync_id_solo() {
+        let (points, _) = solo_points(1);
+        assert_eq!(ControlPoint::get_sync_id(0, false, &points).unwrap(), (0, false));
+        assert_eq!(ControlPoint::get_sync_id(0, true, &points).unwrap(), (0, true));
+    }
+
+    /// Follow chains of syncs, flipping the handle direction each time a flipped link is crossed
+    #[test]
+    fn get_sync_id_chain() {
+        let (mut points, _) = solo_points(3);
+        ControlPoint::retarget(1, false, 0, false, &mut points).unwrap(); // 1 left -> 0 left
+        assert_eq!(ControlPoint::get_sync_id(1, false, &points).unwrap(), (0, false));
+
+        ControlPoint::retarget(2, true, 1, false, &mut points).unwrap(); // 2 right -> 1 left, flipped
+        assert_eq!(ControlPoint::get_sync_id(2, true, &points).unwrap(), (0, false));
+
+        ControlPoint::retarget(1, false, 0, true, &mut points).unwrap(); // 1 left -> 0 right, flipped
+        assert_eq!(ControlPoint::get_sync_id(1, false, &points).unwrap(), (0, true));
+        assert_eq!(ControlPoint::get_sync_id(2, true, &points).unwrap(), (0, true));
+    }
+
+    /// Missing points and sync loops are errors
+    #[test]
+    fn get_sync_id_errors() {
+        let (mut points, _) = solo_points(2);
+        assert!(ControlPoint::get_sync_id(5, false, &points).is_err());
+
+        // 0 left -> 1 left -> 0 left
+        ControlPoint::retarget(0, false, 1, false, &mut points).unwrap();
+        ControlPoint::retarget(1, false, 0, false, &mut points).unwrap();
+        assert!(ControlPoint::get_sync_id(0, false, &points).is_err());
+    }
+}

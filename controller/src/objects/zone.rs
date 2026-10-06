@@ -45,3 +45,53 @@ impl Zone {
 
     pub fn range(&self) -> (u16, u16) { (self.point_start, self.point_count) }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A new zone has no points, starting at the given index
+    #[test]
+    fn new() {
+        let zone = Zone::new(5, Vec3::FORWARD);
+        assert_eq!(zone.range(), (5, 0));
+        assert_eq!(zone.normal, Vec3::FORWARD);
+    }
+
+    /// Adding points returns consecutive IDs after the start
+    #[test]
+    fn add_point() {
+        let mut zone = Zone::new(5, Vec3::FORWARD);
+        assert_eq!(zone.add_point(), 5);
+        assert_eq!(zone.add_point(), 6);
+        assert_eq!(zone.range(), (5, 2));
+    }
+
+    /// Decreasing points works until the zone is empty, then it is an error
+    #[test]
+    fn dec_points() {
+        let mut zone = Zone::new(0, Vec3::FORWARD);
+        zone.add_point();
+        assert!(zone.dec_points().is_ok());
+        assert_eq!(zone.range(), (0, 0));
+        assert!(zone.dec_points().is_err());
+        assert_eq!(zone.range(), (0, 0));
+    }
+
+    /// Offsets can move the zone either way, but can't push it out of the points list
+    #[test]
+    fn add_offset() {
+        let mut zone = Zone::new(10, Vec3::FORWARD);
+        for _ in 0..4 { zone.add_point(); }
+
+        zone.add_offset(5);
+        assert_eq!(zone.range(), (15, 4));
+        zone.add_offset(-3);
+        assert_eq!(zone.range(), (12, 4));
+        zone.add_offset(-100);
+        assert_eq!(zone.range(), (0, 4));
+        zone.add_offset(100000);
+        assert_eq!(zone.range(), (65532, 4));
+    }
+}

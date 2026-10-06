@@ -91,7 +91,8 @@ fn correct_to_line_segment(pos: Vec2, pos0: Vec2, pos1: Vec2) -> (f32, Vec2, f32
     // Check endpoints
     let relative = pos - pos0;
     let line_dir = (pos1 - pos0).normalized();
-    let t = relative.dot(line_dir);
+    let length = pos0.distance(pos1);
+    let t = if length == 0.0 { 0.0 } else { relative.dot(line_dir) / length };
 
     // If it's past an endpoint, distance = distance to endpoint
     if t < 0.0 { (relative.magnitude(), pos0, 0.0) }
@@ -99,7 +100,7 @@ fn correct_to_line_segment(pos: Vec2, pos0: Vec2, pos1: Vec2) -> (f32, Vec2, f32
 
     // If it can be projected onto the line segment,
     // distance = magnitude of projection onto orthag. vector
-    else { (relative.dot(line_dir.right()).abs(), pos0 + t * line_dir, t) }
+    else { (relative.dot(line_dir.right()).abs(), pos0 + t * length * line_dir, t) }
 }
 
 /// Return scalar distance to a bezier curve based on shortest distance to a line segment.
@@ -124,7 +125,7 @@ fn correct_to_bezier(pos: Vec2, pos0: Vec2, pos1: Vec2, pos2: Vec2, pos3: Vec2, 
     let mut last_point = pos0;
     let mut min_dist = (pos - pos0).magnitude(); // minimum distance to the curve
     let mut corrected = pos0;
-    let mut path_t = 0.5;
+    let mut path_t = 0.0;
     let segment_length = 1.0 / segment_count as f32;
     for i in 1..=segment_count {
         let t = i as f32 * segment_length;
@@ -134,11 +135,78 @@ fn correct_to_bezier(pos: Vec2, pos0: Vec2, pos1: Vec2, pos2: Vec2, pos3: Vec2, 
         if distance < min_dist {
             min_dist = distance;
             corrected = corrected_to_line;
-            path_t = t + corrected_t * segment_length;
+            path_t = t - segment_length + corrected_t * segment_length;
         }
 
         last_point = point;
     }
 
     (min_dist, corrected, path_t)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(a: Vec2, b: Vec2) {
+        assert!(a.distance(b) < 1e-3, "{a} is not close to {b}");
+    }
+
+    /// A point beside a segment projects onto it
+    #[test]
+    fn line_segment_projects_onto_interior() {
+        let (distance, corrected, t) = correct_to_line_segment(Vec2::new(5.0, 3.0), Vec2::ZERO, Vec2::new(10.0, 0.0));
+        assert!((distance - 3.0).abs() < 1e-5);
+        assert_close(corrected, Vec2::new(5.0, 0.0));
+        assert!((t - 0.5).abs() < 1e-5);
+    }
+
+    /// A point past either end of a segment snaps to that end
+    #[test]
+    fn line_segment_snaps_to_endpoints() {
+        let (pos0, pos1) = (Vec2::ZERO, Vec2::new(10.0, 0.0));
+
+        let (distance, corrected, t) = correct_to_line_segment(Vec2::new(-3.0, 4.0), pos0, pos1);
+        assert!((distance - 5.0).abs() < 1e-5);
+        assert_close(corrected, pos0);
+        assert_eq!(t, 0.0);
+
+        let (distance, corrected, t) = correct_to_line_segment(Vec2::new(13.0, 4.0), pos0, pos1);
+        assert!((distance - 5.0).abs() < 1e-5);
+        assert_close(corrected, pos1);
+        assert_eq!(t, 1.0);
+    }
+
+    /// A point on a straight curve corrects to itself with the matching t
+    #[test]
+    fn bezier_straight_curve() {
+        let (pos0, pos1, pos2, pos3) = (Vec2::ZERO, Vec2::hz(10.0), Vec2::hz(20.0), Vec2::hz(30.0));
+        let (distance, corrected, t) = correct_to_bezier(Vec2::new(15.0, 2.0), pos0, pos1, pos2, pos3, 1.0);
+        assert!((distance - 2.0).abs() < 1e-3);
+        assert_close(corrected, Vec2::new(15.0, 0.0));
+        assert!((t - 0.5).abs() < 1e-3);
+    }
+
+    /// A point on a curved path should be found on the curve at the right t
+    #[test]
+    fn bezier_curved_path() {
+        let (pos0, pos1, pos2, pos3) = (Vec2::ZERO, Vec2::new(0.0, 40.0), Vec2::new(40.0, 40.0), Vec2::new(40.0, 0.0));
+        for t in [0.2, 0.5, 0.8] {
+            let on_curve = studio_math::bezier::bezier_point_at(pos0, pos1, pos2, pos3, t);
+            let (distance, corrected, found_t) = correct_to_bezier(on_curve, pos0, pos1, pos2, pos3, 1.0);
+            assert!(distance < 0.5, "distance {distance} at t = {t}");
+            assert!(corrected.distance(on_curve) < 0.5);
+            assert!((found_t - t).abs() < 0.05, "found t {found_t} for t = {t}");
+        }
+    }
+
+    /// Points far from a curve report their distance from the closest end
+    #[test]
+    fn bezier_far_point() {
+        let (pos0, pos1, pos2, pos3) = (Vec2::ZERO, Vec2::hz(10.0), Vec2::hz(20.0), Vec2::hz(30.0));
+        let (distance, corrected, _) = correct_to_bezier(Vec2::new(-4.0, 3.0), pos0, pos1, pos2, pos3, 1.0);
+        assert!((distance - 5.0).abs() < 1e-3);
+        assert_close(corrected, pos0);
+    }
 }

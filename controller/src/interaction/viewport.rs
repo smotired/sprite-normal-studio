@@ -70,3 +70,39 @@ impl ViewportDataUniform {
     /// Get the bytes for writing to a buffer
     pub fn bytes(&self) -> &[u8] { bytemuck::bytes_of(self) }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use crate::interaction::tools::EditorToolZone;
+
+    use super::*;
+
+    /// The uniform should be filled from each source
+    #[test]
+    fn new() {
+        let mut camera = Camera::default();
+        camera.reset_position(Vec2::new(10.0, 20.0));
+        camera.apply_scale(1, None);
+        let tool = EditorToolZone::init();
+        let overlay = OverlayState::default();
+
+        let uniform = ViewportDataUniform::new(&Light::default(), &camera, &overlay, Vec2::new(5.0, 6.0), (3, 12), tool.as_ref());
+        assert_eq!(uniform.camera_pos, Vec2::new(10.0, 20.0));
+        assert_eq!(uniform.inv_scale, 0.5);
+        assert_eq!(uniform.overlay_flags, overlay.get_flags(tool.as_ref()));
+        assert_eq!(uniform.light_pos, Vec2::new(100.0, 100.0));
+        assert_eq!(uniform.light_height, 200.0);
+        assert_eq!(uniform.light_color, 0x00FFFFFF);
+        assert_eq!(uniform.cursor_pos, Vec2::new(5.0, 6.0));
+        assert_eq!((uniform.zone_count, uniform.point_count), (3, 12));
+    }
+
+    /// Bytes should cover the whole struct
+    #[test]
+    fn bytes() {
+        let uniform = ViewportDataUniform { zone_count: 1, ..Default::default() };
+        assert_eq!(uniform.bytes().len(), std::mem::size_of::<ViewportDataUniform>());
+        assert_eq!(std::mem::size_of::<ViewportDataUniform>() % 16, 0); // uniform buffers want 16 byte alignment
+    }
+}
