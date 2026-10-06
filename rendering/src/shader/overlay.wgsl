@@ -106,10 +106,11 @@ fn overlay_zone_paths(
 
         // Determine if we have joined with another path.
         let joined = zone.point_count > 1 && (last_point.syncs_left || last_point.syncs_right);
+        let creating = flag(6) && !joined;
 
         // Check completion flag, and that we haven't joined with some other path
         var start = 0u;
-        if (flag(6) && !joined) {
+        if (creating) {
             start = 1u;
             last_point = first_point;
         }
@@ -133,7 +134,7 @@ fn overlay_zone_paths(
         }
 
         // If we stopped drawing the path early, draw a ghost to complete the path at the cursor or the first point instead
-        if (flag(6) && !joined) {
+        if (creating) {
             var pos2 = params.cursor_pos;
             var pos3 = params.cursor_pos;
 
@@ -169,7 +170,7 @@ fn overlay_zone_paths(
                 else {
                     if (!point.no_handles) {
                         // Don't draw the left handle if we are branching off a path
-                        if (params.selected_point != zone.points_start || !point.syncs_left) {
+                        if (!(creating && params.selected_point != zone.points_start && !point.syncs_left)) {
                             let left_handle = left_handle(point);
                             col = draw_line(col, pos, left_handle_color, point.position, left_handle, CONTROL_POINT_HANDLE_HALF_WIDTH);
                             col = draw_circle(col, pos, left_handle_color, left_handle, CONTROL_POINT_HANDLE_RADIUS, 0.0, true);
