@@ -299,7 +299,6 @@ impl ObjectBuffers {
         // Create the point
         let position = bezier_point_at(start_info.position(), start_info.right_handle(), end_info.left_handle(), end_info.position(), t);
         let mut point_id = self.insert_point_helper(zone_id, start_id + 1, position)?;
-        println!("Created point has id {}", point_id);
 
         // Increase end_id and everything in synced_start_ids if they're after the point
         if end_id >= point_id { end_id += 1; } // only doesn't hit if start_id is the last point
@@ -708,8 +707,6 @@ impl ObjectBuffers {
     /// - All nodes on interior paths are correctly set up as interior nodes.
     /// - A path does exist (i.e. check_points_connected was run already).
     fn exterior_path_helper(&self, start_id: u16, end_id: u16, start_right: bool) -> anyhow::Result<(Vec<ExteriorPathSegment>, f32)> {
-        println!("\nFinding path from {} to {}. Starting right: {}", start_id, end_id, start_right);
-
         // Get the handle the start is syncing to, to start by going around in the start direction.
         let points = &self.points.borrow().items;
         let (mut id, mut right) = ControlPoint::get_sync_id(start_id, start_right, points)?;
@@ -825,26 +822,6 @@ impl ObjectBuffers {
                 }
             }
             
-            {
-                println!("Id: {}. Going right: {} | Chosen next point {}, right handle: {} | Best angle: {}", id, right, next_id, next_handle, best_angle);
-
-                let zone_id = self.get_point_info(next_id).unwrap().zone_id();
-                let (lsid, lsr) = ControlPoint::get_sync_id(next_id, false, points)?;
-                let (rsid, rsr) = ControlPoint::get_sync_id(next_id, true, points)?;
-
-                println!(
-                    "    Point {}: Zone {} (#{} in zone) | Position: {} | Left sync id: {}, flipped: {} | Right sync id: {}, flipped: {}",
-                    next_id,
-                    zone_id,
-                    next_id - self.get_zone_info(zone_id).unwrap().range().0,
-                    self.get_point_info(next_id).unwrap().position(),
-                    lsid,
-                    lsr,
-                    rsid,
-                    !rsr
-                );
-            }
-            
             // Traverse to the next point/handle
             id = next_id;
             right = !next_handle;
@@ -863,8 +840,6 @@ impl ObjectBuffers {
 
             signed_area += bezier_signed_area(pos0, pos1, pos2, pos3);
         }
-
-        println!("Final path: {} segments, signed area is {}", path.len(), signed_area);
 
         Ok((path, signed_area))
     }
