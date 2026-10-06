@@ -1,4 +1,9 @@
 # Sprite Normal Studio
+
+[![CI](https://github.com/smotired/sprite-normal-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/smotired/sprite-normal-studio/actions/workflows/ci.yml)
+[![version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsmotired/sprite-normal-studio%2Fmain%2Fstudio%2FCargo.toml&query=%24.package.version&label=version)](https://github.com/smotired/sprite-normal-studio/blob/main/studio/Cargo.toml)
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsmotired/sprite-normal-studio%2Fbadges%2Fcoverage.json)](https://github.com/smotired/sprite-normal-studio/actions/workflows/ci.yml)
+
 Desktop application for creating normal maps for hi-res spritesheets.
 
 ## Abstract

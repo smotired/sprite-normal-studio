@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libwayland-dev libssl-dev
+      - name: Run tests
+        run: cargo test --workspace --all-targets
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # only used to publish the coverage badge on main
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libwayland-dev libssl-dev
+      - name: Measure coverage
+        run: cargo llvm-cov --workspace --json --summary-only --output-path coverage-summary.json
+      - name: Write badge data
+        run: |
+          percent=$(jq '.data[0].totals.lines.percent | floor' coverage-summary.json)
+          if   [ "$percent" -ge 80 ]; then color=brightgreen
+          elif [ "$percent" -ge 60 ]; then color=yellow
+          else color=red; fi
+          mkdir -p badges
+          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${percent}%\",\"color\":\"${color}\"}" > badges/coverage.json
+          cat badges/coverage.json
+      - name: Publish badge data
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp badges/coverage.json "$RUNNER_TEMP/coverage.json"
+          git fetch origin badges || true
+          if git rev-parse --verify origin/badges >/dev/null 2>&1; then
+            git checkout -B badges origin/badges
+          else
+            git checkout --orphan badges
+            git rm -rf . >/dev/null
+          fi
+          cp "$RUNNER_TEMP/coverage.json" coverage.json
+          git add coverage.json
+          git diff --cached --quiet || git commit -m "Update coverage badge"
+          git push origin badges
