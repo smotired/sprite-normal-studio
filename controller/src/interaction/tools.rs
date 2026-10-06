@@ -59,9 +59,9 @@ pub trait EditorTool {
     /// Get the points that are currently selected
     fn selection(&self) -> SelectionType<'_>;
 
-    /// Get the "ignore zone" which we pass to the shader in some modes
-    /// TODO: can probably remove this after the uh ah uh the the the uh change to points
-    fn zone_ignore(&self) -> Option<u16> { None }
+    /// If this tool is creating a path, returns whether the latest point is the first point of that path
+    /// (i.e. the path is about to be closed). The path being created is always the last zone.
+    fn creating_path(&self) -> Option<bool> { None }
 
     /// Handle a click at a point
     fn handle_click(&mut self, state: ControllerStateInput, pos: Vec2) -> ToolResult;

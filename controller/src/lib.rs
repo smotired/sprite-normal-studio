@@ -97,7 +97,7 @@ impl Controller {
         self.write_object_buffers(queue);
 
         if self.normals_stale {
-            self.assigner.assign_zones(device, queue, objects_buffers.clone(), self.objects.object_counts(), self.tool.zone_ignore());
+            self.assigner.assign_zones(device, queue, objects_buffers.clone(), self.objects.object_counts());
             self.generator.generate_normals(device, queue, objects_buffers.clone());
             self.normals_stale = false;
         }

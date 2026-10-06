@@ -45,15 +45,6 @@ const CONTROL_POINT_HALF_WIDTH = 3.0;        // Width of the square drawn for co
 const CONTROL_POINT_HANDLE_HALF_WIDTH = 1.0; // Width of the line drawn for handles of control points
 const CONTROL_POINT_HANDLE_RADIUS = 2.0;     // Radius of the circle drawn for handles of control points
 
-// Returns true if any point in the zone is selected.
-// The pen tool only selects points of the zone it is creating, so this identifies that zone.
-fn zone_has_selection(points_start: u32, point_count: u32) -> bool {
-    for (var j = 0u; j < point_count; j += 1u) {
-        if (is_selected(points_start + j)) { return true; }
-    }
-    return false;
-}
-
 fn overlay_zone_paths(
     color: vec3<f32>,   // Base color below this part of the overlay
     pos: vec2<f32>,     // World-space position of this pixel
@@ -82,7 +73,7 @@ fn overlay_zone_paths(
 
         // Determine if we have joined with another path.
         let joined = zone.point_count > 1 && (last_point.syncs_left || last_point.syncs_right);
-        let creating = flag(6) && !joined && zone_has_selection(zone.points_start, zone.point_count);
+        let creating = flag(6) && !joined && i + 1u == params.zone_count; // the path being created is always the last zone
 
         // Check completion flag, and that we haven't joined with some other path
         var start = 0u;
@@ -93,10 +84,11 @@ fn overlay_zone_paths(
             if (sibling_is_selected(zone.points_start)) { last_color = selected_color; }
         }
 
-        // The loop below skips the first point while creating, so check whether it is the selected point here
-        if (creating && flag(5) && is_selected(zone.points_start) && selected_point == 65536u) {
+        // While creating, the latest point is the one whose handles are drawn. The loop below skips the first point and would not find it.
+        if (creating && flag(5)) {
             selected_zone = i;
-            selected_point = zone.points_start;
+            selected_point = zone.points_start + zone.point_count - 1u;
+            if (flag(7)) { selected_point = zone.points_start; }
             single_point_selected = true;
         }
 
@@ -128,7 +120,7 @@ fn overlay_zone_paths(
                 col = draw_box(col, pos, new_color, point.position, CONTROL_POINT_HALF_WIDTH);
 
                 // Determine if this is the only selected point
-                if (is_selected(zone.points_start + j)) {
+                if (!creating && is_selected(zone.points_start + j)) {
                     if (single_point_selected == false) {
                         if (selected_point == 65536) {
                             selected_zone = i;
@@ -150,8 +142,8 @@ fn overlay_zone_paths(
             var pos2 = params.cursor_pos;
             var pos3 = params.cursor_pos;
 
-            // If first point is selected we are completing the path now, so draw there instead
-            if (is_selected(zone.points_start) && zone.point_count > 1u) {
+            // If the latest point is the first point we are completing the path now, so draw there instead
+            if (flag(7) && zone.point_count > 1u) {
                 pos2 = left_handle(first_point);
                 pos3 = first_point.position;
             }
@@ -181,7 +173,7 @@ fn overlay_zone_paths(
 
         // Determine if we have joined with another path.
         let joined = zone.point_count > 1 && (last_point.syncs_left || last_point.syncs_right);
-        let creating = flag(6) && !joined && zone_has_selection(zone.points_start, zone.point_count);
+        let creating = flag(6) && !joined && selected_zone + 1u == params.zone_count;
 
         // Draw the handles
         let point = get_point(selected_point);

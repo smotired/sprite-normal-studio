@@ -48,7 +48,7 @@ impl ViewportDataUniform {
         Self {
             camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
-            overlay_flags: overlay.get_flags(tool.kind()),
+            overlay_flags: overlay.get_flags(tool.as_ref()),
             light_pos: light.position(),
             light_height: light.height(),
             light_color: light.packed_color(),

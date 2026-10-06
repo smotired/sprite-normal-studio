@@ -52,11 +52,6 @@ struct Params {
 
     // Total amount of points
     point_count: u32,
-
-    // ID of the zone to ignore, and treat as if it's empty space.
-    // If above 65536, out of range, don't ignore any zones.
-    // This is because, if we are adding a zone it might not be closed yet.
-    zone_ignore: u32,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 
@@ -383,9 +378,7 @@ fn main(
 
     // Loop through and evaluate all zones
     for (var i = 0u; i < params.zone_count; i += 1u) {
-        if (i != params.zone_ignore) {
-            result = evaluate_zone(id.xy, i, get_zone(i), result);
-        }
+        result = evaluate_zone(id.xy, i, get_zone(i), result);
     }
 
     // Pack and output
