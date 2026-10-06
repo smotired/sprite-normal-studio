@@ -95,9 +95,9 @@ impl EditorTool for EditorToolZone {
 
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         // Drag selected zone
-        if let Some(zone_id) = self.selected_zone {
+        if let Some(zone_id) = self.selected_zone && let Some(reference_delta) = self.reference_delta {
             // Move the first point to the position
-            state.objects.update_zone_position(zone_id, pos - self.reference_delta.unwrap())?;
+            state.objects.update_zone_position(zone_id, pos - reference_delta)?;
             return self.stale();
         }
         self.ok()
