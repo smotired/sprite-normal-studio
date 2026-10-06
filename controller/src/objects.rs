@@ -75,6 +75,11 @@ pub struct ObjectBuffers {
 
     /// List of control points
     points: Rc<RefCell<VecWithBuffer<ControlPoint>>>,
+
+    /// IDs of control points' siblings. These don't actually affect
+    /// the point at all during rendering and it's better for alignment if we don't
+    /// pass them to the GPU.
+    point_siblings: Rc<RefCell<[u16; 65536]>>,
 }
 
 impl ObjectBuffers {
@@ -85,6 +90,7 @@ impl ObjectBuffers {
         Self {
             zones: Rc::new(RefCell::new(VecWithBuffer::new(device, "Zones Buffer"))),
             points: Rc::new(RefCell::new(VecWithBuffer::new(device, "Control Points Buffer"))),
+            point_siblings: Rc::new(RefCell::new([0; 65536])),
         }
     }
 
@@ -115,6 +121,12 @@ impl ObjectBuffers {
 
         self.zones.borrow_mut().items.push(Zone::new(self.point_count(), Vec3::random_on_hemisphere()));
         Ok(zone_id)
+    }
+
+    pub fn get_sibling(&self, point_id: u16) -> anyhow::Result<u16> {
+        if point_id >= self.point_count() { anyhow::bail!("Point {} does not exist!", point_id); }
+        let siblings = self.point_siblings.borrow();
+        Ok(siblings[point_id as usize])
     }
 
     /// Get a clone of the zones list
@@ -218,13 +230,17 @@ impl ObjectBuffers {
         let point = ControlPoint::new_solo(point_id, zone_id, position);
         let points = &mut self.points.borrow_mut().items;
         
-        // Push point IDs ahead, then add the point
+        // Push point IDs ahead
         let points_after = point_count - point_id;
         for i in 0..points_after {
             let index = point_count - i;
-            ControlPoint::update_id(index - 1, index, points);
+            ControlPoint::update_id(index - 1, index, points, &mut self.point_siblings.borrow_mut());
         }
-        points.insert(point_id as usize, point);
+
+        // Push siblings ahead
+        let mut siblings = self.point_siblings.borrow_mut();
+        siblings.copy_within(point_id as usize..point_count as usize, point_id as usize + 1);
+        siblings[point_id as usize] = point_id;
 
         // Push zone ranges ahead
         let zones = &mut self.zones.borrow_mut().items;
@@ -232,6 +248,9 @@ impl ObjectBuffers {
         for i in (zone_id as usize + 1)..(zone_count as usize) {
             zones[i].add_offset(1);
         }
+
+        // Add the point
+        points.insert(point_id as usize, point);
 
         Ok(point_id)
     }
@@ -264,14 +283,15 @@ impl ObjectBuffers {
         // First determine how many siblings need to be created, and ensure we have room.
         let mut synced_start_ids = {
             let immut_points = &self.points.borrow().items;
-            let mut ids: Vec<u16> = ControlPoint::get_siblings(start_id, immut_points).into_iter()
+            let immut_siblings = &self.point_siblings.borrow();
+            let mut ids: Vec<u16> = ControlPoint::get_siblings(start_id, immut_siblings).into_iter()
                 // Only include siblings where the endpoints sync to the same values
                 .filter(|sibling_start_id| {
                     let sibling_start_id = *sibling_start_id;
                     let sibling_start_info = self.get_point_info(sibling_start_id).unwrap();
 
                     // If there isn't even an end sibling in this zone, exclude
-                    let sibling_end_id = ControlPoint::find_in_zone(end_id, sibling_start_info.zone_id(), immut_points);
+                    let sibling_end_id = ControlPoint::find_in_zone(end_id, sibling_start_info.zone_id(), immut_points, immut_siblings);
                     if sibling_end_id.is_err() || sibling_end_id.as_ref().unwrap().is_none() { return false; }
                     let sibling_end_id = sibling_end_id.unwrap().unwrap();
 
@@ -329,10 +349,10 @@ impl ObjectBuffers {
 
             // Update the synced point
             self.points.borrow_mut().items[sibling_id as usize].force_synced(point_id);// we will update handles later so we don't need to do anything after this.
-            self.points.borrow_mut().items[sibling_id as usize].set_sibling_id(last_sibling_id);
+            self.point_siblings.borrow_mut()[sibling_id as usize] = last_sibling_id;
             last_sibling_id = sibling_id;
         }
-        self.points.borrow_mut().items[point_id as usize].set_sibling_id(last_sibling_id);
+        self.point_siblings.borrow_mut()[point_id as usize] = last_sibling_id;
 
         // Update the point to split the curve correctly (updating the siblings as well)
         // Determine mode and handles for the path to not change
@@ -378,7 +398,7 @@ impl ObjectBuffers {
 
         // Return the list of created points, which is the point ID and its siblings.
         let mut created = vec![point_id];
-        for sibling_id in ControlPoint::get_siblings(point_id, &mut self.points.borrow_mut().items) {
+        for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow()) {
             created.push(sibling_id);
         }
         Ok(created)
@@ -396,6 +416,7 @@ impl ObjectBuffers {
         let point_id = self.zones.borrow_mut().items[zone_id as usize].add_point();
         let point = ControlPoint::new_solo(point_id, zone_id, position);
         self.points.borrow_mut().items.push(point);
+        self.point_siblings.borrow_mut()[point_id as usize] = point_id;
 
         Ok(point_id)
     }
@@ -414,7 +435,7 @@ impl ObjectBuffers {
         // Create a point branching off the sibling point toward the right
         let point_id = point_count;
         let points = &mut self.points.borrow_mut().items;
-        let point = ControlPoint::new_sibling_branch_start(point_id, zone_id, sibling_id, points);
+        let point = ControlPoint::new_sibling_branch_start(point_id, zone_id, sibling_id, points, &mut self.point_siblings.borrow_mut());
         points.push(point);
         self.zones.borrow_mut().items[zone_id as usize].add_point();
 
@@ -436,7 +457,7 @@ impl ObjectBuffers {
 
         // When start = end, convert first point to a free node with a broken handle instead and don't add any other points.
         // This also means we don't have to flip
-        let same_zone_id = ControlPoint::find_in_zone(sibling_id, source_zone_id, &mut self.points.borrow_mut().items)?;
+        let same_zone_id = ControlPoint::find_in_zone(sibling_id, source_zone_id, &self.points.borrow().items, &self.point_siblings.borrow())?;
         if let Some(sibling_id) = same_zone_id {
             if source_point_id == sibling_id {
                 let (first_id, _) = self.get_zone_info(creating_zone_id).unwrap().range();
@@ -461,7 +482,7 @@ impl ObjectBuffers {
             let created_point_id = self.zones.borrow_mut().items[creating_zone_id as usize].add_point();
             let points = &mut self.points.borrow_mut().items;
 
-            let point = ControlPoint::new_sibling_branch_end(created_point_id, creating_zone_id, sibling_id, points);
+            let point = ControlPoint::new_sibling_branch_end(created_point_id, creating_zone_id, sibling_id, points, &mut self.point_siblings.borrow_mut());
             points.push(point); // goes on the end of the list because we are creating a zone
             created_point_id
         };
@@ -508,7 +529,8 @@ impl ObjectBuffers {
                 last_segment.end_handle,
                 segment.start_id,
                 segment.start_handle,
-                points
+                points,
+                &mut self.point_siblings.borrow_mut(),
             );
 
             points.push(point);
@@ -522,27 +544,28 @@ impl ObjectBuffers {
 
     pub fn update_point(&mut self, point_id: u16, position: Option<Vec2>, mode: Option<ControlPointMode>, left_handle: Option<Vec2>, right_handle: Option<Vec2>) -> anyhow::Result<()> {
         let points = &mut self.points.borrow_mut().items;
+        let siblings = &self.point_siblings.borrow();
         if let Some(position) = position {
-            ControlPoint::set_position(point_id, position, points)?;
+            ControlPoint::set_position(point_id, position, points, siblings)?;
         }
         if let Some(mode) = mode {
-            ControlPoint::set_handle_mode(point_id, mode, points)?;
+            ControlPoint::set_handle_mode(point_id, mode, points, siblings)?;
         }
         
         let mode = mode.unwrap_or(points[point_id as usize].mode());
 
         if let Some(left_handle) = left_handle {
-            ControlPoint::set_left_handle(point_id, left_handle, points)?;
+            ControlPoint::set_left_handle(point_id, left_handle, points, siblings)?;
             if right_handle.is_none() && mode == ControlPointMode::Continuous {
                 let current_right_handle = points[point_id as usize].right_handle() - points[point_id as usize].position();
-                ControlPoint::set_right_handle(point_id, -left_handle.normalized() * current_right_handle.magnitude(), points)?;
+                ControlPoint::set_right_handle(point_id, -left_handle.normalized() * current_right_handle.magnitude(), points, siblings)?;
             }
         }
         if let Some(right_handle) = right_handle {
-            ControlPoint::set_right_handle(point_id, right_handle, points)?;
+            ControlPoint::set_right_handle(point_id, right_handle, points, siblings)?;
             if left_handle.is_none() && mode == ControlPointMode::Continuous {
                 let current_left_handle = points[point_id as usize].left_handle() - points[point_id as usize].position();
-                ControlPoint::set_left_handle(point_id, -right_handle.normalized() * current_left_handle.magnitude(), points)?;
+                ControlPoint::set_left_handle(point_id, -right_handle.normalized() * current_left_handle.magnitude(), points, siblings)?;
             }
         }
 
@@ -553,7 +576,7 @@ impl ObjectBuffers {
         let (start, count) = self.get_zone_info(zone_id).unwrap().range();
         let delta = first_point_position - self.get_point_info(start).unwrap().position();
         for i in 0..count {
-            ControlPoint::add_position_delta(start + i, delta, &mut self.points.borrow_mut().items)?;
+            ControlPoint::add_position_delta(start + i, delta, &mut self.points.borrow_mut().items, &self.point_siblings.borrow())?;
         }
         Ok(())
     }
@@ -572,7 +595,7 @@ impl ObjectBuffers {
         let zone_count = self.zone_count() as usize;
         let zones = &mut self.zones.borrow_mut().items;
         
-        ControlPoint::remove_point(point_id, &mut self.points.borrow_mut().items)?; // updates the list
+        ControlPoint::remove_point(point_id, &mut self.points.borrow_mut().items, &mut self.point_siblings.borrow_mut())?; // updates the list
         zones[zone_id].dec_points()?;
         
         // Pull the rest of the points and zones backwards
@@ -620,7 +643,7 @@ impl ObjectBuffers {
 
     /// Find a sibling to the control point in the selected zone.
     pub fn sibling_in_zone(&self, point_id: u16, zone_id: u16) -> Option<u16> {
-        ControlPoint::find_in_zone(point_id, zone_id, &mut self.points.borrow_mut().items).unwrap()
+        ControlPoint::find_in_zone(point_id, zone_id, &self.points.borrow().items, &self.point_siblings.borrow()).unwrap()
     }
 
     /// Get references to the buffers and their sizes. Recreates the buffers if needed.
@@ -649,8 +672,6 @@ impl ObjectBuffers {
             start + (i - start + 1) % count
         };
 
-        let points = &self.points.borrow().items;
-
         // Run breadth-first search
         // Could optimize by doing depth first search since everything in a zone shares a range
         let mut visited = [false; 65536];
@@ -665,7 +686,7 @@ impl ObjectBuffers {
             if point_id == point2 { return Ok(true); }
 
             // Enqueue siblings
-            for sibling_id in ControlPoint::get_siblings(point_id, points) {
+            for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow()) {
                 queue.push_back(sibling_id);
             }
 
@@ -736,7 +757,7 @@ impl ObjectBuffers {
         // True if the edge leaving the point by the handle is shared with any other zone.
         let edge_shared = |point_id: u16, right: bool| -> anyhow::Result<bool> {
             let handle = ControlPoint::get_sync_id(point_id, right, points)?;
-            for sibling_id in ControlPoint::get_siblings(point_id, points) {
+            for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow()) {
                 for side in [false, true] {
                     if ControlPoint::get_sync_id(sibling_id, side, points)? == handle { return Ok(true); }
                 }
@@ -746,7 +767,7 @@ impl ObjectBuffers {
 
         // Get sibling IDs of the end point, which is where we will stop.
         let end_siblings = {
-            let mut siblings = ControlPoint::get_siblings(end_id, points);
+            let mut siblings = ControlPoint::get_siblings(end_id, &self.point_siblings.borrow());
             siblings.insert(0, end_id);
             siblings
         };
@@ -781,11 +802,10 @@ impl ObjectBuffers {
             // Find the next point in the zone and its siblings
             let mut next_id = base_next_id;
             let mut next_handle = !right; // assume we will keep going the same way
-            let next_siblings = ControlPoint::get_siblings(next_id, points);
+            let next_siblings = ControlPoint::get_siblings(next_id, &self.point_siblings.borrow());
 
             // If it has no siblings, it's definitely the next one to go to.
             // Otherwise it's definitely not the next one to go to (by assumptions).
-            let mut best_angle = f32::MAX;
             if !next_siblings.is_empty() {
                 // Get the direction of the path we just took
                 let back_dir = handle_dir(base_next_id, !right);
@@ -795,14 +815,13 @@ impl ObjectBuffers {
                 ring.push(base_next_id);
                 
                 // Pick the direction with the smallest angle
-                // let mut best_angle = f32::MAX;
+                let mut best_angle = f32::MAX;
                 'ring: for candidate_id in ring { // 'ring is the loop handle, so we can control target of break
                     // Reaching the end point always wins
                     if end_siblings.contains(&candidate_id) {
                         next_id = candidate_id;
                         next_handle = !right;
-                        best_angle = -1.0;
-                        break 'ring;
+                        break 'ring; // do not check any other candidates
                     }
 
                     // Check both handles
@@ -899,6 +918,7 @@ impl ObjectBuffers {
         if self.point_count() >= MAX_OBJECT_ID { anyhow::bail!("No space to flip the points in a zone!"); } // we should have checked at the beginning of whatever function
         let (start, count) = self.get_zone_info(zone_id).unwrap().range();
         let points = &mut self.points.borrow_mut().items;
+        let siblings = &mut self.point_siblings.borrow_mut();
 
         for i in 0..(count / 2) {
             let first_id = start + i;
@@ -914,11 +934,12 @@ impl ObjectBuffers {
             let last_point = points[last_id as usize];
             points[last_id as usize] = points[first_id as usize];
             points[first_id as usize] = last_point;
+            siblings.swap(first_id as usize, last_id as usize);
 
             // Swap the sibling IDs. Use id 65535 as a swap space which we checked earlier.
-            ControlPoint::update_id(last_id, 65535, points);
-            ControlPoint::update_id(first_id, last_id, points);
-            ControlPoint::update_id(65535, first_id, points);
+            ControlPoint::update_id(last_id, 65535, points, siblings);
+            ControlPoint::update_id(first_id, last_id, points, siblings);
+            ControlPoint::update_id(65535, first_id, points, siblings);
         }
 
         // Flip middle point if it didn't get flipped
