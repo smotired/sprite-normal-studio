@@ -27,8 +27,8 @@ struct Params {
     // 03: Light Button Halo On (default false, true when dragging light)
     // 04: Zone paths enabled
     // 05: If the currently selected zone path should have its points drawn
-    // 06: If the currently selected zone path should not be closed (i.e. if the first and last points are not connected. only true when creating a new path)
-    // 07: 
+    // 06: If a path is being created. It is always the last zone, and should not be closed.
+    // 07: If the latest point of the path being created is its first point, so the ghost path closes to it
     // 08: 
     // 09: 
     // 10: 

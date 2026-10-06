@@ -60,8 +60,12 @@ impl EditorTool for EditorToolPen {
 
     fn kind(&self) -> EditorToolKind { EditorToolKind::Pen }
 
-    // Return only the final point in the zone for handle drawing purposes
-    fn selection(&self) -> SelectionType<'_> { &self.zone_points[(self.zone_points.len().max(1) - 1)..] }
+    fn creating_path(&self) -> Option<bool> {
+        self.creating_zone?;
+        Some(self.latest_point.is_some() && self.latest_point == self.zone_points.first().copied())
+    }
+
+    fn selection(&self) -> SelectionType<'_> { &self.zone_points[..] }
 
     fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
         self.handle_create_point(state, pos, false)

@@ -1,4 +1,5 @@
 use crate::EditorToolKind;
+use crate::interaction::tools::EditorTool;
 
 /// Tracks the state of the overlay
 pub struct OverlayState {
@@ -11,7 +12,9 @@ pub struct OverlayState {
 
 impl OverlayState {
     // Packs flags into a uint
-    pub fn get_flags(&self, tool: EditorToolKind) -> u32 {
+    pub fn get_flags(&self, tool: &dyn EditorTool) -> u32 {
+        let creating = tool.creating_path();
+        let tool = tool.kind();
         let mut flags: u32 = 0;
 
         // 00: Shade with normal map
@@ -42,9 +45,11 @@ impl OverlayState {
                 _ => {}
             }
 
-            // 06: If the currently selected zone path should not be closed
-            if let EditorToolKind::Pen = tool {
+            // 06: If a path is being created (it is the last zone and should not be closed)
+            // 07: If the latest point of the path being created is its first point, so the ghost path closes to it
+            if let Some(closing) = creating {
                 flags |= 1 << 6;
+                if closing { flags |= 1 << 7; }
             }
         }
 
