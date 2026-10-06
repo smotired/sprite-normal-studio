@@ -37,12 +37,13 @@ impl Vec3 {
 
     /// Create a random normalized vector (uniformly distributed on unit sphere)
     pub fn random_on_sphere() -> Self {
-        let cos_theta = rand::random_range(-1.0 .. 1.0);
-        let phi   = rand::random_range(0.0 .. crate::M_PI);
+        let z: f32 = rand::random_range(-1.0 ..= 1.0);
+        let azimuth: f32 = rand::random_range(0.0 .. 2.0 * crate::M_PI);
+        let radius = (1.0 - z * z).max(0.0).sqrt();
         Self {
-            x: cos_theta * phi.sin(),
-            y: cos_theta.acos().sin() * phi.sin(),
-            z: phi.cos(),
+            x: radius * azimuth.cos(),
+            y: radius * azimuth.sin(),
+            z,
         }
     }
 
