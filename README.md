@@ -57,7 +57,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Modify zone paths, at path and vertex level, including deletion and insertion
 [x] Joining zone paths at certain vertices, which should update both paths
     when manipulated
-[ ] Joining zone paths across multiple shapes
+[x] Joining zone paths across multiple shapes
 [ ] Selecting and manipulating multiple zones/vertices at once
     Shift+select in zone mode should select all connected zones.
     Shift+select in point mode should select all points in the clicked zone.

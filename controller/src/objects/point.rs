@@ -314,7 +314,7 @@ impl ControlPoint {
             position: sibling.position,
             left_handle: if left_sync_handle { left_sync.right_handle } else { left_sync.left_handle },
             right_handle: if right_sync_handle { right_sync.right_handle } else { right_sync.left_handle },
-            mode: sibling.mode,
+            mode: u8::from(ControlPointMode::Broken),
             flags: ControlPointHandleSyncMode::create_flags((left_mode, right_mode)),
             zone_id,
             left_sync_id,
@@ -426,6 +426,32 @@ impl ControlPoint {
         Self::traverse_siblings_mut(point_id, points, |point, _| { point.position += delta; })
     }
 
+    /// Push the root's stored handle value to every handle (on its siblings) that follows it.
+    fn propagate_handle(root_id: u16, root_right: bool, points: &mut Vec<ControlPoint>) {
+        // Determine the handle position from sync mode and handle mode
+        let root = points[root_id as usize];
+        let value = if root.mode() == ControlPointMode::Linear { Vec2::ZERO }
+            else if root_right { root.right_handle } else { root.left_handle };
+
+        // Propagate to all siblings of the root
+        for sibling_id in Self::get_siblings(root_id, points) {
+            // Get the point and its sync modes
+            let (left_mode, right_mode) = points[sibling_id as usize].sync_modes();
+            let point = &mut points[sibling_id as usize];
+
+            // For each handle, sync if it matches
+            for side in [false, true] {
+                let sync_id = if side { point.right_sync_id } else { point.left_sync_id };
+                if sync_id != root_id { continue; }
+
+                let flipped = if side { right_mode } else { left_mode }.is_flipped();
+                if (side != flipped) != root_right { continue; } // this handle follows the other root handle
+
+                if side { point.right_handle = value; } else { point.left_handle = value; }
+            }
+        }
+    }
+
     /// Set the handle mode of a control point. Updates siblings only if changing to linear
     pub fn set_handle_mode(point_id: u16, mode: ControlPointMode, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
         if (point_id as usize) >= points.len() { anyhow::bail!("Point {} does not exist!", point_id); }
@@ -435,88 +461,26 @@ impl ControlPoint {
         if point_info.left_sync_id != point_id || point_info.right_sync_id != point_id { anyhow::bail!("Can't set mode of a synced point! It must be Broken to sync correctly."); }
         points[point_id as usize].set_mode(mode);
         
-        // If we are setting to Linear, sync handles to zero for all watchers
-        if mode == ControlPointMode::Linear {
-            for (watcher_id, _) in Self::get_watchers(point_id, points, false) {
-                points[watcher_id as usize].left_handle = Vec2::ZERO;
-            }
-            for (watcher_id, _) in Self::get_watchers(point_id, points, true) {
-                points[watcher_id as usize].right_handle = Vec2::ZERO;
-            }
-        }
-
-        // Otherwise sync handles to what they actually are for all watchers
-        else {
-            for (watcher_id, sync_mode) in Self::get_watchers(point_id, points, false) {
-                if sync_mode.is_flipped() {
-                    points[watcher_id as usize].right_handle = point_info.left_handle;
-                } else {
-                    points[watcher_id as usize].left_handle = point_info.left_handle;
-                }
-            }
-            for (watcher_id, sync_mode) in Self::get_watchers(point_id, points, true) {
-                if sync_mode.is_flipped() {
-                    points[watcher_id as usize].left_handle = point_info.right_handle;
-                } else {
-                    points[watcher_id as usize].right_handle = point_info.right_handle;
-                }
-            }
-        }
+        // Propagate handle info to all watchers
+        Self::propagate_handle(point_id, false, points);
+        Self::propagate_handle(point_id, true, points);
 
         Ok(())
     }
 
-    /// Set the left handle of a control point unless it's linear. Updates its siblings as well.
     pub fn set_left_handle(point_id: u16, left_handle: Vec2, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
-        // If this point is being synced to a left sibling, do this on that point instead
-        if points[point_id as usize].left_sync_id != point_id {
-            if points[point_id as usize].sync_modes().0.is_flipped() {
-                return Self::set_right_handle(points[point_id as usize].left_sync_id, left_handle, points);
-            } else {
-                return Self::set_left_handle(points[point_id as usize].left_sync_id, left_handle, points);
-            }
-        }
-
-        // Set the left handle
-        points[point_id as usize].left_handle = left_handle;
-
-        // Set it for all watchers as well
-        let watcher_handle = if points[point_id as usize].mode() == ControlPointMode::Linear { Vec2::ZERO } else { left_handle };
-        for (watcher_id, sync_mode) in Self::get_watchers(point_id, points, false) {
-            if sync_mode.is_flipped() {
-                points[watcher_id as usize].right_handle = watcher_handle;
-            } else {
-                points[watcher_id as usize].left_handle = watcher_handle;
-            }
-        }
-        
+        let (root_id, root_right) = Self::get_sync_id(point_id, false, points)?;
+        if root_right { points[root_id as usize].right_handle = left_handle; }
+        else          { points[root_id as usize].left_handle = left_handle; }
+        Self::propagate_handle(root_id, root_right, points);
         Ok(())
     }
 
-    /// Set the right handle of a control point unless it's linear. Updates its siblings as well.
     pub fn set_right_handle(point_id: u16, right_handle: Vec2, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
-        // If this point is being synced to a left sibling, do this on that point instead
-        if points[point_id as usize].right_sync_id != point_id {
-            if points[point_id as usize].sync_modes().1.is_flipped() {
-                return Self::set_left_handle(points[point_id as usize].right_sync_id, right_handle, points);
-            } else {
-                return Self::set_right_handle(points[point_id as usize].right_sync_id, right_handle, points);
-            }
-        }
-
-        // Set the righit handle
-        points[point_id as usize].right_handle = right_handle;
-
-        // Set it for all watchers as well
-        let watcher_handle = if points[point_id as usize].mode() == ControlPointMode::Linear { Vec2::ZERO } else { right_handle };
-        for (watcher_id, sync_mode) in Self::get_watchers(point_id, points, true) {
-            if sync_mode.is_flipped() {
-                points[watcher_id as usize].left_handle = watcher_handle;
-            } else {
-                points[watcher_id as usize].right_handle = watcher_handle;
-            }
-        }
-        
+        let (root_id, root_right) = Self::get_sync_id(point_id, true, points)?;
+        if root_right { points[root_id as usize].right_handle = right_handle; }
+        else          { points[root_id as usize].left_handle = right_handle; }
+        Self::propagate_handle(root_id, root_right, points);
         Ok(())
     }
 
