@@ -150,12 +150,16 @@ fn draw_line(
     return mix(base_color, feathered.rgb, feathered.a);
 }
 
+// Distance on screen, in pixels, each end of a curve holds its color, then fades to the middle color
+const CURVE_FADE_PIXELS = 40.0;
+
 // Function to draw a cubic bezier curve
 fn draw_bezier(
     base_color: vec3<f32>,   // RGB base canvas color.
     pos: vec2<f32>,          // Position of this viewport pixel.
-    color_start: vec4<f32>,  // RGBA stroke color for the curve at pos0
-    color_end: vec4<f32>,    // RGBA fill color for the curve at pos1
+    color_start: vec4<f32>,  // RGBA stroke color at pos0
+    color_mid: vec4<f32>,    // RGBA stroke color between the fades at each end
+    color_end: vec4<f32>,    // RGBA stroke color at pos3
     pos0: vec2<f32>,         // Position of the curve's 0th control point.
     pos1: vec2<f32>,         // Position of the curve's 1st control point.
     pos2: vec2<f32>,         // Position of the curve's 2nd control point.
@@ -180,9 +184,9 @@ fn draw_bezier(
 
     // Draw line segments between each point and its previous point
     var last_point = pos0;
-    var last_t = 0.0;
-    var min_dist = length(pos - pos0); // minimum distance to the curve
-    var min_color = color_start;
+    var length_so_far = 0.0;                 // arc length of the polyline up to last_point
+    var min_dist = length(pos - pos0);       // minimum distance to the curve
+    var min_length = 0.0;                    // arc length along the curve of the closest point
     for (var i = 1u; i <= segment_count; i += 1u) {
         let t = f32(i) * segment_length;
 
@@ -199,18 +203,36 @@ fn draw_bezier(
         let approx = last_point + segment_t * (point - last_point);
         let distance = length(pos - approx);
 
+        let this_length = length(point - last_point);
         if (distance < min_dist) {
             min_dist = distance;
-            let total_t = last_t + segment_t * segment_length;
-            min_color = lerp_color(color_start, color_end, total_t);
+            min_length = length_so_far + segment_t * this_length;
         }
 
-        min_dist = min(min_dist, distance);
+        length_so_far += this_length;
         last_point = point;
-        last_t = t;
     }
 
-    // Determine final color and draw
+    // From each endpoint, hold its color for a fixed distance on screen, then fade to the middle color over the same distance.
+    // Short curves shrink both distances so the two ends still fit.
+    let fade_length = min(CURVE_FADE_PIXELS * params.inv_scale, length_so_far * 0.25);
+    var min_color = color_mid;
+    if (fade_length > 0.0) {
+        let from_end = length_so_far - min_length;
+        if (min_length < fade_length) {
+            min_color = color_start;
+        } else if (min_length < 2.0 * fade_length) {
+            min_color = lerp_color(color_start, color_mid, (min_length - fade_length) / fade_length);
+        } else if (from_end < fade_length) {
+            min_color = color_end;
+        } else if (from_end < 2.0 * fade_length) {
+            min_color = lerp_color(color_end, color_mid, (from_end - fade_length) / fade_length);
+        }
+    } else {
+        min_color = color_start;
+    }
+
+    // Draw with the final color
     let feathered = feather_color(min_color, min_dist, h);
     return mix(base_color, feathered.rgb, feathered.a);
 }
