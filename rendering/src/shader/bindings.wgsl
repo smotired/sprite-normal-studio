@@ -70,18 +70,31 @@ struct Params {
 
     // Total amount of points
     point_count: u32,
-
-    // Selected zone index (> 65535 if none)
-    selected_zone: u32,
-
-    // Selected point index (> 65535 if none)
-    selected_point: u32,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 
 // The input textures for the sprite and normal map
 @group(0) @binding(2) var sprite: texture_2d<f32>;
 @group(0) @binding(3) var normal: texture_2d<f32>;
+
+/***********************************/
+/*       SELECTION / HELPERS       */
+/***********************************/
+
+@group(1) @binding(0) var<storage, read> selection: array<u32>; // 1024 * 32 = 65536
+
+// Return true if the point with the ID is selected
+fn is_selected(point_id: u32) -> bool {
+    // Convert point ID from bit to selection buffer index
+    let buffer_index = point_id / 32u;
+    let bit_index = point_id % 32u;
+
+    // TODO: May need to flip depending on endian-ness
+
+    // Check if the bit is set in the selection buffer
+    let selected_bits = selection[buffer_index];
+    return (selected_bits & (1u << bit_index)) != 0;
+}
 
 /***********************************/
 /*        UNPACKING HELPERS        */
@@ -107,7 +120,7 @@ struct ZonePacked {
     // Amount of points in this path
     points_start_and_point_count: u32,
 }
-@group(1) @binding(0) var<storage, read> zones: array<ZonePacked>;
+@group(1) @binding(1) var<storage, read> zones: array<ZonePacked>;
 
 struct Zone {
     // Normal vector of this zone's face
@@ -160,7 +173,7 @@ struct ControlPointPacked {
     // The index of the control point to share the right handle with.
     left_and_right_sync_ids: u32,
 }
-@group(1) @binding(1) var<storage, read> points: array<ControlPointPacked>;
+@group(1) @binding(2) var<storage, read> points: array<ControlPointPacked>;
 
 struct ControlPoint {
     // Position of the control point
@@ -231,4 +244,29 @@ fn right_handle(point: ControlPoint) -> vec2<f32> {
     } else {
         return point.position + point.right_handle;
     }
+}
+
+// Defines which siblings are selected by which other nodes. Each index contains information for 2 other indices because on the CPU side IDs are u16s.
+@group(1) @binding(3) var<storage, read> siblings: array<u32>;
+
+// Get the ID of a sibling.
+fn sibling_id(point_id: u32) -> u32 {
+    if (point_id % 2 == 0u) {
+        return unpack_fst(siblings[point_id / 2u]);
+    } else {
+        return unpack_snd(siblings[point_id / 2u]);
+    }
+}
+
+// Returns true if any of a point's siblings is selected.
+// Requires that the siblings list be constructed correctly.
+fn sibling_is_selected(point_id: u32) -> bool {
+    if (is_selected(point_id)) { return true; }
+    var id = sibling_id(point_id);
+    // Siblings form a ring, but bound the walk so a bad list can never hang the shader.
+    for (var i = 0u; i < 64u && id != point_id; i += 1u) {
+        if (is_selected(id)) { return true; }
+        id = sibling_id(id);
+    }
+    return false;
 }

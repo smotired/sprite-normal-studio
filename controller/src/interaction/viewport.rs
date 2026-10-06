@@ -34,15 +34,6 @@ pub struct ViewportDataUniform {
 
     // Amount of control points
     pub point_count: u32,
-
-    // Index of the currently selected zone, or > 65535 if none is selected
-    pub selected_zone: u32,
-
-    // Index of the currently selected point, or > 65535 if none is selected
-    pub selected_point: u32,
-
-    // Padding to align the struct properly for the shader.
-    pub _padding: [f32; 2],
 }
 
 impl ViewportDataUniform {
@@ -54,7 +45,6 @@ impl ViewportDataUniform {
         (zone_count, point_count): (usize, usize),
         tool: &Box<dyn EditorTool>,
     ) -> Self {
-        let (selected_zone, selected_point) = tool.selection();
         Self {
             camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
@@ -65,9 +55,6 @@ impl ViewportDataUniform {
             cursor_pos: cursor,
             zone_count: zone_count as u32,
             point_count: point_count as u32,
-            selected_zone: selected_zone.map_or(65536, |v| v as u32),
-            selected_point: selected_point.map_or(65536, |v| v as u32),
-            _padding: Default::default(),
         }
     }
 

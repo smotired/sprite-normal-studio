@@ -47,7 +47,7 @@ impl ZoneAssigner {
         });
 
         // Create object bind group
-        let (zones_buffer, points_buffer) = object_buffers;
+        let (zones_buffer, points_buffer, _) = object_buffers;
         let objects_bind_group = create_objects_bind_group(device, &pipeline, zones_buffer.0, points_buffer.0);
         let object_buffer_sizes = (zones_buffer.1, points_buffer.1);
 
@@ -85,7 +85,7 @@ impl ZoneAssigner {
         }));
 
         // Recreate objects bind group if needed
-        let (zones_buffer, points_buffer) = object_buffers;
+        let (zones_buffer, points_buffer, _) = object_buffers;
         let object_buffer_sizes = (zones_buffer.1, points_buffer.1);
         if object_buffer_sizes != self.object_buffer_sizes {
             self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0, points_buffer.0);
@@ -102,7 +102,7 @@ impl ZoneAssigner {
         let Some(output_bind_group) = &self.output_bind_group else { return };
 
         // Recreate objects bind group if needed
-        let (zones_buffer, points_buffer) = object_buffers;
+        let (zones_buffer, points_buffer, _) = object_buffers;
         let object_buffer_sizes = (zones_buffer.1, points_buffer.1);
         if object_buffer_sizes != self.object_buffer_sizes {
             self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0, points_buffer.0);

@@ -3,7 +3,7 @@ mod interaction;
 mod objects;
 mod assignment;
 
-use wgpu::{Device, Queue, Texture};
+use wgpu::{Buffer, Device, Queue, Texture};
 
 use crate::generator::Generator;
 use crate::assignment::ZoneAssigner;
@@ -42,6 +42,9 @@ pub struct Controller {
 
     /// The tool we currently have selected
     tool: Box<dyn EditorTool>,
+
+    /// Selection buffer which gets contents from the selected tool
+    selection_buffer: Buffer,
 }
 
 impl Controller {
@@ -49,6 +52,13 @@ impl Controller {
     pub fn new(device: &Device) -> Self {
         let mut objects = ObjectBuffers::new(device);
         let objects_buffers = objects.get_buffers(device);
+    
+        let selection_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Points Selection Buffer"),
+            size: 8192, // 65536 max points packed into 8 values per byte
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
 
         Self {
             assigner: ZoneAssigner::new(device, objects_buffers.clone()),
@@ -59,7 +69,8 @@ impl Controller {
             overlay_state: Default::default(),
             objects,
             cursor_pos: Default::default(),
-            tool: EditorToolZone::select((None, None)),
+            tool: EditorToolZone::init(),
+            selection_buffer,
         }
     }
     
@@ -67,7 +78,7 @@ impl Controller {
     pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
     {
         // Reset selection
-        self.tool = EditorToolZone::select((None, None));
+        self.tool = EditorToolZone::init();
 
         // Regenerate the normal map's output texture
         let object_buffers = self.objects.get_buffers(device);
@@ -91,4 +102,6 @@ impl Controller {
             self.normals_stale = false;
         }
     }
+
+    pub fn selection_buffer(&self) -> Buffer { self.selection_buffer.clone() }
 }

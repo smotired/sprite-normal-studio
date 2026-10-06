@@ -57,7 +57,7 @@ impl ObjectBuffers {
             if point_id == point2 { return Ok(true); }
 
             // Enqueue siblings
-            for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow()) {
+            for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow().items) {
                 queue.push_back(sibling_id);
             }
 
@@ -128,7 +128,7 @@ impl ObjectBuffers {
         // True if the edge leaving the point by the handle is shared with any other zone.
         let edge_shared = |point_id: u16, right: bool| -> anyhow::Result<bool> {
             let handle = ControlPoint::get_sync_id(point_id, right, points)?;
-            for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow()) {
+            for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow().items) {
                 for side in [false, true] {
                     if ControlPoint::get_sync_id(sibling_id, side, points)? == handle { return Ok(true); }
                 }
@@ -138,7 +138,7 @@ impl ObjectBuffers {
 
         // Get sibling IDs of the end point, which is where we will stop.
         let end_siblings = {
-            let mut siblings = ControlPoint::get_siblings(end_id, &self.point_siblings.borrow());
+            let mut siblings = ControlPoint::get_siblings(end_id, &self.point_siblings.borrow().items);
             siblings.insert(0, end_id);
             siblings
         };
@@ -173,7 +173,7 @@ impl ObjectBuffers {
             // Find the next point in the zone and its siblings
             let mut next_id = base_next_id;
             let mut next_handle = !right; // assume we will keep going the same way
-            let next_siblings = ControlPoint::get_siblings(next_id, &self.point_siblings.borrow());
+            let next_siblings = ControlPoint::get_siblings(next_id, &self.point_siblings.borrow().items);
 
             // If it has no siblings, it's definitely the next one to go to.
             // Otherwise it's definitely not the next one to go to (by assumptions).
@@ -289,7 +289,7 @@ impl ObjectBuffers {
         if self.point_count() >= super::MAX_OBJECT_ID { anyhow::bail!("No space to flip the points in a zone!"); } // we should have checked at the beginning of whatever function
         let (start, count) = self.get_zone_info(zone_id).unwrap().range();
         let points = &mut self.points.borrow_mut().items;
-        let siblings = &mut self.point_siblings.borrow_mut();
+        let siblings = &mut self.point_siblings.borrow_mut().items;
 
         for i in 0..(count / 2) {
             let first_id = start + i;

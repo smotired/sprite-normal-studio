@@ -18,7 +18,7 @@ const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
 
 /// States of the Zones buffer and Points buffer.
-pub type BufferStates = ((Buffer, usize), (Buffer, usize));
+pub type BufferStates = ((Buffer, usize), (Buffer, usize), (Buffer, usize));
 
 struct VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
     /// Items in the vector
@@ -78,7 +78,7 @@ pub struct ObjectBuffers {
     /// IDs of control points' siblings. These don't actually affect
     /// the point at all during rendering and it's better for alignment if we don't
     /// pass them to the GPU.
-    point_siblings: Rc<RefCell<[u16; 65536]>>,
+    point_siblings: Rc<RefCell<VecWithBuffer<u16>>>,
 }
 
 impl ObjectBuffers {
@@ -86,10 +86,13 @@ impl ObjectBuffers {
     pub fn point_count(&self) -> u16 { self.points.borrow().items.len() as u16 }
 
     pub fn new(device: &Device) -> Self {
+        let mut siblings_buffer = VecWithBuffer::new(device, "Point Siblings Buffer");
+        siblings_buffer.items.resize(65536, 0);
+
         Self {
             zones: Rc::new(RefCell::new(VecWithBuffer::new(device, "Zones Buffer"))),
             points: Rc::new(RefCell::new(VecWithBuffer::new(device, "Control Points Buffer"))),
-            point_siblings: Rc::new(RefCell::new([0; 65536])),
+            point_siblings: Rc::new(RefCell::new(siblings_buffer)),
         }
     }
 
@@ -124,8 +127,7 @@ impl ObjectBuffers {
 
     pub fn get_sibling(&self, point_id: u16) -> anyhow::Result<u16> {
         if point_id >= self.point_count() { anyhow::bail!("Point {} does not exist!", point_id); }
-        let siblings = self.point_siblings.borrow();
-        Ok(siblings[point_id as usize])
+        Ok(self.point_siblings.borrow().items[point_id as usize])
     }
 
     /// Get a clone of the zones list
@@ -233,11 +235,11 @@ impl ObjectBuffers {
         let points_after = point_count - point_id;
         for i in 0..points_after {
             let index = point_count - i;
-            ControlPoint::update_id(index - 1, index, points, &mut self.point_siblings.borrow_mut());
+            ControlPoint::update_id(index - 1, index, points, &mut self.point_siblings.borrow_mut().items);
         }
 
         // Push siblings ahead
-        let mut siblings = self.point_siblings.borrow_mut();
+        let siblings = &mut self.point_siblings.borrow_mut().items;
         siblings.copy_within(point_id as usize..point_count as usize, point_id as usize + 1);
         siblings[point_id as usize] = point_id;
 
@@ -282,7 +284,7 @@ impl ObjectBuffers {
         // First determine how many siblings need to be created, and ensure we have room.
         let mut synced_start_ids = {
             let immut_points = &self.points.borrow().items;
-            let immut_siblings = &self.point_siblings.borrow();
+            let immut_siblings = &self.point_siblings.borrow().items;
             let mut ids: Vec<u16> = ControlPoint::get_siblings(start_id, immut_siblings).into_iter()
                 // Only include siblings where the endpoints sync to the same values
                 .filter(|sibling_start_id| {
@@ -348,10 +350,10 @@ impl ObjectBuffers {
 
             // Update the synced point
             self.points.borrow_mut().items[sibling_id as usize].force_synced(point_id);// we will update handles later so we don't need to do anything after this.
-            self.point_siblings.borrow_mut()[sibling_id as usize] = last_sibling_id;
+            self.point_siblings.borrow_mut().items[sibling_id as usize] = last_sibling_id;
             last_sibling_id = sibling_id;
         }
-        self.point_siblings.borrow_mut()[point_id as usize] = last_sibling_id;
+        self.point_siblings.borrow_mut().items[point_id as usize] = last_sibling_id;
 
         // Update the point to split the curve correctly (updating the siblings as well)
         // Determine mode and handles for the path to not change
@@ -397,7 +399,7 @@ impl ObjectBuffers {
 
         // Return the list of created points, which is the point ID and its siblings.
         let mut created = vec![point_id];
-        for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow()) {
+        for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow().items) {
             created.push(sibling_id);
         }
         Ok(created)
@@ -415,7 +417,7 @@ impl ObjectBuffers {
         let point_id = self.zones.borrow_mut().items[zone_id as usize].add_point();
         let point = ControlPoint::new_solo(point_id, zone_id, position);
         self.points.borrow_mut().items.push(point);
-        self.point_siblings.borrow_mut()[point_id as usize] = point_id;
+        self.point_siblings.borrow_mut().items[point_id as usize] = point_id;
 
         Ok(point_id)
     }
@@ -434,7 +436,7 @@ impl ObjectBuffers {
         // Create a point branching off the sibling point toward the right
         let point_id = point_count;
         let points = &mut self.points.borrow_mut().items;
-        let point = ControlPoint::new_sibling_branch_start(point_id, zone_id, sibling_id, points, &mut self.point_siblings.borrow_mut());
+        let point = ControlPoint::new_sibling_branch_start(point_id, zone_id, sibling_id, points, &mut self.point_siblings.borrow_mut().items);
         points.push(point);
         self.zones.borrow_mut().items[zone_id as usize].add_point();
 
@@ -456,7 +458,7 @@ impl ObjectBuffers {
 
         // When start = end, convert first point to a free node with a broken handle instead and don't add any other points.
         // This also means we don't have to flip
-        let same_zone_id = ControlPoint::find_in_zone(sibling_id, source_zone_id, &self.points.borrow().items, &self.point_siblings.borrow())?;
+        let same_zone_id = ControlPoint::find_in_zone(sibling_id, source_zone_id, &self.points.borrow().items, &self.point_siblings.borrow().items)?;
         if let Some(sibling_id) = same_zone_id {
             if source_point_id == sibling_id {
                 let (first_id, _) = self.get_zone_info(creating_zone_id).unwrap().range();
@@ -481,7 +483,7 @@ impl ObjectBuffers {
             let created_point_id = self.zones.borrow_mut().items[creating_zone_id as usize].add_point();
             let points = &mut self.points.borrow_mut().items;
 
-            let point = ControlPoint::new_sibling_branch_end(created_point_id, creating_zone_id, sibling_id, points, &mut self.point_siblings.borrow_mut());
+            let point = ControlPoint::new_sibling_branch_end(created_point_id, creating_zone_id, sibling_id, points, &mut self.point_siblings.borrow_mut().items);
             points.push(point); // goes on the end of the list because we are creating a zone
             created_point_id
         };
@@ -529,7 +531,7 @@ impl ObjectBuffers {
                 segment.start_id,
                 segment.start_handle,
                 points,
-                &mut self.point_siblings.borrow_mut(),
+                &mut self.point_siblings.borrow_mut().items,
             );
 
             points.push(point);
@@ -543,7 +545,7 @@ impl ObjectBuffers {
 
     pub fn update_point(&mut self, point_id: u16, position: Option<Vec2>, mode: Option<ControlPointMode>, left_handle: Option<Vec2>, right_handle: Option<Vec2>) -> anyhow::Result<()> {
         let points = &mut self.points.borrow_mut().items;
-        let siblings = &self.point_siblings.borrow();
+        let siblings = &self.point_siblings.borrow().items;
         if let Some(position) = position {
             ControlPoint::set_position(point_id, position, points, siblings)?;
         }
@@ -575,7 +577,7 @@ impl ObjectBuffers {
         let (start, count) = self.get_zone_info(zone_id).unwrap().range();
         let delta = first_point_position - self.get_point_info(start).unwrap().position();
         for i in 0..count {
-            ControlPoint::add_position_delta(start + i, delta, &mut self.points.borrow_mut().items, &self.point_siblings.borrow())?;
+            ControlPoint::add_position_delta(start + i, delta, &mut self.points.borrow_mut().items, &self.point_siblings.borrow().items)?;
         }
         Ok(())
     }
@@ -594,7 +596,7 @@ impl ObjectBuffers {
         let zone_count = self.zone_count() as usize;
         let zones = &mut self.zones.borrow_mut().items;
         
-        ControlPoint::remove_point(point_id, &mut self.points.borrow_mut().items, &mut self.point_siblings.borrow_mut())?; // updates the list
+        ControlPoint::remove_point(point_id, &mut self.points.borrow_mut().items, &mut self.point_siblings.borrow_mut().items)?; // updates the list
         zones[zone_id].dec_points()?;
         
         // Pull the rest of the points and zones backwards
@@ -642,7 +644,7 @@ impl ObjectBuffers {
 
     /// Find a sibling to the control point in the selected zone.
     pub fn sibling_in_zone(&self, point_id: u16, zone_id: u16) -> Option<u16> {
-        ControlPoint::find_in_zone(point_id, zone_id, &self.points.borrow().items, &self.point_siblings.borrow()).unwrap()
+        ControlPoint::find_in_zone(point_id, zone_id, &self.points.borrow().items, &self.point_siblings.borrow().items).unwrap()
     }
 
     /// Get references to the buffers and their sizes. Recreates the buffers if needed.
@@ -651,6 +653,7 @@ impl ObjectBuffers {
         (
             self.zones.borrow_mut().get_buffer(device),
             self.points.borrow_mut().get_buffer(device),
+            self.point_siblings.borrow_mut().get_buffer(device),
         )
     }
 
@@ -658,6 +661,7 @@ impl ObjectBuffers {
     pub fn write_buffers(&self, queue: &Queue) {
         self.zones.borrow().write(queue);
         self.points.borrow().write(queue);
+        self.point_siblings.borrow().write(queue);
     }
 
     pub fn object_counts(&self) -> (usize, usize) { (self.zone_count() as usize, self.point_count() as usize) }
@@ -690,7 +694,20 @@ impl Controller {
     pub fn object_buffers(&mut self, device: &Device) -> BufferStates { self.objects.get_buffers(device) }
 
     /// Add a command to write the current object lists to the buffers. Assumes the buffers have already been sized.
-    pub fn write_object_buffers(&self, queue: &Queue) { self.objects.write_buffers(queue); }
+    pub fn write_object_buffers(&self, queue: &Queue) {
+        // Write the object buffers
+        self.objects.write_buffers(queue);
+
+        // Pack selected points into selection buffer
+        let mut packed_bytes = vec![0; 8192];
+        for &point_id in self.tool.selection() {
+            let byte_index = point_id / 8;
+            let bit_index = point_id % 8;
+            packed_bytes[byte_index as usize] |= 1 << bit_index;
+        }
+
+        queue.write_buffer(&self.selection_buffer, 0, &packed_bytes);
+    }
 }
 
 /// Return scalar distance to a line segment, the closest point on that line segment, and t for that point.

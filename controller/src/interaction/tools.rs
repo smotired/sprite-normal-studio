@@ -37,26 +37,30 @@ pub struct ControllerStateInput {
     pub camera_inv_scale: f32,
 }
 
-pub type SelectionType = (Option<u16>, Option<u16>);
+pub type SelectionType<'a> = &'a [u16]; // slice of vector of selected points
 
 /// Defines a class for an editor tool.
 /// Will call default when selecting this tool, and drop when selecting a different tool.
 pub trait EditorTool {
+    /// Create a new instance of this tool, initialized from nothing.
+    fn init() -> Box<Self> where Self : Sized;
+
     /// Create a new instance of this tool, with a selection preserved
     /// Nothing else should be passed between objects
-    fn select(selection: SelectionType) -> Box<Self> where Self : Sized;
+    fn select(selection: SelectionType, state: ControllerStateInput) -> Box<Self> where Self : Sized;
 
     /// Deselect a tool, cleaning up external state if needed.
     /// Returns the selection that should be passed to the new tool if any.
-    fn deselect(&mut self) -> SelectionType;
+    fn deselect(&mut self, state: ControllerStateInput) -> SelectionType<'_>;
 
     /// Get the kind of this tool
     fn kind(&self) -> EditorToolKind;
 
-    /// Get the zone and point that are currently selected
-    fn selection(&self) -> SelectionType { (None, None) }
+    /// Get the points that are currently selected
+    fn selection(&self) -> SelectionType<'_>;
 
     /// Get the "ignore zone" which we pass to the shader in some modes
+    /// TODO: can probably remove this after the uh ah uh the the the uh change to points
     fn zone_ignore(&self) -> Option<u16> { None }
 
     /// Handle a click at a point
@@ -87,12 +91,15 @@ impl Controller {
         // Unless we have sub modes in which case cycle those instead of this stuff.
         if tool == self.tool.kind() { return; }
 
-        // Select the new tool, which should drop the old tool.
-        let selection = self.tool.deselect();
+        // Drop the old tool
+        let selection = Vec::from(self.tool.deselect(self.create_state())); // cloning should be okay
+
+        // Select the new tool
+        let state = self.create_state();
         self.tool = match tool {
-            EditorToolKind::Zone  => EditorToolZone::select(selection),
-            EditorToolKind::Point => EditorToolPoint::select(selection),
-            EditorToolKind::Pen   => EditorToolPen::select(selection),
+            EditorToolKind::Zone  => EditorToolZone::select(&selection, state),
+            EditorToolKind::Point => EditorToolPoint::select(&selection, state),
+            EditorToolKind::Pen   => EditorToolPen::select(&selection, state),
         };
     }
 

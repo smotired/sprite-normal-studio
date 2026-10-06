@@ -34,7 +34,7 @@ impl StudioApp {
     pub fn new(render_state: eframe::egui_wgpu::RenderState) -> Self {
         let mut controller = Controller::new(&render_state.device);
 
-        let renderer = Renderer::new(&render_state.device, controller.object_buffers(&render_state.device));
+        let renderer = Renderer::new(&render_state.device, controller.selection_buffer(), controller.object_buffers(&render_state.device));
         let viewport_texture_id = render_state.renderer.write()
             .register_native_texture(&render_state.device, renderer.view(), FilterMode::Nearest);
 
