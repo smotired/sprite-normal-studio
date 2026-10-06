@@ -103,7 +103,7 @@ fn main(
     let assignment = textureLoad(assign, id.xy, 0);
     let z1 = assignment.r;
     let z2 = assignment.g;
-    let ratio = f32(assignment.b) / 65535.0;
+    let z1_weight = f32(assignment.b) / 65535.0;
 
     let flags = assignment.a;
     let has_zone1 = (flags & 0x0001) > 0;
@@ -114,13 +114,13 @@ fn main(
         // Get the first one
         norm = evaluate_zone(id.xy, z1);
 
-        // If we have a second zone, lerp between them according to ratio
+        // If we have a second zone, lerp between them according to z1_weight
         if (has_zone2) {
             let norm2 = evaluate_zone(id.xy, z2);
 
             // Non-spherical linear interpolation.
             // If this causes noticeable artifacts, swap to slower spherical linear interpolation.
-            norm = normalize(norm + (norm2 - norm) * ratio);
+            norm = normalize(norm2 + (norm - norm2) * z1_weight);
         }
     }
 
