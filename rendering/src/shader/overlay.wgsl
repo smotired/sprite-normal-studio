@@ -170,7 +170,7 @@ fn overlay_zone_paths(
                 else {
                     if (!point.no_handles) {
                         // Don't draw the left handle if we are branching off a path
-                        if (!(creating && params.selected_point != zone.points_start && !point.syncs_left)) {
+                        if (!(creating && params.selected_point == zone.points_start && point.syncs_left)) {
                             let left_handle = left_handle(point);
                             col = draw_line(col, pos, left_handle_color, point.position, left_handle, CONTROL_POINT_HANDLE_HALF_WIDTH);
                             col = draw_circle(col, pos, left_handle_color, left_handle, CONTROL_POINT_HANDLE_RADIUS, 0.0, true);
