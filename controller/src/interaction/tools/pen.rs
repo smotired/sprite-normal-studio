@@ -104,11 +104,11 @@ impl EditorTool for EditorToolPen {
                 // The path is now empty, the whole zone was deleted.
                 self.selected_zone = None;
                 self.selected_point = None;
+                self.branch_point_id = None;
             } else {
                 self.selected_point = Some(self.selected_point.unwrap() - 1); // should be the previous point
             }
             self.handle = None;
-            self.branch_point_id = None;
         }
         self.ok()
     }
