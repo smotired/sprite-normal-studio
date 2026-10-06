@@ -472,6 +472,23 @@ impl ObjectBuffers {
             (created_point_id, _) = self.flip_zone(creating_zone_id)?;
         }
 
+        // Ensure the start and end of the path point to the right places
+        {
+            let (start, count) = self.get_zone_info(creating_zone_id).unwrap().range();
+            let points = &mut self.points.borrow_mut().items;
+
+            let first_seg = exterior_path.first().unwrap();
+            let last_seg = exterior_path.last().unwrap();
+            let (out_id, out_right) = ControlPoint::get_sync_id(first_seg.start_id, first_seg.start_handle, points)?;
+            let (in_id, in_right) = ControlPoint::get_sync_id(last_seg.end_id, last_seg.end_handle, points)?;
+
+            let last_point = start + count - 1;
+            ControlPoint::retarget(last_point, true, out_id, out_right, points)?;
+            ControlPoint::retarget(start, false, in_id, in_right, points)?;
+            ControlPoint::resync_handles(last_point, points)?;
+            ControlPoint::resync_handles(start, points)?;
+        }
+
         // Create interior points for everything along the chosen path
         let mut created = vec![created_point_id];
         let creating_zone = &mut self.zones.borrow_mut().items[creating_zone_id as usize];
@@ -489,9 +506,9 @@ impl ObjectBuffers {
                 creating_zone_id,
                 segment.start_id,
                 last_segment.end_id,
-                last_segment.end_handle ^ last_segment.end_flipped,
+                last_segment.end_handle,
                 segment.start_id,
-                segment.start_handle ^ segment.start_flipped,
+                segment.start_handle,
                 points
             );
 
@@ -662,14 +679,20 @@ impl ObjectBuffers {
     }
     
     // Get the signed area of a zone
-    fn zone_signed_area(&self, zone_id: u16) -> f32 {
+    fn zone_signed_area(&self, zone_id: u16, closed: bool) -> f32 {
         let (start, count) = self.get_zone_info(zone_id).unwrap().range();
-        let mut prev = self.get_point_info(start + count - 1).unwrap();
+        let first = self.get_point_info(start).unwrap();
+
+        let mut prev = first;
         let mut area = 0.0;
-        for i in 0..count {
+        for i in 1..count {
             let point = self.get_point_info(start + i).unwrap();
             area += bezier_signed_area(prev.position(), prev.right_handle(), point.left_handle(), point.position());
             prev = point;
+        }
+
+        if closed {
+            area += bezier_signed_area(prev.position(), prev.right_handle(), first.left_handle(), first.position());
         }
         area
     }
@@ -685,7 +708,7 @@ impl ObjectBuffers {
     /// - All nodes on interior paths are correctly set up as interior nodes.
     /// - A path does exist (i.e. check_points_connected was run already).
     fn exterior_path_helper(&self, start_id: u16, end_id: u16, start_right: bool) -> anyhow::Result<(Vec<ExteriorPathSegment>, f32)> {
-        println!("Finding path from {} to {}. Starting right: {}", start_id, end_id, start_right);
+        println!("\nFinding path from {} to {}. Starting right: {}", start_id, end_id, start_right);
 
         // Get the handle the start is syncing to, to start by going around in the start direction.
         let points = &self.points.borrow().items;
@@ -736,7 +759,7 @@ impl ObjectBuffers {
             // +1.0 = interior is on the left of travel, so sweep counter-clockwise from back_dir.
             // -1.0 = interior is on the right, so sweep clockwise.
             let start_zone_id = self.get_point_info(id).unwrap().zone_id();
-            let sweep = if (self.zone_signed_area(start_zone_id) > 0.0) == start_right { 1.0 } else { -1.0 };
+            let sweep = if (self.zone_signed_area(start_zone_id, true) > 0.0) == right { 1.0 } else { -1.0 };
 
             move |from: Vec2, to: Vec2| -> f32 {
                 let a = (sweep * from.cross(to)).atan2(from.dot(to));
@@ -746,17 +769,19 @@ impl ObjectBuffers {
         
         // Loop until we find a sibling of the end point
         let mut path = vec![];
+        let mut seen = std::collections::HashSet::new();
         while !end_siblings.contains(&id) {
             // Bail if we are in an infinite loop.
-            if path.len() > points.len() * 2 {
-                anyhow::bail!("Exterior path did not terminate (started at {start_id}, targeting {end_id})");
+            if !seen.insert((id, right)) {
+                anyhow::bail!("Exterior path revisited state ({id}, {right}) from {start_id} to {end_id}");
             }
-
-            // Create the path segment that starts at this point
-            let mut segment = ExteriorPathSegment::new(id, right, right != start_right);
+            let base_next_id = next(id, right);
+            
+            // Create the path segment that starts at this point and ends at the next point
+            let segment = ExteriorPathSegment::new(id, right, base_next_id, !right);
+            path.push(segment);
 
             // Find the next point in the zone and its siblings
-            let base_next_id = next(id, right);
             let mut next_id = base_next_id;
             let mut next_handle = !right; // assume we will keep going the same way
             let next_siblings = ControlPoint::get_siblings(next_id, points);
@@ -800,16 +825,29 @@ impl ObjectBuffers {
                 }
             }
             
-            println!("Id: {}. Going right: {} | Chosen next point {}, right handle: {} | Best angle: {}", id, right, next_id, next_handle, best_angle);
+            {
+                println!("Id: {}. Going right: {} | Chosen next point {}, right handle: {} | Best angle: {}", id, right, next_id, next_handle, best_angle);
 
-            // Update the segment to go to the next path
-            segment.end_id = next_id;
-            segment.end_handle = next_handle;
-            segment.end_flipped = next_handle == start_right;
+                let zone_id = self.get_point_info(next_id).unwrap().zone_id();
+                let (lsid, lsr) = ControlPoint::get_sync_id(next_id, false, points)?;
+                let (rsid, rsr) = ControlPoint::get_sync_id(next_id, true, points)?;
+
+                println!(
+                    "    Point {}: Zone {} (#{} in zone) | Position: {} | Left sync id: {}, flipped: {} | Right sync id: {}, flipped: {}",
+                    next_id,
+                    zone_id,
+                    next_id - self.get_zone_info(zone_id).unwrap().range().0,
+                    self.get_point_info(next_id).unwrap().position(),
+                    lsid,
+                    lsr,
+                    rsid,
+                    !rsr
+                );
+            }
             
-            id = segment.end_id;
-            right = !segment.end_handle;
-            path.push(segment);
+            // Traverse to the next point/handle
+            id = next_id;
+            right = !next_handle;
         }
 
         // Calculate area by checking each segment
@@ -844,7 +882,7 @@ impl ObjectBuffers {
         // Find the signed area of the part we are creating, up to the endpoint which we take as linear
         let (creating_start, creating_count) = self.get_zone_info(zone_id).unwrap().range();
         let signed_area = {
-            let mut area = self.zone_signed_area(zone_id);
+            let mut area = self.zone_signed_area(zone_id, false);
             let before_join = self.get_point_info(creating_start + creating_count - 1).unwrap();
             let end = self.get_point_info(end_id).unwrap();
             area += bezier_signed_area(before_join.position(), before_join.right_handle(), end.position(), end.position());
@@ -892,10 +930,10 @@ impl ObjectBuffers {
             let last_id = start + count - 1 - i;
 
             // Flip the first point
-            points[first_id as usize].flip();
+            points[first_id as usize].flip(first_id);
 
             // Flip the last point
-            points[last_id as usize].flip();
+            points[last_id as usize].flip(last_id);
 
             // Swap the points themselves
             let last_point = points[last_id as usize];
@@ -911,7 +949,7 @@ impl ObjectBuffers {
         // Flip middle point if it didn't get flipped
         if count % 2 == 1 {
             let middle_id = start + count / 2;
-            points[middle_id as usize].flip();
+            points[middle_id as usize].flip(middle_id);
             // don't need to move it
         }
 
@@ -1019,42 +1057,25 @@ struct ExteriorPathSegment {
     /// The handle we are using to start the curve segment. right = true
     pub start_handle: bool,
 
-    /// If we are syncing the start point's handle to the opposite handle.
-    pub start_flipped: bool,
-
     /// The ID of the point that ends the curve.
     pub end_id: u16,
 
     /// The handle we are using to end the curve segment. right = true
     pub end_handle: bool,
-
-    /// If we are syncing the end point's handle to the opposite handle.
-    pub end_flipped: bool,
 }
 
 impl ExteriorPathSegment {
-    pub fn new(start_id: u16, start_handle: bool, start_flipped: bool) -> Self {
+    pub fn new(start_id: u16, start_handle: bool, end_id: u16, end_handle: bool) -> Self {
         Self {
             start_id,
             start_handle,
-            start_flipped,
-            end_id: 0,
-            end_handle: false,
-            end_flipped: false,
+            end_id,
+            end_handle,
         }
     }
 
     pub fn flip(&mut self) {
-        let tmp = self.start_id;
-        self.start_id = self.end_id;
-        self.end_id = tmp;
-
-        let tmp = self.start_handle;
-        self.start_handle = self.end_handle;
-        self.end_handle = tmp;
-
-        let tmp = self.start_flipped;
-        self.start_flipped = self.end_flipped;
-        self.end_flipped = tmp;
+        std::mem::swap(&mut self.start_id, &mut self.end_id);
+        std::mem::swap(&mut self.start_handle, &mut self.end_handle);
     }
 }
