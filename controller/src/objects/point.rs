@@ -87,7 +87,7 @@ impl ControlPointHandleSyncMode {
 }
 
 type PointsList = Vec<ControlPoint>;
-type SiblingsList = [u16; 65536];
+type SiblingsList = Vec<u16>;
 
 /// A Zone is made up of a list of control points and a list of shapes.
 #[repr(C)]
