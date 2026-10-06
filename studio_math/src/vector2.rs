@@ -177,3 +177,141 @@ impl Display for Vec2 {
         write!(f, "({}, {})", self.x, self.y)
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Constructors should place values on the right axes
+    #[test]
+    fn constructors() {
+        assert_eq!(Vec2::new(1.0, 2.0), Vec2 { x: 1.0, y: 2.0 });
+        assert_eq!(Vec2::hz(3.0), Vec2::new(3.0, 0.0));
+        assert_eq!(Vec2::vt(3.0), Vec2::new(0.0, 3.0));
+        assert_eq!(Vec2::square(4.0), Vec2::new(4.0, 4.0));
+    }
+
+    /// Random vectors should always be unit length
+    #[test]
+    fn random_on_circle_is_normalized() {
+        for _ in 0..100 {
+            assert!((Vec2::random_on_circle().magnitude() - 1.0).abs() < 1e-5);
+        }
+    }
+
+    /// Dot product of perpendicular vectors is 0
+    #[test]
+    fn dot() {
+        assert_eq!(Vec2::new(1.0, 2.0).dot(Vec2::new(3.0, 4.0)), 11.0);
+        assert_eq!(Vec2::RIGHT.dot(Vec2::UP), 0.0);
+    }
+
+    /// Cross product is the determinant, so it's positive going counter-clockwise
+    #[test]
+    fn cross() {
+        assert_eq!(Vec2::RIGHT.cross(Vec2::UP), 1.0);
+        assert_eq!(Vec2::UP.cross(Vec2::RIGHT), -1.0);
+        assert_eq!(Vec2::ONE.cross(Vec2::ONE), 0.0);
+    }
+
+    /// 3-4-5 triangle
+    #[test]
+    fn magnitude() {
+        assert_eq!(Vec2::new(3.0, 4.0).sq_magnitude(), 25.0);
+        assert_eq!(Vec2::new(3.0, 4.0).magnitude(), 5.0);
+    }
+
+    /// Normalizing gives unit length, and the zero vector stays zero
+    #[test]
+    fn normalized() {
+        assert_eq!(Vec2::new(0.0, 5.0).normalized(), Vec2::UP);
+        assert!((Vec2::new(3.0, 4.0).normalized().magnitude() - 1.0).abs() < 1e-6);
+        assert_eq!(Vec2::ZERO.normalized(), Vec2::ZERO);
+    }
+
+    /// Left is counter-clockwise, right is clockwise
+    #[test]
+    fn left_and_right() {
+        assert_eq!(Vec2::RIGHT.left(), Vec2::UP);
+        assert_eq!(Vec2::UP.left(), Vec2::LEFT);
+        assert_eq!(Vec2::RIGHT.right(), Vec2::DOWN);
+        assert_eq!(Vec2::new(2.0, 3.0).left().right(), Vec2::new(2.0, 3.0));
+    }
+
+    /// Distance should be symmetric
+    #[test]
+    fn distance() {
+        let a = Vec2::new(1.0, 1.0);
+        let b = Vec2::new(4.0, 5.0);
+        assert_eq!(a.sq_distance(b), 25.0);
+        assert_eq!(a.distance(b), 5.0);
+        assert_eq!(b.distance(a), 5.0);
+    }
+
+    /// Lerp hits both endpoints and the middle
+    #[test]
+    fn lerp() {
+        let a = Vec2::new(0.0, 10.0);
+        let b = Vec2::new(10.0, 20.0);
+        assert_eq!(Vec2::lerp(a, b, 0.0), a);
+        assert_eq!(Vec2::lerp(a, b, 1.0), b);
+        assert_eq!(Vec2::lerp(a, b, 0.5), Vec2::new(5.0, 15.0));
+    }
+
+    /// Lerp clamps t to between 0 and 1
+    #[test]
+    fn lerp_clamps() {
+        assert_eq!(Vec2::lerp(Vec2::ZERO, Vec2::ONE, -1.0), Vec2::ZERO);
+        assert_eq!(Vec2::lerp(Vec2::ZERO, Vec2::ONE, 2.0), Vec2::ONE);
+    }
+
+    /// Bytes should be x then y as native f32s
+    #[test]
+    fn bytes() {
+        let vector = Vec2::new(1.0, 2.0);
+        let bytes = vector.bytes();
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(&bytes[0..4], &1.0f32.to_ne_bytes());
+        assert_eq!(&bytes[4..8], &2.0f32.to_ne_bytes());
+    }
+
+    /// Arithmetic operators, including assigning versions
+    #[test]
+    fn operators() {
+        let a = Vec2::new(1.0, 2.0);
+        let b = Vec2::new(3.0, 5.0);
+        assert_eq!(a + b, Vec2::new(4.0, 7.0));
+        assert_eq!(b - a, Vec2::new(2.0, 3.0));
+        assert_eq!(a * 2.0, Vec2::new(2.0, 4.0));
+        assert_eq!(2.0 * a, Vec2::new(2.0, 4.0));
+        assert_eq!(-a, Vec2::new(-1.0, -2.0));
+
+        let mut c = a;
+        c += b;
+        assert_eq!(c, Vec2::new(4.0, 7.0));
+        c -= b;
+        assert_eq!(c, a);
+        c *= 3.0;
+        assert_eq!(c, Vec2::new(3.0, 6.0));
+    }
+
+    /// Conversions from tuples, arrays, and library types
+    #[test]
+    fn conversions() {
+        assert_eq!(Vec2::from((1.0, 2.0)), Vec2::new(1.0, 2.0));
+        assert_eq!(Vec2::from((1usize, 2usize)), Vec2::new(1.0, 2.0));
+        assert_eq!(Vec2::from([1.0, 2.0]), Vec2::new(1.0, 2.0));
+        assert_eq!(Vec2::from(egui::Pos2::new(1.0, 2.0)), Vec2::new(1.0, 2.0));
+        assert_eq!(Vec2::from(egui::Vec2::new(1.0, 2.0)), Vec2::new(1.0, 2.0));
+
+        let extent = wgpu::Extent3d { width: 3, height: 4, depth_or_array_layers: 5 };
+        assert_eq!(Vec2::from(extent), Vec2::new(3.0, 4.0));
+    }
+
+    /// Display formats as a coordinate pair
+    #[test]
+    fn display() {
+        assert_eq!(Vec2::new(1.0, 2.5).to_string(), "(1, 2.5)");
+    }
+}

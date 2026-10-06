@@ -82,3 +82,71 @@ impl ControlPointHandleSyncMode {
     /// Create u8 flags for both handles being synced.
     pub(super) fn both_synced() -> u8 { 0b00 }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Only the lowest two bits matter, and unknown values fall back to broken
+    #[test]
+    fn mode_from_u8() {
+        assert_eq!(ControlPointMode::from(0), ControlPointMode::Continuous);
+        assert_eq!(ControlPointMode::from(1), ControlPointMode::Broken);
+        assert_eq!(ControlPointMode::from(2), ControlPointMode::Linear);
+        assert_eq!(ControlPointMode::from(3), ControlPointMode::Broken);
+        assert_eq!(ControlPointMode::from(4), ControlPointMode::Continuous);
+    }
+
+    /// Converting to u8 and back should give the same mode
+    #[test]
+    fn mode_round_trip() {
+        for mode in [ControlPointMode::Continuous, ControlPointMode::Broken, ControlPointMode::Linear] {
+            assert_eq!(ControlPointMode::from(u8::from(mode)), mode);
+        }
+    }
+
+    /// Only the lowest bit matters for sync modes
+    #[test]
+    fn sync_mode_from_u8_and_bool() {
+        assert_eq!(ControlPointHandleSyncMode::from(0u8), ControlPointHandleSyncMode::Synced);
+        assert_eq!(ControlPointHandleSyncMode::from(1u8), ControlPointHandleSyncMode::Flipped);
+        assert_eq!(ControlPointHandleSyncMode::from(2u8), ControlPointHandleSyncMode::Synced);
+        assert_eq!(ControlPointHandleSyncMode::from(false), ControlPointHandleSyncMode::Synced);
+        assert_eq!(ControlPointHandleSyncMode::from(true), ControlPointHandleSyncMode::Flipped);
+    }
+
+    /// Flipping twice should be the identity
+    #[test]
+    fn sync_mode_flip() {
+        assert_eq!(ControlPointHandleSyncMode::Synced.flip(), ControlPointHandleSyncMode::Flipped);
+        assert_eq!(ControlPointHandleSyncMode::Flipped.flip(), ControlPointHandleSyncMode::Synced);
+        assert!(ControlPointHandleSyncMode::Flipped.is_flipped());
+        assert!(!ControlPointHandleSyncMode::Synced.is_flipped());
+    }
+
+    /// Left is the lowest bit, right is the next bit
+    #[test]
+    fn flags_layout() {
+        use ControlPointHandleSyncMode::{Synced, Flipped};
+        assert_eq!(ControlPointHandleSyncMode::create_flags((Synced, Synced)), 0b00);
+        assert_eq!(ControlPointHandleSyncMode::create_flags((Flipped, Synced)), 0b01);
+        assert_eq!(ControlPointHandleSyncMode::create_flags((Synced, Flipped)), 0b10);
+        assert_eq!(ControlPointHandleSyncMode::create_flags((Flipped, Flipped)), 0b11);
+        assert_eq!(ControlPointHandleSyncMode::both_synced(), 0b00);
+    }
+
+    /// Creating flags then reading them should give the same modes, ignoring other bits
+    #[test]
+    fn flags_round_trip() {
+        use ControlPointHandleSyncMode::{Synced, Flipped};
+        for left in [Synced, Flipped] {
+            for right in [Synced, Flipped] {
+                let flags = ControlPointHandleSyncMode::create_flags((left, right));
+                assert_eq!(ControlPointHandleSyncMode::from_flags(flags), (left, right));
+                assert_eq!(ControlPointHandleSyncMode::from_flags(flags | 0b100), (left, right));
+            }
+        }
+    }
+}

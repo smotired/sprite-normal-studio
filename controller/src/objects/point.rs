@@ -109,3 +109,161 @@ impl ControlPoint {
     /// Set a zone ID. Should be called when zone ordering changes.
     pub fn set_zone_id(&mut self, zone_id: u16) { self.zone_id = zone_id; }
 }
+
+
+
+/// Helpers for building control points and sibling lists in tests
+#[cfg(test)]
+mod test_utils {
+    use studio_math::Vec2;
+
+    use super::{ControlPoint, PointsList, SiblingsList};
+
+    /// Create `count` solo points in zone 0 along the x axis, and a siblings list where every point is alone
+    pub(super) fn solo_points(count: u16) -> (PointsList, SiblingsList) {
+        let points = (0..count).map(|id| ControlPoint::new_solo(id, 0, Vec2::new(id as f32, 0.0))).collect();
+        let siblings = (0..count).collect();
+        (points, siblings)
+    }
+
+    /// Link the given points into a single sibling ring, in the order given
+    pub(super) fn link_ring(ids: &[u16], siblings: &mut SiblingsList) {
+        for (i, &id) in ids.iter().enumerate() {
+            siblings[id as usize] = ids[(i + 1) % ids.len()];
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::test_utils::solo_points;
+
+    /// Distance should be measured from the position of the point
+    #[test]
+    fn distance() {
+        let point = ControlPoint::new_solo(0, 0, Vec2::new(1.0, 2.0));
+        assert_eq!(point.position(), Vec2::new(1.0, 2.0));
+        assert_eq!(point.distance(Vec2::new(4.0, 6.0)), 5.0);
+    }
+
+    /// Axis distance is the larger of the x and y differences
+    #[test]
+    fn absolute_axis_distance() {
+        let point = ControlPoint::new_solo(0, 0, Vec2::new(1.0, 2.0));
+        assert_eq!(point.absolute_axis_distance(Vec2::new(4.0, 3.0)), 3.0);
+        assert_eq!(point.absolute_axis_distance(Vec2::new(0.0, -8.0)), 10.0);
+        assert_eq!(point.absolute_axis_distance(point.position()), 0.0);
+    }
+
+    /// Handles are in world space, except for linear points where they sit on the point
+    #[test]
+    fn handles_by_mode() {
+        let mut point = ControlPoint::new_solo(0, 0, Vec2::new(10.0, 10.0));
+        point.left_handle = Vec2::new(-1.0, 2.0);
+        point.right_handle = Vec2::new(3.0, -4.0);
+
+        point.set_mode(ControlPointMode::Linear);
+        assert_eq!(point.left_handle(), Vec2::new(10.0, 10.0));
+        assert_eq!(point.right_handle(), Vec2::new(10.0, 10.0));
+
+        for mode in [ControlPointMode::Broken, ControlPointMode::Continuous] {
+            point.set_mode(mode);
+            assert_eq!(point.left_handle(), Vec2::new(9.0, 12.0));
+            assert_eq!(point.right_handle(), Vec2::new(13.0, 6.0));
+        }
+    }
+
+    /// Mode and zone ID should read back what was set
+    #[test]
+    fn mode_and_zone() {
+        let mut point = ControlPoint::new_solo(0, 3, Vec2::ZERO);
+        assert_eq!(point.zone_id(), 3);
+        point.set_zone_id(5);
+        assert_eq!(point.zone_id(), 5);
+
+        assert_eq!(point.mode(), ControlPointMode::Linear);
+        point.set_mode(ControlPointMode::Continuous);
+        assert_eq!(point.mode(), ControlPointMode::Continuous);
+    }
+
+    /// Setting one handle's sync mode shouldn't touch the other
+    #[test]
+    fn set_sync_mode() {
+        let mut point = ControlPoint::new_solo(0, 0, Vec2::ZERO);
+        assert_eq!(point.sync_modes(), (ControlPointHandleSyncMode::Synced, ControlPointHandleSyncMode::Synced));
+
+        point.set_sync_mode(true, ControlPointHandleSyncMode::Flipped);
+        assert_eq!(point.sync_modes(), (ControlPointHandleSyncMode::Synced, ControlPointHandleSyncMode::Flipped));
+
+        point.set_sync_mode(false, ControlPointHandleSyncMode::Flipped);
+        assert_eq!(point.sync_modes(), (ControlPointHandleSyncMode::Flipped, ControlPointHandleSyncMode::Flipped));
+    }
+
+    /// Setting sync modes should leave the higher flag bits alone
+    #[test]
+    fn set_sync_modes_keeps_other_flags() {
+        let mut point = ControlPoint::new_solo(0, 0, Vec2::ZERO);
+        point.flags = 0b100;
+        point.set_sync_modes(0b11);
+        assert_eq!(point.flags, 0b111);
+        point.set_sync_modes(0b00);
+        assert_eq!(point.flags, 0b100);
+    }
+
+    /// A point syncs "in" a direction if that handle follows a different point
+    #[test]
+    fn self_syncs_in() {
+        let mut point = ControlPoint::new_solo(3, 0, Vec2::ZERO);
+        assert!(!point.self_syncs_in(3, false));
+        assert!(!point.self_syncs_in(3, true));
+
+        point.left_sync_id = 1;
+        assert!(point.self_syncs_in(3, false));
+        assert!(!point.self_syncs_in(3, true));
+    }
+
+    /// Forcing free syncs both handles to itself and zeroes the left handle
+    #[test]
+    fn force_free() {
+        let mut point = ControlPoint::new_solo(0, 0, Vec2::ZERO);
+        point.left_handle = Vec2::new(1.0, 1.0);
+        point.right_handle = Vec2::new(2.0, 2.0);
+        point.left_sync_id = 4;
+        point.right_sync_id = 5;
+        point.set_sync_mode(true, ControlPointHandleSyncMode::Flipped);
+
+        point.force_free(7);
+        assert_eq!((point.left_sync_id(), point.right_sync_id()), (7, 7));
+        assert_eq!(point.sync_modes(), (ControlPointHandleSyncMode::Synced, ControlPointHandleSyncMode::Synced));
+        assert_eq!(point.left_handle, Vec2::ZERO);
+        assert_eq!(point.right_handle, Vec2::new(2.0, 2.0));
+    }
+
+    /// Forcing synced makes the point broken and follow the target without touching handles
+    #[test]
+    fn force_synced() {
+        let mut point = ControlPoint::new_solo(0, 0, Vec2::ZERO);
+        point.right_handle = Vec2::new(2.0, 2.0);
+
+        point.force_synced(4);
+        assert_eq!(point.mode(), ControlPointMode::Broken);
+        assert_eq!((point.left_sync_id(), point.right_sync_id()), (4, 4));
+        assert_eq!(point.right_handle, Vec2::new(2.0, 2.0));
+    }
+
+    /// A handle is in a sync group if it syncs to something, or if something syncs to it
+    #[test]
+    fn any_syncs_in() {
+        let (mut points, mut siblings) = solo_points(2);
+        super::test_utils::link_ring(&[0, 1], &mut siblings);
+        assert!(!ControlPoint::any_syncs_in(0, false, &points, &siblings));
+        assert!(!ControlPoint::any_syncs_in(1, false, &points, &siblings));
+
+        // Left handle of 1 follows 0
+        points[1].left_sync_id = 0;
+        assert!(ControlPoint::any_syncs_in(0, false, &points, &siblings));
+        assert!(ControlPoint::any_syncs_in(1, false, &points, &siblings));
+        assert!(!ControlPoint::any_syncs_in(0, true, &points, &siblings));
+    }
+}

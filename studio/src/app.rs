@@ -204,3 +204,25 @@ fn generate_normal_map_filename(sprite_path: &Path) -> PathBuf {
 
     sprite_path.with_file_name(std::ffi::OsStr::new(&new_filename))
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// _normal is added to the stem and the directory is kept
+    #[test]
+    fn normal_map_filename() {
+        assert_eq!(
+            generate_normal_map_filename(&PathBuf::from("art").join("hero.png")),
+            PathBuf::from("art").join("hero_normal.png"),
+        );
+        assert_eq!(generate_normal_map_filename(Path::new("hero.png")), PathBuf::from("hero_normal.png"));
+    }
+
+    /// Only the final extension is replaced
+    #[test]
+    fn normal_map_filename_with_dots() {
+        assert_eq!(generate_normal_map_filename(Path::new("hero.idle.png")), PathBuf::from("hero.idle_normal.png"));
+    }
+}

@@ -80,3 +80,63 @@ impl Default for OverlayState {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use crate::interaction::tools::{EditorToolPen, EditorToolPoint, EditorToolZone};
+
+    use super::*;
+
+    /// Everything on by default, but points aren't drawn in the zone tool
+    #[test]
+    fn default_flags_zone_tool() {
+        let tool = EditorToolZone::init();
+        assert_eq!(OverlayState::default().get_flags(tool.as_ref()), 0b0001_0111);
+    }
+
+    /// Point and pen tools also draw the points
+    #[test]
+    fn default_flags_point_tools() {
+        let state = OverlayState::default();
+        assert_eq!(state.get_flags(EditorToolPoint::init().as_ref()), 0b0011_0111);
+        assert_eq!(state.get_flags(EditorToolPen::init().as_ref()), 0b0011_0111);
+    }
+
+    /// With the overlay off, only shading flags are set
+    #[test]
+    fn overlay_off_flags() {
+        let mut state = OverlayState::default();
+        state.toggle_overlay();
+        assert_eq!(state.get_flags(EditorToolPen::init().as_ref()), 0b11);
+
+        state.normals_on = false;
+        assert_eq!(state.get_flags(EditorToolPen::init().as_ref()), 0b10);
+    }
+
+    /// Without lighting, the light isn't drawn unless it's being dragged
+    #[test]
+    fn light_flags() {
+        let tool = EditorToolZone::init();
+        let mut state = OverlayState { lighting_on: false, normals_on: false, ..Default::default() };
+        assert_eq!(state.get_flags(tool.as_ref()), 0b1_0000);
+
+        state.dragging_light = true;
+        assert_eq!(state.get_flags(tool.as_ref()), 0b1_1100);
+    }
+
+    /// Toggling reports the new state, and turning the overlay off stops dragging the light
+    #[test]
+    fn toggle_overlay() {
+        let mut state = OverlayState::default();
+        assert!(state.overlay_on());
+
+        state.dragging_light = true;
+        assert!(!state.toggle_overlay());
+        assert!(!state.overlay_on());
+        assert!(!state.dragging_light);
+
+        assert!(state.toggle_overlay());
+        assert!(state.overlay_on());
+    }
+}

@@ -31,3 +31,25 @@ impl ZoneAssignerUniform {
     /// Get the bytes for writing to a buffer
     pub fn bytes(&self) -> &[u8] { bytemuck::bytes_of(self) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Counts should be copied into the uniform
+    #[test]
+    fn new() {
+        let uniform = ZoneAssignerUniform::new((3, 12));
+        assert_eq!((uniform.zone_count, uniform.point_count), (3, 12));
+    }
+
+    /// Bytes should be the zone count then the point count
+    #[test]
+    fn bytes() {
+        let uniform = ZoneAssignerUniform::new((3, 12));
+        let bytes = uniform.bytes();
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(&bytes[0..4], &3u32.to_ne_bytes());
+        assert_eq!(&bytes[4..8], &12u32.to_ne_bytes());
+    }
+}
