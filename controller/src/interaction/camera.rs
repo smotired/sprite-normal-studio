@@ -34,6 +34,6 @@ impl Camera {
         self.position = anchor + (self.position - anchor) * ratio; // lerp clamps so do manually
     }
 
-    pub fn scale(&self) -> f32 { (2 as f32).powf(self.scale as f32) }
-    pub fn inv_scale(&self) -> f32 { (2 as f32).powf(-self.scale as f32) }
+    pub fn scale(&self) -> f32 { 2_f32.powf(self.scale as f32) }
+    pub fn inv_scale(&self) -> f32 { 2_f32.powf(-self.scale as f32) }
 }

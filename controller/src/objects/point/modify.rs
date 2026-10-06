@@ -15,7 +15,7 @@ impl ControlPoint {
     }
 
     /// Push the root's stored handle value to every handle (on its siblings) that follows it.
-    fn propagate_handle(root_id: u16, root_right: bool, points: &mut Vec<ControlPoint>, siblings: &SiblingsList) {
+    fn propagate_handle(root_id: u16, root_right: bool, points: &mut [ControlPoint], siblings: &SiblingsList) {
         // Determine the handle position from sync mode and handle mode
         let root = points[root_id as usize];
         let value = if root.mode() == ControlPointMode::Linear { Vec2::ZERO }
@@ -41,10 +41,10 @@ impl ControlPoint {
     }
 
     /// Set the handle mode of a control point. Updates siblings only if changing to linear
-    pub fn set_handle_mode(point_id: u16, mode: ControlPointMode, points: &mut Vec<ControlPoint>, siblings: &SiblingsList) -> anyhow::Result<()> {
+    pub fn set_handle_mode(point_id: u16, mode: ControlPointMode, points: &mut [ControlPoint], siblings: &SiblingsList) -> anyhow::Result<()> {
         if (point_id as usize) >= points.len() { anyhow::bail!("Point {} does not exist!", point_id); }
 
-        let point_info = points[point_id as usize].clone();
+        let point_info = points[point_id as usize];
         // TODO: Can probably actually make that work
         if point_info.left_sync_id != point_id || point_info.right_sync_id != point_id { anyhow::bail!("Can't set mode of a synced point! It must be Broken to sync correctly."); }
         points[point_id as usize].set_mode(mode);
@@ -56,7 +56,7 @@ impl ControlPoint {
         Ok(())
     }
 
-    pub fn set_left_handle(point_id: u16, left_handle: Vec2, points: &mut Vec<ControlPoint>, siblings: &SiblingsList) -> anyhow::Result<()> {
+    pub fn set_left_handle(point_id: u16, left_handle: Vec2, points: &mut [ControlPoint], siblings: &SiblingsList) -> anyhow::Result<()> {
         let (root_id, root_right) = Self::get_sync_id(point_id, false, points)?;
         if root_right { points[root_id as usize].right_handle = left_handle; }
         else          { points[root_id as usize].left_handle = left_handle; }
@@ -64,7 +64,7 @@ impl ControlPoint {
         Ok(())
     }
 
-    pub fn set_right_handle(point_id: u16, right_handle: Vec2, points: &mut Vec<ControlPoint>, siblings: &SiblingsList) -> anyhow::Result<()> {
+    pub fn set_right_handle(point_id: u16, right_handle: Vec2, points: &mut [ControlPoint], siblings: &SiblingsList) -> anyhow::Result<()> {
         let (root_id, root_right) = Self::get_sync_id(point_id, true, points)?;
         if root_right { points[root_id as usize].right_handle = right_handle; }
         else          { points[root_id as usize].left_handle = right_handle; }
@@ -73,11 +73,11 @@ impl ControlPoint {
     }
 
     /// Replace IDs for points by going through the whole list globally. Doesn't move the point.
-    pub fn update_id(point_id: u16, new_point_id: u16, points: &mut Vec<ControlPoint>, siblings: &mut SiblingsList) {
+    pub fn update_id(point_id: u16, new_point_id: u16, points: &mut [ControlPoint], siblings: &mut SiblingsList) {
         let point_count = points.len();
         for i in 0..point_count {
             let point = &mut points[i];
-            if siblings[i as usize] == point_id { siblings[i as usize] = new_point_id; }
+            if siblings[i] == point_id { siblings[i] = new_point_id; }
             if point.left_sync_id == point_id { point.left_sync_id = new_point_id; }
             if point.right_sync_id == point_id { point.right_sync_id = new_point_id; }
         }
@@ -164,7 +164,7 @@ impl ControlPoint {
 
     /// Point one handle of `point_id` at a specific handle of another point.
     /// The relation is flipped when the two handles are in different directions.
-    pub fn retarget(point_id: u16, right: bool, target_id: u16, target_right: bool, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
+    pub fn retarget(point_id: u16, right: bool, target_id: u16, target_right: bool, points: &mut [ControlPoint]) -> anyhow::Result<()> {
         if point_id as usize >= points.len() { anyhow::bail!("Point {} does not exist!", point_id); }
         let point = &mut points[point_id as usize];
         if right { point.right_sync_id = target_id; } else { point.left_sync_id = target_id; }
@@ -174,7 +174,7 @@ impl ControlPoint {
     
     /// Refresh the stored value of every synced handle from the handle it eventually syncs to.
     /// Should be done after flipping.
-    pub fn resync_handles(point_id: u16, points: &mut Vec<ControlPoint>) -> anyhow::Result<()> {
+    pub fn resync_handles(point_id: u16, points: &mut [ControlPoint]) -> anyhow::Result<()> {
         for right in [false, true] {
             let (root_id, root_right) = Self::get_sync_id(point_id, right, points)?;
             if root_id == point_id { continue; } // the point syncs to its own handle

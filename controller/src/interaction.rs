@@ -27,7 +27,7 @@ impl Controller {
             &self.overlay_state,
             self.cursor_pos,
             self.objects.object_counts(),
-            &self.tool,
+            self.tool.as_ref(),
         )
     }
 }

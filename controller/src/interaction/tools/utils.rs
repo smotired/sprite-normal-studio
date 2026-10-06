@@ -39,10 +39,9 @@ pub fn get_clicked_handle(point_id: u16, state: &ControllerStateInput, pos: Vec2
 /// Also returns the point corrected to the path and the t value of that curve segment.
 /// If inserting a point into the zone path, it would go after the returned point.
 pub fn get_clicked_zone_path(state: &ControllerStateInput, pos: Vec2) -> Option<(u16, u16, Vec2, f32)> {
-    if let Some((zone_id, point_id, corrected, t)) = state.objects.get_closest_path_point(pos, state.camera_inv_scale) {
-        if corrected.distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
+    if let Some((zone_id, point_id, corrected, t)) = state.objects.get_closest_path_point(pos, state.camera_inv_scale)
+        && corrected.distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
             return Some((zone_id, point_id, corrected, t));
         }
-    }
     None
 }

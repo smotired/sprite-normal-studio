@@ -115,7 +115,7 @@ impl ControlPoint {
     }
 
     /// Get the ID and handle direction of the handle we are eventually syncing this handle to.
-    pub fn get_sync_id(point_id: u16, mut right: bool, points: &Vec<ControlPoint>) -> anyhow::Result<(u16, bool)> {
+    pub fn get_sync_id(point_id: u16, mut right: bool, points: &[ControlPoint]) -> anyhow::Result<(u16, bool)> {
         // Helper to return true if a control point's mode syncs in a given direction
         let point_syncs_in = |point_id: u16, point: &ControlPoint, right: bool| {
             if right { point.right_sync_id != point_id }

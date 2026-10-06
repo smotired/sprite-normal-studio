@@ -80,14 +80,14 @@ impl Renderer {
         let size = Vec2::square(256.0);
 
         // Create the buffer for the viewport uniform
-        let uniform_buffer = ViewportDataUniform::buffer(&device);
+        let uniform_buffer = ViewportDataUniform::buffer(device);
         
         // Create texture data
-        let view = create_texture(&device, size);
+        let view = create_texture(device, size);
 
         // Create initial input textures
-        let sprite_view = create_texture(&device, Vec2::square(16.0));
-        let normal_view = create_texture(&device, Vec2::square(16.0));
+        let sprite_view = create_texture(device, Vec2::square(16.0));
+        let normal_view = create_texture(device, Vec2::square(16.0));
 
         // Create the bind group
         let textures_bind_group = create_textures_bind_group(
@@ -132,7 +132,7 @@ impl Renderer {
 
         // Recreate texture if needed
         if size != self.texture.size {
-            let view = create_texture(&device, size);
+            let view = create_texture(device, size);
 
             self.texture.view = view;
             self.texture.size = size;
@@ -161,8 +161,8 @@ impl Renderer {
         // Set up work groups
         {
             // We specified 16x16x16 work groups in the shader
-            let blocks_x = (size.x as u32).div_ceil(16) as u32;
-            let blocks_y = (size.y as u32).div_ceil(16) as u32;
+            let blocks_x = (size.x as u32).div_ceil(16);
+            let blocks_y = (size.y as u32).div_ceil(16);
 
             // Set up the render pass and dispatch work groups
             let mut pass = encoder.begin_compute_pass(&Default::default());
@@ -227,7 +227,7 @@ fn create_textures_bind_group(device: &Device, pipeline: &ComputePipeline, outpu
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&output),
+                resource: wgpu::BindingResource::TextureView(output),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -235,11 +235,11 @@ fn create_textures_bind_group(device: &Device, pipeline: &ComputePipeline, outpu
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::TextureView(&sprite),
+                resource: wgpu::BindingResource::TextureView(sprite),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: wgpu::BindingResource::TextureView(&normal),
+                resource: wgpu::BindingResource::TextureView(normal),
             },
         ]
     })

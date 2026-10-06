@@ -18,14 +18,14 @@ pub fn bezier_de_casteljau(pos0: Vec2, pos1: Vec2, pos2: Vec2, pos3: Vec2, t: f3
 /// Find the point on a bezier curve at a given t value
 pub fn bezier_point_at(pos0: Vec2, pos1: Vec2, pos2: Vec2, pos3: Vec2, t: f32) -> Vec2 {
     // Last interpolation is the target point.
-    return bezier_de_casteljau(pos0, pos1, pos2, pos3, t).5;
+    bezier_de_casteljau(pos0, pos1, pos2, pos3, t).5
 }
 
 /// Split a bezier curve at a given t value and return control points for the two new curves.
 /// Returns the points in the order along the curve.
 pub fn bezier_split_at(pos0: Vec2, pos1: Vec2, pos2: Vec2, pos3: Vec2, t: f32) -> (Vec2, Vec2, Vec2, Vec2, Vec2) {
     let (a1, _, b2, a2, b1, mid) = bezier_de_casteljau(pos0, pos1, pos2, pos3, t);
-    return (a1, a2, mid, b1, b2);
+    (a1, a2, mid, b1, b2)
 }
 
 /// Find the signed area of a bezier curve via closed form of Green's theorem for a cubic

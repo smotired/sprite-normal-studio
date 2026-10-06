@@ -60,8 +60,8 @@ impl ObjectBuffers {
         zones[zone_id].dec_points()?;
         
         // Pull the rest of the points and zones backwards
-        for i in (zone_id as usize + 1)..zone_count {
-            zones[i].add_offset(-1);
+        for zone in &mut zones[(zone_id + 1)..zone_count] {
+            zone.add_offset(-1);
         }
 
         Ok(false)
@@ -91,9 +91,9 @@ impl ObjectBuffers {
         let zones = &mut self.zones.borrow_mut().items;
         let points = &mut self.points.borrow_mut().items;
         zones.remove(zone_id as usize);
-        for i in (zone_id as usize)..new_zone_count {
+        for (i, zone) in zones.iter().enumerate().take(new_zone_count).skip(zone_id as usize) {
             // The zone should already have had its range updated
-            let (start, count) = zones[i].range();
+            let (start, count) = zone.range();
             for j in 0..count {
                 points[(start + j) as usize].set_zone_id(i as u16);
             }

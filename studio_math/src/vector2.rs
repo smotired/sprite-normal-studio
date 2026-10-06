@@ -29,7 +29,7 @@ impl Vec2 {
 
     /// Create a random normalized vector (uniformly distributed on unit circle)
     pub fn random_on_circle() -> Self {
-        let angle = rand::random_range(0.0 .. crate::M_2PI);
+        let angle = rand::random_range(0.0 .. core::f32::consts::TAU);
         Self {
             x: angle.cos(),
             y: angle.sin(),

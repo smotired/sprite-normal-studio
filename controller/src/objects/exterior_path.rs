@@ -286,7 +286,7 @@ impl ObjectBuffers {
     /// Should only be used for a brand new zone, that doesn't have anything synced to it.
     pub fn flip_zone(&mut self, zone_id: u16) -> anyhow::Result<(u16, u16)> {
         if zone_id != self.zone_count() - 1 { anyhow::bail!("Can only run flip_zone on the final zone, not zone {}!", zone_id); }
-        if self.point_count() >= super::MAX_OBJECT_ID { anyhow::bail!("No space to flip the points in a zone!"); } // we should have checked at the beginning of whatever function
+        if self.point_count() == super::MAX_OBJECT_ID { anyhow::bail!("No space to flip the points in a zone!"); } // we should have checked at the beginning of whatever function
         let (start, count) = self.get_zone_info(zone_id).unwrap().range();
         let points = &mut self.points.borrow_mut().items;
         let siblings = &mut self.point_siblings.borrow_mut().items;
@@ -302,9 +302,7 @@ impl ObjectBuffers {
             points[last_id as usize].flip(last_id);
 
             // Swap the points themselves
-            let last_point = points[last_id as usize];
-            points[last_id as usize] = points[first_id as usize];
-            points[first_id as usize] = last_point;
+            points.swap(last_id as usize, first_id as usize);
             siblings.swap(first_id as usize, last_id as usize);
 
             // Swap the sibling IDs. Use id 65535 as a swap space which we checked earlier.

@@ -174,23 +174,21 @@ impl StudioApp {
         let mut inputs = Vec::new();
 
         // Handle click as determined by egui
-        if response.clicked() {
-            if let Some(pos) = response.interact_pointer_pos() {
+        if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos() {
                 inputs.push(Input::MouseClicked(to_world(pos)));
             }
-        }
 
         // Handle starting drag
-        if response.drag_started_by(PointerButton::Primary) {
-            if let Some(start_screen) = ui.input(|i| i.pointer.press_origin()) {
+        if response.drag_started_by(PointerButton::Primary)
+            && let Some(start_screen) = ui.input(|i| i.pointer.press_origin()) {
                 inputs.push(Input::MouseDragStarted(to_world(start_screen)));
             }
-        }
 
         // Handle an active drag
-        if response.dragged_by(PointerButton::Primary) {
-            if let Some(start_screen) = ui.input(|i| i.pointer.press_origin()) {
-                if let Some(total_delta) = response.total_drag_delta() {
+        if response.dragged_by(PointerButton::Primary)
+            && let Some(start_screen) = ui.input(|i| i.pointer.press_origin())
+                && let Some(total_delta) = response.total_drag_delta() {
                     let start_world = to_world(start_screen);
 
                     // drag_delta is this frame's incremental movement
@@ -199,8 +197,6 @@ impl StudioApp {
 
                     inputs.push(Input::MouseDragged(start_world, final_world));
                 }
-            }
-        }
 
         // Handle stopping drag
         if response.drag_stopped_by(PointerButton::Primary) {
