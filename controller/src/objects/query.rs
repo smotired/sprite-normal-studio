@@ -1,6 +1,6 @@
 use studio_math::Vec2;
 
-use super::ObjectBuffers;
+use super::{ObjectBuffers, ControlPoint};
 
 impl ObjectBuffers {
     /// Get the closest point to the given position within the specified zone.
@@ -83,6 +83,47 @@ impl ObjectBuffers {
 
         // Fold in corrected position
         best.map(|(z, p)| (z, p, corrected, t))
+    }
+
+    /// Get a list of all points connected to 
+    /// If include_siblings is false, it will only include the first-reached sibling
+    pub fn get_connected_points(&self, point_id: u16, include_siblings: bool) -> anyhow::Result<Vec<u16>> {
+        // Helper function to get the next point in the same zone in the given direction.
+        let next = |i: u16| {
+            let zone_id = self.get_point_info(i).unwrap().zone_id();
+            let (start, count) = self.get_zone_info(zone_id).unwrap().range();
+            start + (i - start + 1) % count
+        };
+
+        // Run breadth-first search
+        let mut visited = [false; 65536];
+        let mut tracked_siblings = std::collections::HashSet::new();
+        let mut connected = vec![];
+
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(point_id);
+        while let Some(point_id) = queue.pop_front() {
+            // Skip or mark as visited
+            if visited[point_id as usize] { continue; }
+            visited[point_id as usize] = true;
+
+            // Add to the connected list if not disallowed
+            if include_siblings || tracked_siblings.insert(point_id) {
+                connected.push(point_id);
+            }
+
+            // Enqueue siblings, but also mark them as tracked
+            for sibling_id in ControlPoint::get_siblings(point_id, &self.point_siblings.borrow().items) {
+                queue.push_back(sibling_id);
+                tracked_siblings.insert(sibling_id);
+            }
+
+            // Enqueue next node
+            queue.push_back(next(point_id));
+        }
+
+        // Return the final list of connected nodes
+        Ok(connected)
     }
 }
 
@@ -210,7 +251,7 @@ mod tests {
         assert_close(corrected, pos0);
     }
 
-use super::super::test_utils::{add_zone, add_square};
+    use super::super::test_utils::{add_zone, add_square};
     use crate::objects::ObjectBuffers;
 
     /// With no zone given, the closest point across every zone is found
@@ -281,5 +322,93 @@ use super::super::test_utils::{add_zone, add_square};
     fn closest_path_point_none() {
         let objects = ObjectBuffers::headless();
         assert!(objects.get_closest_path_point(Vec2::ZERO, 1.0).is_none());
+    }
+
+    use std::collections::HashSet;
+
+    /// A zone with no branched zones is connected to all its points
+    #[test]
+    fn connected_in_single_zone() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)]);
+
+        // Ensure it is connected to itself from all points
+        for i in 0..4 {
+            assert_eq!(
+                objects.get_connected_points(i, true)
+                    .unwrap().into_iter().collect::<HashSet<u16>>(),
+                HashSet::from([0, 1, 2, 3]),
+            );
+        }
+
+        // Ensure the other zone is connected to itself from all points
+        for i in 4..8 {
+            assert_eq!(
+                objects.get_connected_points(i, true)
+                    .unwrap().into_iter().collect::<HashSet<u16>>(),
+                HashSet::from([4, 5, 6, 7]),
+            );
+        }
+    }
+
+    /// Zones are connected if they share points, directly or indirectly.
+    #[test]
+    fn connected_through_siblings() {
+        let mut objects = ObjectBuffers::headless();
+
+        // Add an initial zone
+        add_square(&mut objects, 10.0);
+
+        // Add the first branching zone, just with a single point to create a triangle along the top edge.
+        let (branch_zone, _) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(branch_zone, Vec2::new(20.0, 0.0)).unwrap();
+        objects.complete_branching_zone(1, branch_zone, 2).unwrap();
+
+        // Add the second branching zone, to complete the square from the previous one.
+        let (branch_zone, _) = objects.create_branching_zone(5).unwrap();
+        objects.create_point(branch_zone, Vec2::new(20.0, 10.0)).unwrap();
+        objects.complete_branching_zone(5, branch_zone, 4).unwrap();
+
+        // Add a completely unrelated zone
+        add_zone(&mut objects, &[(100.0, 0.0), (110.0, 0.0)]);
+
+        // Ensure the three connected zones are connected together, but only to each other
+        for i in 0..10 {
+            assert_eq!(
+                objects.get_connected_points(i, true)
+                    .unwrap().into_iter().collect::<HashSet<u16>>(),
+                HashSet::from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            );
+        }
+    }
+
+    /// If include_siblings is false, we should only store the first encountered sibling for each point
+    #[test]
+    fn connected_through_siblings_without_siblings() {
+        let mut objects = ObjectBuffers::headless();
+
+        // Add an initial zone
+        add_square(&mut objects, 10.0);
+
+        // Add the first branching zone, just with a single point to create a triangle along the top edge.
+        let (branch_zone, _) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(branch_zone, Vec2::new(20.0, 0.0)).unwrap();
+        objects.complete_branching_zone(1, branch_zone, 2).unwrap();
+
+        // Add the second branching zone, to complete the square from the previous one.
+        let (branch_zone, _) = objects.create_branching_zone(5).unwrap();
+        objects.create_point(branch_zone, Vec2::new(20.0, 10.0)).unwrap();
+        objects.complete_branching_zone(5, branch_zone, 4).unwrap();
+
+        // Add a completely unrelated zone
+        add_zone(&mut objects, &[(100.0, 0.0), (110.0, 0.0)]);
+
+        // Run on the second zone in the list, This zone has the points 4,5,6, so their siblings should be excluded.
+        assert_eq!(
+            objects.get_connected_points(5, false)
+                .unwrap().into_iter().collect::<HashSet<u16>>(),
+            HashSet::from([0, 3, 4, 5, 6, 8]),
+        );
     }
 }

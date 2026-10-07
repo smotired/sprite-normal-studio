@@ -114,7 +114,7 @@ pub(crate) mod test_utils {
         zone_id
     }
 
-    /// Create a counter-clockwise square zone with corners at (0, 0) and (size, size)
+    /// Create a clockwise square zone with corners at (0, 0) and (size, size)
     pub(crate) fn add_square(objects: &mut ObjectBuffers, size: f32) -> u16 {
         add_zone(objects, &[(0.0, 0.0), (size, 0.0), (size, size), (0.0, size)])
     }
