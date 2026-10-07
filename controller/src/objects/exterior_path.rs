@@ -36,6 +36,8 @@ impl ExteriorPathSegment {
 impl ObjectBuffers {
     /// Determine if two points in different zones are connected
     pub fn check_points_connected(&self, point1: u16, point2: u16) -> anyhow::Result<bool> {
+        // Don't use get_connected_points, so that we can exit early if we find the one we want.
+
         // Helper function to get the next point in the same zone in the given direction.
         let next = |i: u16| {
             let zone_id = self.get_point_info(i).unwrap().zone_id();
@@ -340,8 +342,7 @@ mod tests {
         assert_eq!((segment.end_id, segment.end_handle), (1, true));
     }
 
-use studio_math::Vec2;
-
+    use studio_math::Vec2;
     use super::super::test_utils::{add_zone, add_square};
 
     /// Points in the same zone are always connected
