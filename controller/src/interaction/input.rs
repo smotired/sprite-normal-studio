@@ -14,6 +14,20 @@ pub struct InputModifiers {
     pub alt: bool,
 }
 
+impl InputModifiers {
+    pub fn none()       -> Self { Default::default() }
+    pub fn shift()      -> Self { Self { shift: true,  ctrl: false, alt: false }}
+    pub fn ctrl()       -> Self { Self { shift: false, ctrl: true,  alt: false }}
+    pub fn alt()        -> Self { Self { shift: false, ctrl: false, alt: true  }}
+    pub fn shift_ctrl() -> Self { Self { shift: true,  ctrl: true,  alt: false }}
+    pub fn ctrl_shift() -> Self { Self { shift: true,  ctrl: true,  alt: false }}
+    pub fn shift_alt()  -> Self { Self { shift: true,  ctrl: false, alt: true  }}
+    pub fn alt_shift()  -> Self { Self { shift: true,  ctrl: false, alt: true  }}
+    pub fn ctrl_alt()   -> Self { Self { shift: false, ctrl: true,  alt: true  }}
+    pub fn alt_ctrl()   -> Self { Self { shift: false, ctrl: true,  alt: true  }}
+    pub fn all()        -> Self { Self { shift: true,  ctrl: true,  alt: true  }}
+}
+
 /// Defines input types
 pub enum Input {
     /// No input, used so that we don't kill the iterator early
