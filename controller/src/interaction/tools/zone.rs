@@ -64,12 +64,53 @@ impl EditorTool for EditorToolZone {
     }
 
     fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
+        let clicked_zone_info = self.zone_from_pos(&state, pos);
         let (new_selection, reference_delta) = self.get_updated_selection(&state, pos, true, modifiers);
-        self.set_selection(new_selection, &state);
 
-        // TODO: If new_selection is empty, instead start dragging a box. When released, will select everything within the box.
+        // If we clicked a zone, only update selection if the clicked zone isn't selected.
+        if let Some(clicked_zone_id) = clicked_zone_info.0 {
+            // Determine if this (or a sibling) is in the selected zone
+            let mut selected = self.selected_zones.contains(&clicked_zone_id);
+            if !selected && let Some(clicked_point_id) = clicked_zone_info.1 {
+                for &zone_id in &self.selected_zones {
+                    if let Some(sibling_id) = state.objects.sibling_in_zone(clicked_point_id, zone_id) { // can prolly make a helper for this
+                        if clicked_zone_info.2.is_none() {
+                            selected = true;
+                            break;
+                        } else if let Some(end_id) = state.objects.sibling_in_zone(clicked_zone_info.2.unwrap(), zone_id) {
+                            let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+                            let expected_next_id = start + (sibling_id - start + 1) % count;
+                            if expected_next_id == end_id {
+                                selected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
 
-        self.reference_delta = reference_delta;
+            // Update selection if not in selected zone
+            if !selected {
+                self.set_selection(new_selection, &state);
+                self.reference_delta = reference_delta;
+            }
+
+            // Otherwise keep selection as is and recalculate reference delta
+            else {
+                let first_zone_id = *self.selected_zones.iter().min().unwrap();
+                let (first_point_id, _) = state.objects.get_zone_info(first_zone_id).unwrap().range();
+                let first_point_position = state.objects.get_point_info(first_point_id).unwrap().position();
+                self.reference_delta = Some(pos - first_point_position);
+            }
+        }
+
+        // If we didn't click a zone, just update the selection
+        else {
+            // TODO: If new_selection is empty, instead start dragging a box. When released, will select everything within the box.
+
+            self.set_selection(new_selection, &state);
+            self.reference_delta = reference_delta;
+        }
         self.ok()
     }
 
@@ -612,12 +653,41 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_start(state(&objects), Vec2::new(140.0, 100.0), Default::default()).unwrap();
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(145.0, 102.0), Default::default()).unwrap();
         assert!(result.normals_stale);
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(0.0, 0.0));
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(45.0, 2.0));
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
 
         // Releasing keeps the zone selected but stops the drag
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 3);
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
+    }
+
+    /// Dragging a selected zone doesn't change the selection regardless of modifier keys
+    #[test]
+    fn drag_selected_doesnt_change_selection() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
+        let mut tool = EditorToolZone::init();
+
+        // Select both zones
+        tool.handle_click(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(90.0, 1.0), IM::shift()).unwrap();
+
+        // Drag the second zone, without holding shift
+        tool.handle_drag_start(state(&objects), Vec2::new(140.0, 100.0), Default::default()).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(145.0, 102.0), Default::default()).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 2.0));
+        assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(45.0, 2.0));
+        assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
+
+        // Releasing keeps the zone selected but stops the drag
+        tool.handle_drag_released(state(&objects), Default::default()).unwrap();
+        assert_eq!(tool.selection().len(), 7);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
         assert!(result.normals_stale);
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
