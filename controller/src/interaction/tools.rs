@@ -9,7 +9,7 @@ pub use point::EditorToolPoint;
 use result::{ToolResult, EditorToolActionResult};
 
 use studio_math::Vec2;
-use crate::{Controller, ObjectBuffers};
+use crate::{Controller, ObjectBuffers, InputModifiers};
 
 /// Options for which tool we are using in the editor.
 /// Tool options may later be added as tuple parameters in this enum.
@@ -64,16 +64,16 @@ pub trait EditorTool {
     fn creating_path(&self) -> Option<bool> { None }
 
     /// Handle a click at a point
-    fn handle_click(&mut self, state: ControllerStateInput, pos: Vec2) -> ToolResult;
+    fn handle_click(&mut self, state: ControllerStateInput, pos: Vec2, modifiers: InputModifiers) -> ToolResult;
 
     /// Handle a drag starting at a point
-    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: Vec2) -> ToolResult;
+    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: Vec2, modifiers: InputModifiers) -> ToolResult;
 
     /// Handle a drag with a new position
-    fn handle_dragging_to(&mut self, state: ControllerStateInput, pos: Vec2) -> ToolResult;
+    fn handle_dragging_to(&mut self, state: ControllerStateInput, pos: Vec2, modifiers: InputModifiers) -> ToolResult;
 
     /// Handle releasing drag
-    fn handle_drag_released(&mut self, state: ControllerStateInput) -> ToolResult;
+    fn handle_drag_released(&mut self, state: ControllerStateInput, modifiers: InputModifiers) -> ToolResult;
 
     /// Handle cancelling something
     fn handle_cancel(&mut self, state: ControllerStateInput) -> ToolResult;

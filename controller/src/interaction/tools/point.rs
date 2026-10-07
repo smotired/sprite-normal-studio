@@ -1,5 +1,5 @@
-use crate::interaction::tools::utils::get_clicked_handle;
 
+use crate::InputModifiers;
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
 use super::result::{ToolResult, DefaultResults};
 
@@ -28,12 +28,12 @@ impl EditorTool for EditorToolPoint {
     fn kind(&self) -> EditorToolKind { EditorToolKind::Point }
     fn selection(&self) -> SelectionType<'_> { &self.selected_points[..] }
 
-    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         // TODO: Create helper like in zone for selecting with modifier keys
 
         // Reselect unless we clicked the current control point's handle
         let selected_point = self.single_selected_point();
-        if selected_point.is_none() || get_clicked_handle(selected_point.unwrap(), &state, pos).is_none()
+        if selected_point.is_none() || utils::get_clicked_handle(selected_point.unwrap(), &state, pos).is_none()
         {
             // Selecting a path selects all of its points, so the "selected zone" is the one all selected points share.
             let selected_zone = self.single_selected_zone(&state);
@@ -85,11 +85,11 @@ impl EditorTool for EditorToolPoint {
         self.ok()
     }
 
-    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         // TODO: Use modifier keys to add to or remove from selection first
 
         // If we select a handle of the control point start dragging it
-        if let Some(point_id) = self.single_selected_point() && let Some(right) = get_clicked_handle(point_id, &state, pos) {
+        if let Some(point_id) = self.single_selected_point() && let Some(right) = utils::get_clicked_handle(point_id, &state, pos) {
             self.handle = Some(right);
         } else {
             self.selected_points = 
@@ -111,7 +111,7 @@ impl EditorTool for EditorToolPoint {
         self.ok()
     }
 
-    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         // Drag selected points
         if !self.selected_points.is_empty() {
             // If we are dragging the handle of a single point, adjust that
@@ -137,7 +137,7 @@ impl EditorTool for EditorToolPoint {
         self.ok()
     }
 
-    fn handle_drag_released(&mut self, _state: ControllerStateInput) -> ToolResult {
+    fn handle_drag_released(&mut self, _state: ControllerStateInput, _modifiers: InputModifiers) -> ToolResult {
         // Release drag on selected point/handle
         self.handle = None;
         self.ok()
@@ -221,13 +221,13 @@ mod tests {
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPoint::init();
 
-        tool.handle_click(state(&objects), Vec2::new(100.0, 100.5)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(100.0, 100.5), Default::default()).unwrap();
         assert_eq!(tool.selection(), &[2]);
 
-        tool.handle_click(state(&objects), Vec2::new(50.0, -1.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(50.0, -1.0), Default::default()).unwrap();
         assert_eq!(tool.selection(), &[0, 1, 2, 3]);
 
-        tool.handle_click(state(&objects), Vec2::new(500.0, 500.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(500.0, 500.0), Default::default()).unwrap();
         assert!(tool.selection().is_empty());
     }
 
@@ -239,7 +239,7 @@ mod tests {
         objects.update_point(1, None, Some(ControlPointMode::Broken), None, Some(Vec2::new(0.0, 30.0))).unwrap();
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
 
-        tool.handle_click(state(&objects), Vec2::new(10.0, 30.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(10.0, 30.0), Default::default()).unwrap();
         assert_eq!(tool.selection(), &[1]);
     }
 
@@ -252,7 +252,7 @@ mod tests {
         objects.create_point(1, Vec2::new(20.0, 0.0)).unwrap();
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
 
-        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
         assert_eq!(tool.selection(), &[branch_id]);
     }
 
@@ -263,11 +263,11 @@ mod tests {
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
 
-        let result = tool.handle_drag_start(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        let result = tool.handle_drag_start(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
         assert!(!result.normals_stale);
         assert_eq!(tool.selection(), &[1]);
 
-        let result = tool.handle_dragging_to(state(&objects), Vec2::new(14.0, 3.0)).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(14.0, 3.0), Default::default()).unwrap();
         assert!(result.normals_stale);
         assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(14.0, 3.0));
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
@@ -280,7 +280,7 @@ mod tests {
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::select(&[0, 1, 2, 3], state(&objects));
 
-        tool.handle_dragging_to(state(&objects), Vec2::new(5.0, 5.0)).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(5.0, 5.0), Default::default()).unwrap();
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 5.0));
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 15.0));
     }
@@ -293,16 +293,16 @@ mod tests {
         objects.update_point(1, None, Some(ControlPointMode::Broken), None, Some(Vec2::new(0.0, 30.0))).unwrap();
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
 
-        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 30.0)).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 30.0), Default::default()).unwrap();
         assert_eq!(tool.handle, Some(true));
-        let result = tool.handle_dragging_to(state(&objects), Vec2::new(25.0, 10.0)).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(25.0, 10.0), Default::default()).unwrap();
         assert!(result.normals_stale);
 
         let point = objects.get_point_info(1).unwrap();
         assert_eq!(point.position(), Vec2::new(10.0, 0.0));
         assert_eq!(point.right_handle(), Vec2::new(25.0, 10.0));
 
-        tool.handle_drag_released(state(&objects)).unwrap();
+        tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.handle, None);
     }
 
@@ -313,8 +313,8 @@ mod tests {
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
 
-        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0)).unwrap();
-        assert!(!tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0)).unwrap().normals_stale);
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0), Default::default()).unwrap();
+        assert!(!tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0), Default::default()).unwrap().normals_stale);
     }
 
     /// Deleting removes every selected point, even though IDs shift as they go

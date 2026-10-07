@@ -1,5 +1,6 @@
 use studio_math::Vec2;
 
+use crate::InputModifiers;
 use crate::objects::ControlPointMode;
 
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
@@ -67,16 +68,16 @@ impl EditorTool for EditorToolPen {
 
     fn selection(&self) -> SelectionType<'_> { &self.zone_points[..] }
 
-    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         self.handle_create_point(state, pos, false)
     }
 
-    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         self.dragging_reversed = false;
         self.handle_create_point(state, pos, true)
     }
 
-    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         // Assume we are dragging the handle of the currently selected point
         if let Some(point_id) = self.latest_point {
             let point_pos = state.objects.get_point_info(point_id).unwrap().position();
@@ -92,7 +93,7 @@ impl EditorTool for EditorToolPen {
         self.ok()
     }
 
-    fn handle_drag_released(&mut self, state: ControllerStateInput) -> ToolResult {
+    fn handle_drag_released(&mut self, state: ControllerStateInput, _modifiers: InputModifiers) -> ToolResult {
         self.dragging_reversed = false;
         self.handle = None;
 
@@ -295,9 +296,9 @@ mod tests {
 
     /// Click three points far apart to start a path
     fn start_triangle(tool: &mut EditorToolPen, objects: &ObjectBuffers) {
-        tool.handle_click(state(objects), Vec2::new(0.0, 0.0)).unwrap();
-        tool.handle_click(state(objects), Vec2::new(50.0, 0.0)).unwrap();
-        tool.handle_click(state(objects), Vec2::new(50.0, 50.0)).unwrap();
+        tool.handle_click(state(objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+        tool.handle_click(state(objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
+        tool.handle_click(state(objects), Vec2::new(50.0, 50.0), Default::default()).unwrap();
     }
 
     /// A tool that is not creating anything
@@ -315,14 +316,14 @@ mod tests {
         let objects = ObjectBuffers::headless();
         let mut tool = EditorToolPen::init();
 
-        let result = tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Pen);
         assert_eq!(objects.object_counts(), (1, 1));
         assert_eq!(tool.creating_path(), Some(true)); // the latest point is the first point
 
-        tool.handle_click(state(&objects), Vec2::new(50.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
         assert_eq!(tool.creating_path(), Some(false));
-        tool.handle_click(state(&objects), Vec2::new(50.0, 50.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(50.0, 50.0), Default::default()).unwrap();
         assert_eq!(objects.object_counts(), (1, 3));
         assert_eq!(tool.selection(), &[0, 1, 2]);
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(50.0, 50.0));
@@ -335,7 +336,7 @@ mod tests {
         let mut tool = EditorToolPen::init();
         start_triangle(&mut tool, &objects);
 
-        let result = tool.handle_click(state(&objects), Vec2::new(1.0, 1.0)).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(1.0, 1.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
         assert!(result.normals_stale);
         assert_eq!(objects.object_counts(), (1, 3));
@@ -350,9 +351,9 @@ mod tests {
     fn click_first_point_needs_more_points() {
         let objects = ObjectBuffers::headless();
         let mut tool = EditorToolPen::init();
-        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
 
-        let result = tool.handle_click(state(&objects), Vec2::new(1.0, 1.0)).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(1.0, 1.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Pen);
         assert_eq!(objects.point_count(), 1);
     }
@@ -362,15 +363,15 @@ mod tests {
     fn drag_creates_continuous_point() {
         let objects = ObjectBuffers::headless();
         let mut tool = EditorToolPen::init();
-        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0)).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
         assert_eq!(objects.get_point_info(0).unwrap().mode(), ControlPointMode::Continuous);
         assert_eq!(tool.handle, Some(true));
 
-        tool.handle_dragging_to(state(&objects), Vec2::new(30.0, 10.0)).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(30.0, 10.0), Default::default()).unwrap();
         let point = objects.get_point_info(0).unwrap();
         assert_eq!(point.right_handle(), Vec2::new(30.0, 10.0));
 
-        tool.handle_drag_released(state(&objects)).unwrap();
+        tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.handle, None);
     }
 
@@ -379,9 +380,9 @@ mod tests {
     fn drag_sets_opposite_handles() {
         let objects = ObjectBuffers::headless();
         let mut tool = EditorToolPen::init();
-        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
-        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0)).unwrap();
-        tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 5.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 5.0), Default::default()).unwrap();
 
         let point = objects.get_point_info(1).unwrap();
         assert_eq!(point.right_handle(), Vec2::new(60.0, 5.0));
@@ -395,11 +396,11 @@ mod tests {
         let mut tool = EditorToolPen::init();
         start_triangle(&mut tool, &objects);
 
-        tool.handle_drag_start(state(&objects), Vec2::new(1.0, 1.0)).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(1.0, 1.0), Default::default()).unwrap();
         assert_eq!(tool.creating_path(), Some(true));
         assert_eq!(objects.get_point_info(0).unwrap().mode(), ControlPointMode::Broken);
 
-        let result = tool.handle_drag_released(state(&objects)).unwrap();
+        let result = tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
         assert!(result.normals_stale);
     }
@@ -409,9 +410,9 @@ mod tests {
     fn release_needs_more_points() {
         let objects = ObjectBuffers::headless();
         let mut tool = EditorToolPen::init();
-        tool.handle_drag_start(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
 
-        let result = tool.handle_drag_released(state(&objects)).unwrap();
+        let result = tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Pen);
     }
 
@@ -474,7 +475,7 @@ mod tests {
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
-        let result = tool.handle_click(state(&objects), Vec2::new(50.0, 1.0)).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(50.0, 1.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Point);
         assert!(result.normals_stale);
         assert_eq!(objects.point_count(), 5);
@@ -492,7 +493,7 @@ mod tests {
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
-        tool.handle_click(state(&objects), Vec2::new(100.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(100.0, 0.0), Default::default()).unwrap();
         assert_eq!(objects.object_counts(), (2, 5));
         assert_eq!(tool.creating_path(), Some(true));
         assert_eq!(objects.get_sibling(1).unwrap(), 4);
@@ -505,9 +506,9 @@ mod tests {
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
-        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
-        tool.handle_click(state(&objects), Vec2::new(-100.0, 50.0)).unwrap();
-        let result = tool.handle_click(state(&objects), Vec2::new(0.0, 100.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(-100.0, 50.0), Default::default()).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(0.0, 100.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
         assert!(result.normals_stale);
         assert_eq!(objects.zone_count(), 2);

@@ -7,6 +7,13 @@ pub enum Axis {
     Horizontal,
 }
 
+#[derive(Default, Copy, Clone, Debug)]
+pub struct InputModifiers {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+}
+
 /// Defines input types
 pub enum Input {
     /// No input, used so that we don't kill the iterator early
@@ -23,16 +30,16 @@ pub enum Input {
     CameraScale(i32, Option<Vec2>),
 
     /// Left-clicking the mouse at a world space position
-    MouseClicked(Vec2),
+    MouseClicked(Vec2, InputModifiers),
 
     /// Starting a drag event
-    MouseDragStarted(Vec2),
+    MouseDragStarted(Vec2, InputModifiers),
 
     /// Dragging the mouse while left clicking, from a start position to an end position.
-    MouseDragged(Vec2, Vec2),
+    MouseDragged(Vec2, Vec2, InputModifiers),
 
     /// Releasing the mouse dragging
-    MouseDragReleased,
+    MouseDragReleased(InputModifiers),
 
     /// Dragging the camera across this world space delta.
     CameraDragged(Vec2),
@@ -87,14 +94,14 @@ impl Controller {
                 self.camera.apply_scale(amount, relative_to);
             },
 
-            Input::MouseClicked(pos) => {
+            Input::MouseClicked(pos, modifiers) => {
                 if self.overlay_state.overlay_on() {
-                    let result = self.tool.handle_click(self.create_state(), pos);
+                    let result = self.tool.handle_click(self.create_state(), pos, modifiers);
                     self.handle_tool_result(result);
                 }
             },
 
-            Input::MouseDragStarted(pos) => {
+            Input::MouseDragStarted(pos, modifiers) => {
                 self.overlay_state.dragging_light = false;
 
                 if self.overlay_state.overlay_on() {
@@ -105,13 +112,13 @@ impl Controller {
 
                     // Check the tool
                     else {
-                        let result = self.tool.handle_drag_start(self.create_state(), pos);
+                        let result = self.tool.handle_drag_start(self.create_state(), pos, modifiers);
                         self.handle_tool_result(result);
                     }
                 }
             }
 
-            Input::MouseDragged(_start, new) => {
+            Input::MouseDragged(_start, new, modifiers) => {
                 // Move the light if we are dragging it
                 if self.overlay_state.dragging_light {
                     self.light.set_pos(new);
@@ -119,18 +126,18 @@ impl Controller {
 
                 // Otherwise switch based on tool
                 else if self.overlay_state.overlay_on() {
-                    let result = self.tool.handle_dragging_to(self.create_state(), new);
+                    let result = self.tool.handle_dragging_to(self.create_state(), new, modifiers);
                     self.handle_tool_result(result);
                 }
             },
 
-            Input::MouseDragReleased => {
+            Input::MouseDragReleased(modifiers) => {
                 if self.overlay_state.dragging_light {
                     self.overlay_state.dragging_light = false;
                 }
 
                 else if self.overlay_state.overlay_on() {
-                    let result = self.tool.handle_drag_released(self.create_state());
+                    let result = self.tool.handle_drag_released(self.create_state(), modifiers);
                     self.handle_tool_result(result);
                 }
             },

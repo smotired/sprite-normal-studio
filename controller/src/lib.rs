@@ -8,7 +8,7 @@ use wgpu::{Buffer, Device, Queue, Texture};
 use crate::generator::Generator;
 use crate::assignment::ZoneAssigner;
 
-pub use crate::interaction::input::{Input, Axis};
+pub use crate::interaction::input::{Input, InputModifiers, Axis};
 use crate::interaction::tools::{EditorTool, EditorToolZone};
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::EditorToolKind;
