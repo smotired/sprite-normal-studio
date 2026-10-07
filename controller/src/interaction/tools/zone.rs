@@ -1,5 +1,7 @@
 use studio_math::Vec2;
 
+use crate::InputModifiers;
+
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
 use super::result::{ToolResult, DefaultResults};
 
@@ -40,7 +42,7 @@ impl EditorTool for EditorToolZone {
     fn kind(&self) -> EditorToolKind { EditorToolKind::Zone }
     fn selection(&self) -> SelectionType<'_> { &self.selected_points_reference[..] }
 
-    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         // Select the zone if a control point or the path was clicked
         // TODO: Move to like "select clicked control point" and "select clicked path" helpers, like in the pen tool.
         // TODO: This should put all connected zones to the selection.
@@ -85,7 +87,7 @@ impl EditorTool for EditorToolZone {
         self.ok()
     }
 
-    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         // TODO: If not clicking on a zone, drag out a box and selecting everything within the box.
         // SHIFT: Add to selection
         // CTRL: Box is sized to square
@@ -125,7 +127,7 @@ impl EditorTool for EditorToolZone {
         self.ok()
     }
 
-    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2) -> ToolResult {
+    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         // Drag selected zones
         if !self.selected_zones.is_empty() {
             for zone_id in &self.selected_zones[..] {
@@ -141,7 +143,7 @@ impl EditorTool for EditorToolZone {
         self.ok()
     }
 
-    fn handle_drag_released(&mut self, _state: ControllerStateInput) -> ToolResult {
+    fn handle_drag_released(&mut self, _state: ControllerStateInput, _modifiers: InputModifiers) -> ToolResult {
         // Release drag on selected zones, but keep them selected
         self.reference_delta = None;
         self.ok()
@@ -222,15 +224,15 @@ mod tests {
         add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
         let mut tool = EditorToolZone::init();
 
-        let result = tool.handle_click(state(&objects), Vec2::new(10.5, 0.0)).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(10.5, 0.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
         assert!(!result.normals_stale);
         assert_eq!(tool.selection(), &[0, 1, 2, 3]);
 
-        tool.handle_click(state(&objects), Vec2::new(90.0, 1.0)).unwrap(); // path
+        tool.handle_click(state(&objects), Vec2::new(90.0, 1.0), Default::default()).unwrap(); // path
         assert_eq!(tool.selection(), &[4, 5, 6]);
 
-        tool.handle_click(state(&objects), Vec2::new(25.0, 25.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(25.0, 25.0), Default::default()).unwrap();
         assert!(tool.selection().is_empty());
     }
 
@@ -243,12 +245,12 @@ mod tests {
         objects.create_point(zone_id, Vec2::new(20.0, 0.0)).unwrap();
         let mut tool = EditorToolZone::init();
 
-        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
         let first = tool.selection().to_vec();
-        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
         let second = tool.selection().to_vec();
         assert_ne!(first, second);
-        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
         assert_eq!(tool.selection(), &first[..]);
     }
 
@@ -259,16 +261,16 @@ mod tests {
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::init();
 
-        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0)).unwrap();
-        let result = tool.handle_dragging_to(state(&objects), Vec2::new(15.0, 12.0)).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(15.0, 12.0), Default::default()).unwrap();
         assert!(result.normals_stale);
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 2.0));
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
 
         // Releasing keeps the zone selected but stops the drag
-        tool.handle_drag_released(state(&objects)).unwrap();
+        tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 4);
-        let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0)).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
         assert!(result.normals_stale);
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
     }
@@ -280,8 +282,8 @@ mod tests {
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::init();
 
-        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0)).unwrap();
-        let result = tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0)).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0), Default::default()).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0), Default::default()).unwrap();
         assert!(!result.normals_stale);
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
     }
@@ -297,7 +299,7 @@ mod tests {
         assert!(!tool.handle_delete(state(&objects)).unwrap().normals_stale);
         assert_eq!(objects.zone_count(), 2);
 
-        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0)).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
         assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale);
         assert_eq!(objects.object_counts(), (1, 3));
         assert!(tool.selection().is_empty());

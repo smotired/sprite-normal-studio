@@ -1,8 +1,18 @@
-use controller::{Axis, Input};
+use controller::{Axis, Input, InputModifiers};
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
 use studio_math::Vec2;
 
 use crate::app::StudioApp;
+
+trait IntoInputModifiers {
+    fn convert(self) -> InputModifiers;
+}
+
+impl IntoInputModifiers for Modifiers {
+    fn convert(self) -> InputModifiers {
+        InputModifiers { shift: self.shift, ctrl: self.ctrl, alt: self.alt }
+    }
+}
 
 impl StudioApp {
     // Convert egui inputs into something our controller can use.
@@ -176,18 +186,22 @@ impl StudioApp {
         // Handle click as determined by egui
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos() {
-                inputs.push(Input::MouseClicked(to_world(pos)));
+                let modifiers = ui.input(|i| i.modifiers);
+                inputs.push(Input::MouseClicked(to_world(pos), modifiers.convert()));
             }
 
         // Handle starting drag
-        if response.drag_started_by(PointerButton::Primary)
-            && let Some(start_screen) = ui.input(|i| i.pointer.press_origin()) {
-                inputs.push(Input::MouseDragStarted(to_world(start_screen)));
+        if response.drag_started_by(PointerButton::Primary) {
+            let (press_origin, modifiers) = ui.input(|i| (i.pointer.press_origin(), i.modifiers));
+            if let Some(start_screen) = press_origin {
+                inputs.push(Input::MouseDragStarted(to_world(start_screen), modifiers.convert()));
             }
+        }
 
         // Handle an active drag
-        if response.dragged_by(PointerButton::Primary)
-            && let Some(start_screen) = ui.input(|i| i.pointer.press_origin())
+        if response.dragged_by(PointerButton::Primary) {
+            let (press_origin, modifiers) = ui.input(|i| (i.pointer.press_origin(), i.modifiers));
+            if let Some(start_screen) = press_origin
                 && let Some(total_delta) = response.total_drag_delta() {
                     let start_world = to_world(start_screen);
 
@@ -195,12 +209,14 @@ impl StudioApp {
                     let final_screen = start_screen + total_delta;
                     let final_world = to_world(final_screen);
 
-                    inputs.push(Input::MouseDragged(start_world, final_world));
+                    inputs.push(Input::MouseDragged(start_world, final_world, modifiers.convert()));
                 }
+        }
 
         // Handle stopping drag
         if response.drag_stopped_by(PointerButton::Primary) {
-            inputs.push(Input::MouseDragReleased);
+            let modifiers = ui.input(|i| i.modifiers);
+            inputs.push(Input::MouseDragReleased(modifiers.convert()));
         }
 
         // Handle an active drag with the middle mouse button for camera
