@@ -59,6 +59,9 @@ pub trait EditorTool {
     /// Get the points that are currently selected
     fn selection(&self) -> SelectionType<'_>;
 
+    /// Get two coordinates of the bounding box we are currently dragging out
+    fn selection_box(&self) -> Option<(Vec2, Vec2)> { None }
+
     /// If this tool is creating a path, returns whether the latest point is the first point of that path
     /// (i.e. the path is about to be closed). The path being created is always the last zone.
     fn creating_path(&self) -> Option<bool> { None }

@@ -70,6 +70,12 @@ struct Params {
 
     // Total amount of points
     point_count: u32,
+
+    // Top left corner of the selection box. Should be 0,0 if no selection box.
+    selection_box_start: vec2<f32>,
+
+    // Bottom right corner of the selection box. Should be 0,0 if no selection box.
+    selection_box_end: vec2<f32>,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 

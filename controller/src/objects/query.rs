@@ -125,6 +125,27 @@ impl ObjectBuffers {
         // Return the final list of connected nodes
         Ok(connected)
     }
+
+    pub fn get_points_in_rect(&self, min: Vec2, max: Vec2) -> Vec<u16> {
+        // Correct the rectangle
+        let (min, max) = {
+            let x_min = min.x.min(max.x);
+            let x_max = min.x.max(max.x);
+            let y_min = min.y.min(max.y);
+            let y_max = min.y.max(max.y);
+            (Vec2::new(x_min, y_min), Vec2::new(x_max, y_max))
+        };
+
+        // Find all points within the rectangle
+        let mut points = vec![];
+        for point_id in 0..self.point_count() {
+            let pos = self.get_point_info(point_id).unwrap().position();
+            if pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y {
+                points.push(point_id);
+            }
+        }
+        points
+    }
 }
 
 /// Return scalar distance to a line segment, the closest point on that line segment, and t for that point.
@@ -409,6 +430,30 @@ mod tests {
             objects.get_connected_points(5, false)
                 .unwrap().into_iter().collect::<HashSet<u16>>(),
             HashSet::from([0, 3, 4, 5, 6, 8]),
+        );
+    }
+
+    /// Ensure getting points within a rectangle only includes relevant points, including all siblings
+    #[test]
+    fn points_in_rect() {
+        let mut objects = ObjectBuffers::headless();
+
+        // Add an initial zone
+        add_square(&mut objects, 10.0);
+
+        // Add the first branching zone, just with a single point to create a triangle along the top edge.
+        let (branch_zone, _) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(branch_zone, Vec2::new(20.0, 0.0)).unwrap();
+        objects.complete_branching_zone(1, branch_zone, 2).unwrap();
+
+        // Add a completely unrelated zone with a point aligned to the middle line
+        add_zone(&mut objects, &[(10.0, 15.0), (5.0, 20.0), (15.0, 20.0)]);
+
+        // Check by selecting a zone across the middle
+        assert_eq!(
+            objects.get_points_in_rect(Vec2::new(7.0, -3.0), Vec2::new(13.0, 23.0))
+                .into_iter().collect::<HashSet<u16>>(),
+            HashSet::from([1, 2, 4, 6, 7]),
         );
     }
 }
