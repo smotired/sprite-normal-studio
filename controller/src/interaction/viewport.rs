@@ -34,6 +34,12 @@ pub struct ViewportDataUniform {
 
     // Amount of control points
     pub point_count: u32,
+
+    // Top left corner of the selection box. Should be 0,0 if no selection box.
+    pub selection_box_start: Vec2,
+
+    // Bottom right corner of the selection box. Should be 0,0 if no selection box.
+    pub selection_box_end: Vec2,
 }
 
 impl ViewportDataUniform {
@@ -45,6 +51,18 @@ impl ViewportDataUniform {
         (zone_count, point_count): (usize, usize),
         tool: &dyn EditorTool,
     ) -> Self {
+        // Calculate selection box
+        let (selection_box_start, selection_box_end) = {
+            if let Some((start, end)) = tool.selection_box() {
+                // Correct box positions
+                let start_x = start.x.min(end.x);
+                let start_y = start.y.min(end.y);
+                let end_x = start.x.max(end.x);
+                let end_y = start.y.max(end.y);
+                (Vec2::new(start_x, start_y), Vec2::new(end_x, end_y))
+            } else { (Vec2::ZERO, Vec2::ZERO) }
+        };
+
         Self {
             camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
@@ -55,6 +73,8 @@ impl ViewportDataUniform {
             cursor_pos: cursor,
             zone_count: zone_count as u32,
             point_count: point_count as u32,
+            selection_box_start,
+            selection_box_end,
         }
     }
 
@@ -96,6 +116,8 @@ mod tests {
         assert_eq!(uniform.light_color, 0x00FFFFFF);
         assert_eq!(uniform.cursor_pos, Vec2::new(5.0, 6.0));
         assert_eq!((uniform.zone_count, uniform.point_count), (3, 12));
+        assert_eq!(uniform.selection_box_start, Vec2::new(0.0, 0.0));
+        assert_eq!(uniform.selection_box_end, Vec2::new(0.0, 0.0));
     }
 
     /// Bytes should cover the whole struct

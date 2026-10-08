@@ -4,6 +4,32 @@
  *******************************************************************/
 
 /***********************************/
+/*     SELECTION BOX OVERLAY       */
+/***********************************/
+
+fn overlay_selection_box(
+    color: vec3<f32>,   // Base color below this part of the overlay
+    pos: vec2<f32>,     // World-space position of this pixel
+) -> vec3<f32> {        // Returns new color after adding selection box overlay
+    var col = color;
+    let selection_box_color = vec4<f32>(1, 1, 1, 0.1);
+
+    // Don't draw if 0 dimensions
+    let size = params.selection_box_end - params.selection_box_start;
+    if (size.x == 0.0 && size.y == 0.0) {
+        return col;
+    }
+
+    // Draw if within the selection box
+    if (pos.x >= params.selection_box_start.x && pos.x <= params.selection_box_end.x &&
+        pos.y >= params.selection_box_start.y && pos.y <= params.selection_box_end.y) {
+        col = mix(col, selection_box_color.rgb, selection_box_color.a);
+    }
+
+    return col;
+}
+
+/***********************************/
 /*         LIGHTS OVERLAY          */
 /***********************************/
 

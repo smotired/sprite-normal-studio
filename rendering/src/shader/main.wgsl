@@ -32,6 +32,9 @@ fn main(
     // Add in the overlay
     color = overlay_color(color, pos);
 
+    // Add the selection box on top regardless of overlay flags
+    color = overlay_selection_box(color, pos);
+
     // Output final color to viewport texture
     textureStore(output, id.xy, vec4<f32>(color, 1.0));
 }

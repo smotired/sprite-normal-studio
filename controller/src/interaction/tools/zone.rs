@@ -5,8 +5,19 @@ use crate::InputModifiers;
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
 use super::result::{ToolResult, DefaultResults};
 
-// TODO: Selection box if starting drag midair
 // TODO: Modifier keys for dragging
+//
+// dragging position:
+// Shift - move along axis
+// Ctrl - snap to grid (1px grid for now)
+//
+// dragging box:
+// shift: add to selection
+// alt: remove from selection
+// ctrl: only select exact zones
+// same multi rules as below except toggle affects the normal selected list instead of the tentative list
+
+// also maybe only actually make it save the changed selection when ending drag, so you can like cancel or whatever. add a tentative_selection list, and join em in selection()
 
 /// The Zone tool allows mananging entire zones at once. 
 /// 
@@ -32,6 +43,12 @@ pub struct EditorToolZone {
 
     /// The reference point for if we are dragging a zone, relative to the position of the first point.
     reference_delta: Option<Vec2>,
+
+    /// The start point for our selection box if we are instead dragging out a box of zones
+    selection_origin: Option<Vec2>,
+
+    /// The end point for our selection box if we are instead dragging out a box of zones
+    selection_box_end: Option<Vec2>,
 }
 
 impl EditorTool for EditorToolZone {
@@ -46,7 +63,7 @@ impl EditorTool for EditorToolZone {
 
         let selected_points_reference = points_from_zone_selection(&selected_zones[..], &state);
 
-        Box::new(Self { selected_zones, selected_points_reference, reference_delta: None })
+        Box::new(Self { selected_zones, selected_points_reference, reference_delta: None, selection_origin: None, selection_box_end: None })
     }
 
     fn deselect(&mut self, _state: ControllerStateInput) -> SelectionType<'_> {
@@ -56,6 +73,13 @@ impl EditorTool for EditorToolZone {
 
     fn kind(&self) -> EditorToolKind { EditorToolKind::Zone }
     fn selection(&self) -> SelectionType<'_> { &self.selected_points_reference[..] }
+    fn selection_box(&self) -> Option<(Vec2, Vec2)> {
+        if let (Some(start), Some(end)) = (self.selection_origin, self.selection_box_end) {
+            Some((start, end))
+        } else {
+            None
+        }
+    }
 
     fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         let (new_selection, _) = self.get_updated_selection(&state, pos, false, modifiers);
@@ -106,22 +130,37 @@ impl EditorTool for EditorToolZone {
 
         // If we didn't click a zone, just update the selection
         else {
-            // TODO: If new_selection is empty, instead start dragging a box. When released, will select everything within the box.
+            // If new_selection is empty, start dragging a box instead of the reference delta. When released, will select everything within the box.
+            if new_selection.is_empty() {
+                self.selection_origin = Some(pos);
+                self.selection_box_end = Some(pos);
+            } else {
+                self.reference_delta = reference_delta;
+            }
 
             self.set_selection(new_selection, &state);
-            self.reference_delta = reference_delta;
         }
         self.ok()
     }
 
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
-        // Drag selected zones
-        if !self.selected_zones.is_empty() {
-            if let Some(reference_delta) = self.reference_delta {
-                // Move the first point to the position across all the selected zones.
-                state.objects.move_zones(&self.selected_zones[..], pos - reference_delta)?;
-            }
+        // Drag selected zones if we are doing that
+        if let Some(reference_delta) = self.reference_delta && !self.selected_zones.is_empty() {
+            // Move the first point to the position across all the selected zones.
+            state.objects.move_zones(&self.selected_zones[..], pos - reference_delta)?;
             return self.stale();
+        }
+        // Or if we are dragging a selection box, set our selected zones to be the ones in the box
+        else if let Some(selection_origin) = self.selection_origin {
+            self.selection_box_end = Some(pos);
+            let selected_points = state.objects.get_points_in_rect(selection_origin, pos);
+            let mut selected_zones = std::collections::HashSet::new();
+            for point_id in selected_points {
+                let zone_id = state.objects.get_point_info(point_id).unwrap().zone_id();
+                let all_connected = get_connected_zones(zone_id, &state);
+                selected_zones.extend(all_connected);
+            }
+            self.set_selection(selected_zones.into_iter().collect(), &state);
         }
         self.ok()
     }
@@ -129,18 +168,27 @@ impl EditorTool for EditorToolZone {
     fn handle_drag_released(&mut self, _state: ControllerStateInput, _modifiers: InputModifiers) -> ToolResult {
         // Release drag on selected zones, but keep them selected
         self.reference_delta = None;
+        self.selection_origin = None;
+        self.selection_box_end = None;
         self.ok()
     }
 
     fn handle_cancel(&mut self, state: ControllerStateInput) -> ToolResult {
         // Clear selection
         self.set_selection(vec![], &state);
+        self.selection_origin = None;
+        self.selection_box_end = None;
         self.ok()
     }
 
     fn handle_delete(&mut self, mut state: ControllerStateInput) -> ToolResult {
-        // Delete selected zones
-        if !self.selected_zones.is_empty() {
+        // Stop dragging out selection box
+        if self.selection_origin.is_some() {
+            self.selection_origin = None;
+            self.selection_box_end = None;
+        }
+        // Or Delete selected zones
+        else if !self.selected_zones.is_empty() {
             self.selected_zones.sort();
             let mut offset = 0;
             #[allow(clippy::explicit_counter_loop)] // offset counts deletions, not iterations
@@ -621,7 +669,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 4);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(!result.normals_stale);
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
     }
 
@@ -661,7 +709,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 3);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(!result.normals_stale);
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
     }
 
@@ -689,7 +737,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 7);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(!result.normals_stale);
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
     }
 
@@ -718,8 +766,62 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 8);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(!result.normals_stale);
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
+    }
+
+    /// Test selecting zones by dragging over selected points
+    #[test]
+    fn drag_to_select() {
+        let mut objects = ObjectBuffers::headless();
+        
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (20.0, 10.0)]);
+        add_zone(&mut objects, &[(40.0, 10.0), (50.0, 10.0), (50.0, 0.0)]);
+
+        let (branching_zone, _) = objects.create_branching_zone(9).unwrap();
+        objects.create_point(branching_zone, Vec2::new(55.0, 5.0)).unwrap();
+        objects.complete_branching_zone(9, branching_zone, 8).unwrap();
+
+        let mut tool = EditorToolZone::init();
+
+        let check_selection = |actual: &[u16], expected: &[u16]| 
+        assert_eq!(
+            actual.into_iter().map(|&i| i).collect::<std::collections::HashSet<u16>>(),
+            expected.into_iter().map(|&i| i).collect::<std::collections::HashSet<u16>>(),
+        );
+
+        // Selection box should be empty when not dragging
+        assert_eq!(tool.selection_box(), None);
+
+        // Start dragging from above and between zones 2 and 3, downward and to the right over zone 3
+        tool.handle_drag_start(state(&objects), Vec2::new(35.0, -7.0), Default::default()).unwrap();
+        assert_eq!(tool.selection_box(), Some((Vec2::new(35.0, -7.0), Vec2::new(35.0, -7.0))));
+        assert_eq!(tool.selection(), &[]);
+
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(45.0, 17.0), Default::default()).unwrap();
+        assert!(!result.normals_stale);
+        check_selection(tool.selection(), &[7, 8, 9, 10, 11, 12]); // should include the connected zone 4 even though no points overlap
+        assert_eq!(tool.selection_box(), Some((Vec2::new(35.0, -7.0), Vec2::new(45.0, 17.0))));
+
+        // Drag far to the left, leaving zone 3 and selecting 1 and 2
+        tool.handle_dragging_to(state(&objects), Vec2::new(5.0, 5.0), Default::default()).unwrap();
+        check_selection(tool.selection(), &[0, 1, 2, 3, 4, 5, 6]);
+        assert_eq!(tool.selection_box(), Some((Vec2::new(35.0, -7.0), Vec2::new(5.0, 5.0))));
+
+        // Releasing keeps the zones selected but stops the drag
+        tool.handle_drag_released(state(&objects), Default::default()).unwrap();
+        check_selection(tool.selection(), &[0, 1, 2, 3, 4, 5, 6]);
+        assert_eq!(tool.selection_box(), None);
+        tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
+        check_selection(tool.selection(), &[0, 1, 2, 3, 4, 5, 6]);
+        assert_eq!(tool.selection_box(), None);
+
+        // Ensure positions are all still correct
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(0.0, 0.0));
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
+        assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(20.0, 0.0));
+        assert_eq!(objects.get_point_info(7).unwrap().position(), Vec2::new(40.0, 10.0));
     }
 
     /// Cancel input should deselect everything
