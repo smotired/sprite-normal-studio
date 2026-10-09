@@ -138,7 +138,6 @@ Basically, other software is to Photoshop what this is to Illustrator.
 
 Finish, polish, and deploy as a commercial product.
 Will add steps to this section as I think of them.
-Will probably remove the GPL 3.0 license.
 
 ```
 [ ] Better UI - final icons, repeatable welcome tutorial, etc.
