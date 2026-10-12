@@ -5,13 +5,6 @@ use crate::InputModifiers;
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
 use super::result::{ToolResult, DefaultResults};
 
-/// Size in pixels of the grid that dragging zones snaps to while holding ctrl.
-/// This will be replaced with a user setting in the future.
-const GRID_SIZE: u32 = 1;
-
-/// tan(22.5 degrees), the slope that splits orthagonal from diagonal when snapping directions.
-const TAN_HALF_OCTANT: f32 = 0.414_213_56;
-
 /// The Zone tool allows mananging entire zones at once.
 ///
 /// Selection rules:
@@ -29,7 +22,7 @@ const TAN_HALF_OCTANT: f32 = 0.414_213_56;
 ///
 /// Dragging zones:
 /// SHIFT: snap movement to horizontal, vertical, or diagonal, whichever is closest to the direction moved
-/// CTRL: snap to the grid (see GRID_SIZE)
+/// CTRL: snap to the grid (see utils::GRID_SIZE)
 ///
 /// Dragging a selection box:
 /// Uses the same selection rules as above, applied against the selection from before the drag started.
@@ -156,32 +149,8 @@ impl EditorTool for EditorToolZone {
         // Drag selected zones if we are doing that
         if let Some(reference_delta) = self.reference_delta && !self.selected_zones.is_empty() {
             let mut target = pos - reference_delta;
-
             if let Some(origin) = self.drag_origin {
-                let first_point_start = origin - reference_delta;
-
-                // Shift: only move orthagonally/diagonally
-                if modifiers.shift {
-                    let delta = pos - origin;
-                    let (abs_x, abs_y) = (delta.x.abs(), delta.y.abs());
-
-                    // Snap delta to whichever of 8 directions is correct
-                    let snapped_delta = if abs_y < abs_x * TAN_HALF_OCTANT {
-                        Vec2::new(delta.x, 0.0)
-                    } else if abs_x < abs_y * TAN_HALF_OCTANT {
-                        Vec2::new(0.0, delta.y)
-                    } else {
-                        let diagonal = (abs_x + abs_y) / 2.0;
-                        Vec2::new(diagonal.copysign(delta.x), diagonal.copysign(delta.y))
-                    };
-                    target = first_point_start + snapped_delta;
-                }
-            }
-
-            // Ctrl: snap to the grid
-            if modifiers.ctrl {
-                let grid = GRID_SIZE as f32;
-                target = Vec2::new((target.x / grid).round() * grid, (target.y / grid).round() * grid);
+                target = utils::snap_drag_target(target, origin - reference_delta, origin, pos, modifiers);
             }
 
             // Move the first point to the position across all the selected zones.
@@ -278,18 +247,8 @@ impl EditorToolZone {
             }
         }
 
-        let mut selected: std::collections::HashSet<u16> = self.selected_zones.iter().copied().collect();
-        match (modifiers.shift, modifiers.alt) {
-            (true, true) => for zone_id in boxed {
-                if !selected.insert(zone_id) { selected.remove(&zone_id); }
-            },
-            (true, false) => selected.extend(boxed),
-            (false, true) => for zone_id in boxed { selected.remove(&zone_id); },
-            (false, false) => selected = boxed,
-        }
-
-        let mut zones: Vec<u16> = selected.into_iter().collect();
-        zones.sort();
+        let boxed: Vec<u16> = boxed.into_iter().collect();
+        let zones = utils::combine_selection(&self.selected_zones[..], &boxed[..], modifiers, false);
         let points = points_from_zone_selection(&zones[..], state);
         self.tentative_selection = Some((zones, points));
     }
@@ -322,23 +281,11 @@ impl EditorToolZone {
 
         // If a zone is clicked, determine point/path/etc
         if let Some(zone_id) = zone_id {
-            let toggling = modifiers.shift && modifiers.alt;
-
             // If ctrl is clicked, only operate on the exact clicked zone
             let new_selection = if modifiers.ctrl {
                 // If a modifier key is selected do what you would expect
-                if toggling {
-                    let mut selected: std::collections::HashSet<_> = self.selected_zones.clone().into_iter().collect();
-                    if !selected.insert(zone_id) { selected.remove(&zone_id); } // if it was already present, remove it
-                    selected.into_iter().collect()
-                } else if modifiers.shift {
-                    let mut selected: std::collections::HashSet<_> = self.selected_zones.clone().into_iter().collect();
-                    selected.insert(zone_id);
-                    selected.into_iter().collect()
-                } else if modifiers.alt {
-                    let mut selected: std::collections::HashSet<_> = self.selected_zones.clone().into_iter().collect();
-                    selected.remove(&zone_id);
-                    selected.into_iter().collect()
+                if modifiers.shift || modifiers.alt {
+                    utils::combine_selection(&self.selected_zones[..], &[zone_id], modifiers, true)
                 }
                 
                 // Otherwise, we are just selecting a single zone.
@@ -379,32 +326,10 @@ impl EditorToolZone {
                 }
             }
 
-            // Otherwise, add/remove/toggle all selected zones
+            // Otherwise, add/remove/toggle all connected zones
             else {
                 let all_connected = get_connected_zones(zone_id, &state);
-                
-                if toggling {
-                    // Remove if and only if all were already selected
-                    let mut selected: std::collections::HashSet<_> = self.selected_zones.clone().into_iter().collect();
-
-                    if all_connected.iter().all(|id| selected.contains(id)) {
-                        for zone_id in all_connected { selected.remove(&zone_id); }
-                    } else {
-                        for zone_id in all_connected { selected.insert(zone_id); }
-                    }
-                    
-                    selected.into_iter().collect()
-                } else if modifiers.shift {
-                    let mut selected: std::collections::HashSet<_> = self.selected_zones.clone().into_iter().collect();
-                    for zone_id in all_connected { selected.insert(zone_id); }
-                    selected.into_iter().collect()
-                } else if modifiers.alt {
-                    let mut selected: std::collections::HashSet<_> = self.selected_zones.clone().into_iter().collect();
-                    for zone_id in all_connected { selected.remove(&zone_id); }
-                    selected.into_iter().collect()
-                } else {
-                    all_connected
-                }
+                utils::combine_selection(&self.selected_zones[..], &all_connected[..], modifiers, true)
             };
 
             let reference_delta = if !dragging || new_selection.is_empty() { None } else {

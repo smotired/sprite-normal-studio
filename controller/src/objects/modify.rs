@@ -36,7 +36,6 @@ impl ObjectBuffers {
     /// Updates the position of a list of zones, based on a new position for the very first point in that range.
     pub fn move_zones(&mut self, zone_ids: &[u16], first_point_position: Vec2) -> anyhow::Result<()> {
         if zone_ids.is_empty() { return Ok(()); }
-        let siblings = &self.point_siblings.borrow().items;
 
         // Get the ID of the very first point
         let first_id = {
@@ -46,22 +45,33 @@ impl ObjectBuffers {
 
         // Determine how much to move it
         let delta = first_point_position - self.get_point_info(first_id).unwrap().position();
-        
-        // Get all point IDs in all zones, making sure to have only one copy of each sibling
-        let mut targets = vec![];
-        let mut exhausted = std::collections::HashSet::new();
+
+        // Get all point IDs in all zones
+        let mut point_ids = vec![];
         for &zone_id in zone_ids {
             let (start, count) = self.get_zone_info(zone_id).unwrap().range();
-            for point_id in start..start+count {
-                // If this isn't already in the exhausted list, add it and exhaust siblings
-                if exhausted.insert(point_id) {
-                    targets.push(point_id);
-                    exhausted.extend(ControlPoint::get_siblings(point_id, siblings));
-                }
+            point_ids.extend(start..start+count);
+        }
+        self.move_points(&point_ids[..], delta)
+    }
+
+    /// Move a list of points by a delta. Siblings move together, so each set of siblings is only moved once
+    /// no matter how many of them are in the list.
+    pub fn move_points(&mut self, point_ids: &[u16], delta: Vec2) -> anyhow::Result<()> {
+        let siblings = &self.point_siblings.borrow().items;
+
+        // Get one copy of each set of siblings
+        let mut targets = vec![];
+        let mut exhausted = std::collections::HashSet::new();
+        for &point_id in point_ids {
+            // If this isn't already in the exhausted list, add it and exhaust siblings
+            if exhausted.insert(point_id) {
+                targets.push(point_id);
+                exhausted.extend(ControlPoint::get_siblings(point_id, siblings));
             }
         }
 
-        // Update all connected points, excluding their siblings
+        // Update all the points, which also updates their siblings
         for point_id in targets {
             ControlPoint::add_position_delta(point_id, delta, &mut self.points.borrow_mut().items, siblings)?;
         }
@@ -212,6 +222,21 @@ mod tests {
         assert_eq!(objects.get_point_info(5).unwrap().position(), Vec2::new(10.0, 20.0));
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(5.0, 15.0));
         assert_eq!(objects.get_point_info(7).unwrap().position(), Vec2::new(20.0, 0.0));
+    }
+
+    /// Moving points moves each set of siblings exactly once, even if several of them are listed
+    #[test]
+    fn move_points_with_siblings() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (branching_zone, branch_id) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(branching_zone, Vec2::new(20.0, 0.0)).unwrap();
+
+        objects.move_points(&[1, branch_id, 1, 2], Vec2::new(5.0, 2.0)).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(15.0, 2.0));
+        assert_eq!(objects.get_point_info(branch_id).unwrap().position(), Vec2::new(15.0, 2.0));
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
     }
 
     /// Deleting a point removes it and shifts later points and zones back
