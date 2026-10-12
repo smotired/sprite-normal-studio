@@ -8,7 +8,7 @@ use wgpu::{Buffer, Device, Queue, Texture};
 use crate::generator::Generator;
 use crate::assignment::ZoneAssigner;
 
-pub use crate::interaction::input::{Input, InputModifiers, Axis};
+pub use crate::interaction::action::{Action, InputModifiers, Axis};
 use crate::interaction::tools::{EditorTool, EditorToolZone};
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorSnapshot};
@@ -91,7 +91,7 @@ impl Controller {
         self.normals_stale = true;
 
         // Recenter the camera and the light by adding a fake input (maybe not a good idea but icbatgetslftmoas </3)
-        self.handle_input(Input::Recenter);
+        self.handle_action(Action::Recenter);
     }
 
     /// Runs every frame of the GUI. Handle rerendering as needed.

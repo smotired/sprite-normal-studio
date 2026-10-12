@@ -8,7 +8,7 @@ pub use pen::EditorToolPen;
 pub use point::EditorToolPoint;
 use result::{ToolResult, EditorToolActionResult};
 
-use studio_math::Vec2;
+use studio_math::{Vec2, Vec3};
 use crate::{Controller, ObjectBuffers, ObjectSnapshot, InputModifiers};
 
 /// Options for which tool we are using in the editor.
@@ -131,6 +131,40 @@ impl Controller {
             self.normals_stale |= normals_stale;
             self.select_tool(new_tool);
         }
+    }
+
+    /// Run an action on the objects that isn't part of a tool, with the same rollback and error handling as tool actions.
+    pub(crate) fn run_object_action(&mut self, continuing_drag: bool, normals_stale: bool, action: impl FnOnce(&mut ObjectBuffers) -> anyhow::Result<()>) {
+        self.run_tool(continuing_drag, |tool, mut state| {
+            action(&mut state.objects)?;
+            Ok(EditorToolActionResult::new(tool.kind(), normals_stale))
+        });
+    }
+
+    /// Get the IDs of the zones that have selected points, sorted.
+    /// In the zone tool these are exactly the selected zones.
+    pub fn selected_zones(&self) -> Vec<u16> {
+        let mut zones: Vec<u16> = self.tool.selection().iter()
+            .filter_map(|&point_id| self.objects.get_point_info(point_id).ok())
+            .map(|point| point.zone_id())
+            .collect();
+        zones.sort();
+        zones.dedup();
+        zones
+    }
+
+    /// Get the normal vector shared by all selected zones, or None if nothing is selected or they don't all match.
+    pub fn selected_zones_normal(&self) -> Option<Vec3> {
+        let mut normals = self.selected_zones().into_iter()
+            .filter_map(|zone_id| self.objects.get_zone_info(zone_id).ok())
+            .map(|zone| zone.normal());
+        let first = normals.next()?;
+        normals.all(|normal| normal == first).then_some(first)
+    }
+
+    /// Returns true if any selected point has an unselected sibling
+    pub fn can_separate_selection(&self) -> bool {
+        self.objects.can_separate(self.tool.selection())
     }
 
     /// Take a snapshot of the objects and tool state

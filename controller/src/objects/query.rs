@@ -127,6 +127,13 @@ impl ObjectBuffers {
         Ok(connected)
     }
 
+    /// Returns true if any of the listed points has a sibling that isn't listed, i.e. separate_points would do something.
+    pub fn can_separate(&self, point_ids: &[u16]) -> bool {
+        point_ids.iter().any(|&point_id| {
+            point_id < self.point_count() && self.get_siblings(point_id).iter().any(|sibling_id| !point_ids.contains(sibling_id))
+        })
+    }
+
     pub fn get_points_in_rect(&self, min: Vec2, max: Vec2) -> anyhow::Result<Vec<u16>> {
         // Correct the rectangle
         let (min, max) = {
@@ -456,5 +463,19 @@ mod tests {
                 .into_iter().collect::<HashSet<u16>>(),
             HashSet::from([1, 2, 4, 6, 7]),
         );
+    }
+
+    /// Points can be separated only if one of them has a sibling that isn't listed
+    #[test]
+    fn can_separate() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        assert!(!objects.can_separate(&[0, 1, 2, 3]));
+
+        let (_, point_id) = objects.create_branching_zone(1).unwrap();
+        assert!(objects.can_separate(&[0, 1, 2, 3]));
+        assert!(objects.can_separate(&[point_id]));
+        assert!(!objects.can_separate(&[1, point_id]));
+        assert!(!objects.can_separate(&[0, 2]));
     }
 }

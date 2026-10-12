@@ -4,7 +4,7 @@ mod camera;
 mod light;
 mod overlay;
 pub mod viewport;
-pub mod input;
+pub mod action;
 pub mod tools;
 
 pub use camera::Camera;

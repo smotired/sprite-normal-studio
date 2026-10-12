@@ -31,6 +31,9 @@ pub struct StudioApp {
 
     /// If the dialog with the full tool error text is open
     show_error_dialog: bool,
+
+    /// Sidebar sections for each editor tool
+    tool_sidebars: sidebar::ToolSidebars,
 }
 
 /// Default initializer for application state
@@ -50,6 +53,7 @@ impl StudioApp {
             render_state,
             viewport_texture_id,
             show_error_dialog: false,
+            tool_sidebars: Default::default(),
         }
     }
 
