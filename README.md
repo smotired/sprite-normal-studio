@@ -79,6 +79,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 
 ### Phase IV - Editor Features
+*10/12/26 - present*
 
 ```
 [ ] Undo/redo with history. Use a stack like Unity's Undo class. Look for an
