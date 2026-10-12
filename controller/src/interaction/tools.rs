@@ -9,7 +9,7 @@ pub use point::EditorToolPoint;
 use result::{ToolResult, EditorToolActionResult};
 
 use studio_math::Vec2;
-use crate::{Controller, ObjectBuffers, InputModifiers};
+use crate::{Controller, ObjectBuffers, ObjectSnapshot, InputModifiers};
 
 /// Options for which tool we are using in the editor.
 /// Tool options may later be added as tuple parameters in this enum.
@@ -39,9 +39,23 @@ pub struct ControllerStateInput {
 
 pub type SelectionType<'a> = &'a [u16]; // slice of vector of selected points
 
+/// Allows boxed editor tools to be cloned, so their state can be snapshotted.
+/// Automatically implemented for every tool that implements Clone.
+pub trait EditorToolClone {
+    fn clone_box(&self) -> Box<dyn EditorTool>;
+}
+
+impl<T: EditorTool + Clone + 'static> EditorToolClone for T {
+    fn clone_box(&self) -> Box<dyn EditorTool> { Box::new(self.clone()) }
+}
+
+impl Clone for Box<dyn EditorTool> {
+    fn clone(&self) -> Self { (**self).clone_box() }
+}
+
 /// Defines a class for an editor tool.
 /// Will call default when selecting this tool, and drop when selecting a different tool.
-pub trait EditorTool {
+pub trait EditorTool: EditorToolClone {
     /// Create a new instance of this tool, initialized from nothing.
     fn init() -> Box<Self> where Self : Sized;
 
@@ -106,11 +120,24 @@ impl Controller {
         };
     }
 
-    pub fn handle_tool_result(&mut self, result: ToolResult) {
-        let EditorToolActionResult { new_tool, normals_stale } = result.unwrap(); // TODO: Handle error
-        self.normals_stale |= normals_stale;
-        self.select_tool(new_tool);
+    /// The error from the latest tool action, if it failed
+    pub fn tool_error(&self) -> Option<&str> { self.tool_error.as_deref() }
+
+    /// Run a tool action, restoring the objects and tool state if it fails.
+    /// Set continuing_drag when this action continues a drag, so a success doesn't hide an error from earlier in the drag.
+    pub(crate) fn run_tool(&mut self, continuing_drag: bool, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
+        let state = self.create_state();
+        if let Some(EditorToolActionResult { new_tool, normals_stale }) = run_tool_action(&mut self.tool, state, &mut self.tool_error, continuing_drag, action) {
+            self.normals_stale |= normals_stale;
+            self.select_tool(new_tool);
+        }
     }
+
+    /// Take a snapshot of the objects and tool state
+    pub fn snapshot(&self) -> EditorSnapshot { EditorSnapshot::take(&self.objects, self.tool.as_ref()) }
+
+    /// Restore the objects and tool state from a snapshot
+    pub fn restore(&mut self, snapshot: EditorSnapshot) { snapshot.restore_into(&self.objects, &mut self.tool); }
 
     pub fn create_state(&self) -> ControllerStateInput {
         ControllerStateInput {
@@ -121,6 +148,49 @@ impl Controller {
     }
 }
 
+
+/// A copy of the objects and the tool state, which can be restored later.
+#[derive(Clone)]
+pub struct EditorSnapshot {
+    objects: ObjectSnapshot,
+    tool: Box<dyn EditorTool>,
+}
+
+impl EditorSnapshot {
+    fn take(objects: &ObjectBuffers, tool: &dyn EditorTool) -> Self {
+        Self { objects: objects.snapshot(), tool: tool.clone_box() }
+    }
+
+    fn restore_into(self, objects: &ObjectBuffers, tool: &mut Box<dyn EditorTool>) {
+        objects.restore(self.objects);
+        *tool = self.tool;
+    }
+}
+
+/// Run a tool action, restoring the objects and tool state if it fails.
+/// Errors always replace the previous error, and successes clear it unless we are continuing a drag.
+/// Returns the result of the action if it succeeded.
+fn run_tool_action(
+    tool: &mut Box<dyn EditorTool>,
+    state: ControllerStateInput,
+    error: &mut Option<String>,
+    continuing_drag: bool,
+    action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult,
+) -> Option<EditorToolActionResult> {
+    let objects = state.objects.clone();
+    let snapshot = EditorSnapshot::take(&objects, tool.as_ref());
+    match action(tool.as_mut(), state) {
+        Ok(result) => {
+            if !continuing_drag { *error = None; }
+            Some(result)
+        },
+        Err(e) => {
+            snapshot.restore_into(&objects, tool);
+            *error = Some(format!("{e:#}"));
+            None
+        },
+    }
+}
 
 /// Helpers for running tools against objects in tests
 #[cfg(test)]
@@ -138,5 +208,95 @@ mod test_utils {
     /// Create the input state for a tool with a specific inverse camera scale
     pub(super) fn state_scaled(objects: &ObjectBuffers, camera_inv_scale: f32) -> ControllerStateInput {
         ControllerStateInput { mouse: Vec2::ZERO, objects: objects.clone(), camera_inv_scale }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use studio_math::Vec2;
+
+    use crate::ObjectBuffers;
+    use crate::objects::test_utils::add_square;
+    use super::*;
+    use super::test_utils::{self, state};
+
+    /// A successful action that doesn't change anything
+    fn ok_action(_tool: &mut dyn EditorTool, _state: ControllerStateInput) -> ToolResult {
+        Ok(EditorToolActionResult::new(EditorToolKind::Zone, false))
+    }
+
+    /// A failing action that doesn't change anything
+    fn err_action(_tool: &mut dyn EditorTool, _state: ControllerStateInput) -> ToolResult {
+        anyhow::bail!("New error")
+    }
+
+    /// An action that fails partway through restores the objects and tool state
+    #[test]
+    fn error_restores_state() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
+        let mut error = None;
+
+        let result = run_tool_action(&mut tool, state(&objects), &mut error, false, |tool, mut state| {
+            tool.handle_click(test_utils::state(&state.objects), Vec2::ZERO, InputModifiers::none())?;
+            assert!(!tool.selection().is_empty());
+            state.objects.create_zone()?;
+            anyhow::bail!("Failed partway")
+        });
+
+        assert!(result.is_none());
+        assert_eq!(error.as_deref(), Some("Failed partway"));
+        assert!(tool.selection().is_empty());
+        assert_eq!(objects.object_counts(), (1, 4));
+    }
+
+    /// A successful action keeps its changes and clears the error
+    #[test]
+    fn success_keeps_state() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
+        let mut error = Some("Old error".to_owned());
+
+        let result = run_tool_action(&mut tool, state(&objects), &mut error, false, |tool, state| {
+            tool.handle_click(state, Vec2::ZERO, InputModifiers::none())
+        });
+
+        assert!(result.is_some());
+        assert!(error.is_none());
+        assert!(!tool.selection().is_empty());
+    }
+
+    /// Continuing a drag only replaces the error if the action fails
+    #[test]
+    fn continuing_drag_keeps_error() {
+        let objects = ObjectBuffers::headless();
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
+
+        let mut error = Some("Old error".to_owned());
+        run_tool_action(&mut tool, state(&objects), &mut error, true, ok_action);
+        assert_eq!(error.as_deref(), Some("Old error"));
+
+        run_tool_action(&mut tool, state(&objects), &mut error, true, err_action);
+        assert_eq!(error.as_deref(), Some("New error"));
+
+        let mut error = None;
+        run_tool_action(&mut tool, state(&objects), &mut error, true, ok_action);
+        assert!(error.is_none());
+    }
+
+    /// Actions other than continuing a drag always replace the error
+    #[test]
+    fn other_actions_replace_error() {
+        let objects = ObjectBuffers::headless();
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
+
+        let mut error = Some("Old error".to_owned());
+        run_tool_action(&mut tool, state(&objects), &mut error, false, err_action);
+        assert_eq!(error.as_deref(), Some("New error"));
+
+        run_tool_action(&mut tool, state(&objects), &mut error, false, ok_action);
+        assert!(error.is_none());
     }
 }

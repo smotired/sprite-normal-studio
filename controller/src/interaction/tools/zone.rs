@@ -27,7 +27,7 @@ use super::result::{ToolResult, DefaultResults};
 /// Dragging a selection box:
 /// Uses the same selection rules as above, applied against the selection from before the drag started.
 /// The result is tentative until the drag is released, and can be cancelled.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct EditorToolZone {
     /// The zone that is selected.
     selected_zones: Vec<u16>,
@@ -58,11 +58,11 @@ impl EditorTool for EditorToolZone {
     fn select(selected_points: SelectionType, state: ControllerStateInput) -> Box<Self> where Self : Sized {
         // Get all zones with a point selected
         let selected_zones: std::collections::HashSet<_> = selected_points.iter().filter_map(|&point_id| {
-            state.objects.get_point_info(point_id).map(|info| info.zone_id())
+            state.objects.get_point_info(point_id).ok().map(|info| info.zone_id())
         }).collect();
         let selected_zones: Vec<_> = selected_zones.into_iter().collect();
 
-        let selected_points_reference = points_from_zone_selection(&selected_zones[..], &state);
+        let selected_points_reference = points_from_zone_selection(&selected_zones[..], &state).unwrap();
 
         Box::new(Self { selected_zones, selected_points_reference, ..Default::default() })
     }
@@ -88,14 +88,14 @@ impl EditorTool for EditorToolZone {
     }
 
     fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
-        let (new_selection, _) = self.get_updated_selection(&state, pos, false, modifiers);
-        self.set_selection(new_selection, &state);
+        let (new_selection, _) = self.get_updated_selection(&state, pos, false, modifiers)?;
+        self.set_selection(new_selection, &state)?;
         self.ok()
     }
 
     fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
-        let clicked_zone_info = self.zone_from_pos(&state, pos);
-        let (new_selection, reference_delta) = self.get_updated_selection(&state, pos, true, modifiers);
+        let clicked_zone_info = self.zone_from_pos(&state, pos)?;
+        let (new_selection, reference_delta) = self.get_updated_selection(&state, pos, true, modifiers)?;
         self.drag_origin = Some(pos);
 
         // If we clicked a zone, only update selection if the clicked zone isn't selected.
@@ -111,7 +111,7 @@ impl EditorTool for EditorToolZone {
                             break;
                         };
                         if let Some(end_id) = state.objects.sibling_in_zone(clicked_end_id, zone_id) {
-                            let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+                            let (start, count) = state.objects.get_zone_info(zone_id)?.range();
                             let expected_next_id = start + (sibling_id - start + 1) % count;
                             if expected_next_id == end_id {
                                 selected = true;
@@ -124,15 +124,15 @@ impl EditorTool for EditorToolZone {
 
             // Update selection if not in selected zone
             if !selected {
-                self.set_selection(new_selection, &state);
+                self.set_selection(new_selection, &state)?;
                 self.reference_delta = reference_delta;
             }
 
             // Otherwise keep selection as is and recalculate reference delta
             else {
                 let first_zone_id = *self.selected_zones.iter().min().unwrap();
-                let (first_point_id, _) = state.objects.get_zone_info(first_zone_id).unwrap().range();
-                let first_point_position = state.objects.get_point_info(first_point_id).unwrap().position();
+                let (first_point_id, _) = state.objects.get_zone_info(first_zone_id)?.range();
+                let first_point_position = state.objects.get_point_info(first_point_id)?.position();
                 self.reference_delta = Some(pos - first_point_position);
             }
         }
@@ -142,7 +142,7 @@ impl EditorTool for EditorToolZone {
         else {
             self.selection_origin = Some(pos);
             self.selection_box_end = Some(pos);
-            self.set_tentative_selection(&[], &state, modifiers);
+            self.set_tentative_selection(&[], &state, modifiers)?;
         }
         self.ok()
     }
@@ -162,8 +162,8 @@ impl EditorTool for EditorToolZone {
         // Or if we are dragging a selection box, tentatively select the zones in the box
         else if let Some(selection_origin) = self.selection_origin {
             self.selection_box_end = Some(pos);
-            let selected_points = state.objects.get_points_in_rect(selection_origin, pos);
-            self.set_tentative_selection(&selected_points[..], &state, modifiers);
+            let selected_points = state.objects.get_points_in_rect(selection_origin, pos)?;
+            self.set_tentative_selection(&selected_points[..], &state, modifiers)?;
         }
         self.ok()
     }
@@ -199,7 +199,7 @@ impl EditorTool for EditorToolZone {
         }
         // Otherwise clear selection
         else {
-            self.set_selection(vec![], &state);
+            self.set_selection(vec![], &state)?;
         }
         self.ok()
     }
@@ -221,7 +221,7 @@ impl EditorTool for EditorToolZone {
                 offset += 1;
             }
 
-            self.set_selection(Vec::new(), &state);
+            self.set_selection(Vec::new(), &state)?;
             self.reference_delta = None;
 
             return self.stale();
@@ -231,55 +231,57 @@ impl EditorTool for EditorToolZone {
 }
 
 impl EditorToolZone {
-    fn set_selection(&mut self, selected_zones: Vec<u16>, state: &ControllerStateInput) {
+    fn set_selection(&mut self, selected_zones: Vec<u16>, state: &ControllerStateInput) -> anyhow::Result<()> {
         self.selected_zones = selected_zones;
-        self.selected_points_reference = points_from_zone_selection(&self.selected_zones[..], state);
+        self.selected_points_reference = points_from_zone_selection(&self.selected_zones[..], state)?;
+        Ok(())
     }
 
     /// Set the tentative selection from the points inside a selection box, applying modifiers against the committed selection.
     /// SHIFT adds, ALT removes, SHIFT+ALT toggles, and CTRL only selects the exact zones instead of all connected zones.
-    fn set_tentative_selection(&mut self, boxed_points: &[u16], state: &ControllerStateInput, modifiers: InputModifiers) {
+    fn set_tentative_selection(&mut self, boxed_points: &[u16], state: &ControllerStateInput, modifiers: InputModifiers) -> anyhow::Result<()> {
         let mut boxed = std::collections::HashSet::new();
         for &point_id in boxed_points {
-            let zone_id = state.objects.get_point_info(point_id).unwrap().zone_id();
+            let zone_id = state.objects.get_point_info(point_id)?.zone_id();
             if modifiers.ctrl {
                 boxed.insert(zone_id);
             } else {
-                boxed.extend(get_connected_zones(zone_id, state));
+                boxed.extend(get_connected_zones(zone_id, state)?);
             }
         }
 
         let boxed: Vec<u16> = boxed.into_iter().collect();
         let zones = utils::combine_selection(&self.selected_zones[..], &boxed[..], modifiers, false);
-        let points = points_from_zone_selection(&zones[..], state);
+        let points = points_from_zone_selection(&zones[..], state)?;
         self.tentative_selection = Some((zones, points));
+        Ok(())
     }
 
     /// Get a single zone selection from a click position.
     /// Returns the ID of the zone that was clicked, and the ID of the clicked point or its path start/end
-    fn zone_from_pos(&self, state: &ControllerStateInput, pos: Vec2) -> (Option<u16>, Option<u16>, Option<u16>) {
+    fn zone_from_pos(&self, state: &ControllerStateInput, pos: Vec2) -> anyhow::Result<(Option<u16>, Option<u16>, Option<u16>)> {
         // Check the point
-        if let Some((zone_id, point_id)) = utils::get_clicked_control_point(state, None, pos) {
-            (Some(zone_id), Some(point_id), None)
+        if let Some((zone_id, point_id)) = utils::get_clicked_control_point(state, None, pos)? {
+            Ok((Some(zone_id), Some(point_id), None))
         }
 
         // Check the curve
-        else if let Some((zone_id, start_id, _, _)) = utils::get_clicked_zone_path(state, pos) {
-            let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
-            (Some(zone_id), Some(start_id), Some(start + (start_id - start + 1) % count))
+        else if let Some((zone_id, start_id, _, _)) = utils::get_clicked_zone_path(state, pos)? {
+            let (start, count) = state.objects.get_zone_info(zone_id)?.range();
+            Ok((Some(zone_id), Some(start_id), Some(start + (start_id - start + 1) % count)))
         }
 
         // Notihing is clicked
         else {
-            (None, None, None)
+            Ok((None, None, None))
         }
     }
 
     /// Given a click (or drag start) point and input info, and whether or not this is a drag action,
     /// and using the state of the current selection, return a new selection.
     /// Also return delta from the lowest ID selected point to the click position, in case this is a drag start.
-    fn get_updated_selection(&self, state: &ControllerStateInput, pos: Vec2, dragging: bool, modifiers: InputModifiers) -> (Vec<u16>, Option<Vec2>) {
-        let (zone_id, point_id, neighbor_id) = self.zone_from_pos(state, pos);
+    fn get_updated_selection(&self, state: &ControllerStateInput, pos: Vec2, dragging: bool, modifiers: InputModifiers) -> anyhow::Result<(Vec<u16>, Option<Vec2>)> {
+        let (zone_id, point_id, neighbor_id) = self.zone_from_pos(state, pos)?;
 
         // If a zone is clicked, determine point/path/etc
         if let Some(zone_id) = zone_id {
@@ -305,17 +307,17 @@ impl EditorToolZone {
                             if let Some(neighbor_id) = neighbor_id {
                                 if let Some(neighbor_id) = state.objects.sibling_in_zone(neighbor_id, selected_zone_id) {
                                     // If it is an interior path, return the next zone.
-                                    let (start, count) = state.objects.get_zone_info(selected_zone_id).unwrap().range();
+                                    let (start, count) = state.objects.get_zone_info(selected_zone_id)?.range();
                                     let projected_next_id = start + (point_id - start + 1) % count;
                                     if neighbor_id == projected_next_id {
-                                        let sibling_id = state.objects.get_sibling(point_id).unwrap();
-                                        vec![state.objects.get_point_info(sibling_id).unwrap().zone_id()]
+                                        let sibling_id = state.objects.get_sibling(point_id)?;
+                                        vec![state.objects.get_point_info(sibling_id)?.zone_id()]
                                     } else { vec![zone_id] }
                                 } else { vec![zone_id] } // return selected zone
                             } else {
                                 // Otherwise, just return the next zone.
-                                let sibling_id = state.objects.get_sibling(point_id).unwrap();
-                                vec![state.objects.get_point_info(sibling_id).unwrap().zone_id()]
+                                let sibling_id = state.objects.get_sibling(point_id)?;
+                                vec![state.objects.get_point_info(sibling_id)?.zone_id()]
                             }
                         }
 
@@ -330,50 +332,50 @@ impl EditorToolZone {
 
             // Otherwise, add/remove/toggle all connected zones
             else {
-                let all_connected = get_connected_zones(zone_id, state);
+                let all_connected = get_connected_zones(zone_id, state)?;
                 utils::combine_selection(&self.selected_zones[..], &all_connected[..], modifiers, true)
             };
 
             let reference_delta = if !dragging || new_selection.is_empty() { None } else {
                 // Get the difference in position with the first point in the first zone
                 let first_zone_id = *new_selection.iter().min().unwrap();
-                let (first_point_id, _) = state.objects.get_zone_info(first_zone_id).unwrap().range();
-                let first_point_position = state.objects.get_point_info(first_point_id).unwrap().position();
+                let (first_point_id, _) = state.objects.get_zone_info(first_zone_id)?.range();
+                let first_point_position = state.objects.get_point_info(first_point_id)?.position();
                 Some(pos - first_point_position)
             };
 
-            (new_selection, reference_delta)
+            Ok((new_selection, reference_delta))
         }
 
         // If no zone is clicked, deselect or return selection unmodified
         else {
             if modifiers.shift || modifiers.alt {
                 // We are adding to/removing from/toggling selected zones, so leave unmodified
-                (self.selected_zones.clone(), None)
+                Ok((self.selected_zones.clone(), None))
             } else {
-                (vec![], None)
+                Ok((vec![], None))
             }
         }
     }
 }
 
 /// Get the points we have selected from the zone we have selected
-fn points_from_zone_selection(selected_zones: &[u16], state: &ControllerStateInput) -> Vec<u16> {
+fn points_from_zone_selection(selected_zones: &[u16], state: &ControllerStateInput) -> anyhow::Result<Vec<u16>> {
     let mut points = vec![];
     for zone_id in selected_zones {
-        let (start, count) = state.objects.get_zone_info(*zone_id).unwrap().range();
+        let (start, count) = state.objects.get_zone_info(*zone_id)?.range();
         points.extend((start..start + count).collect::<Vec<u16>>());
     }
-    points
+    Ok(points)
 }
 
-fn get_connected_zones(zone_id: u16, state: &ControllerStateInput) -> Vec<u16> {
-    let (point_id, _) = state.objects.get_zone_info(zone_id).unwrap().range();
-    let connected_points = state.objects.get_connected_points(point_id, true).unwrap();
+fn get_connected_zones(zone_id: u16, state: &ControllerStateInput) -> anyhow::Result<Vec<u16>> {
+    let (point_id, _) = state.objects.get_zone_info(zone_id)?.range();
+    let connected_points = state.objects.get_connected_points(point_id, true)?;
     let connected_zones: std::collections::HashSet<_> = connected_points.iter().filter_map(|&point_id| {
-        state.objects.get_point_info(point_id).map(|info| info.zone_id())
+        state.objects.get_point_info(point_id).ok().map(|info| info.zone_id())
     }).collect(); // Collect as hash set first to remove duplicates
-    connected_zones.into_iter().collect()
+    Ok(connected_zones.into_iter().collect())
 }
 
 /* ******************************** */

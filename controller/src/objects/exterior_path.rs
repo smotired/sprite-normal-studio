@@ -39,10 +39,10 @@ impl ObjectBuffers {
         // Don't use get_connected_points, so that we can exit early if we find the one we want.
 
         // Helper function to get the next point in the same zone in the given direction.
-        let next = |i: u16| {
-            let zone_id = self.get_point_info(i).unwrap().zone_id();
-            let (start, count) = self.get_zone_info(zone_id).unwrap().range();
-            start + (i - start + 1) % count
+        let next = |i: u16| -> anyhow::Result<u16> {
+            let zone_id = self.get_point_info(i)?.zone_id();
+            let (start, count) = self.get_zone_info(zone_id)?.range();
+            Ok(start + (i - start + 1) % count)
         };
 
         // Run breadth-first search
@@ -64,7 +64,7 @@ impl ObjectBuffers {
             }
 
             // Enqueue next node
-            queue.push_back(next(point_id));
+            queue.push_back(next(point_id)?);
         }
 
         // If the queue is exhausted the points are not connected
@@ -72,14 +72,14 @@ impl ObjectBuffers {
     }
     
     // Get the signed area of a zone
-    pub fn zone_signed_area(&self, zone_id: u16, closed: bool) -> f32 {
-        let (start, count) = self.get_zone_info(zone_id).unwrap().range();
-        let first = self.get_point_info(start).unwrap();
+    pub fn zone_signed_area(&self, zone_id: u16, closed: bool) -> anyhow::Result<f32> {
+        let (start, count) = self.get_zone_info(zone_id)?.range();
+        let first = self.get_point_info(start)?;
 
         let mut prev = first;
         let mut area = 0.0;
         for i in 1..count {
-            let point = self.get_point_info(start + i).unwrap();
+            let point = self.get_point_info(start + i)?;
             area += bezier_signed_area(prev.position(), prev.right_handle(), point.left_handle(), point.position());
             prev = point;
         }
@@ -87,7 +87,7 @@ impl ObjectBuffers {
         if closed {
             area += bezier_signed_area(prev.position(), prev.right_handle(), first.left_handle(), first.position());
         }
-        area
+        Ok(area)
     }
 
     /// Helper method to find an exterior path by traversing in a direction.
@@ -106,25 +106,25 @@ impl ObjectBuffers {
         let (mut id, mut right) = ControlPoint::get_sync_id(start_id, start_right, points)?;
 
         // Helper function to get the next point in the same zone in the given direction.
-        let next = |i: u16, right: bool| {
-            let zone_id = self.get_point_info(i).unwrap().zone_id();
-            let (start, count) = self.get_zone_info(zone_id).unwrap().range();
-            start + ((i - start + count) as i32 + if right { 1 } else { -1 }) as u16 % count
+        let next = |i: u16, right: bool| -> anyhow::Result<u16> {
+            let zone_id = self.get_point_info(i)?.zone_id();
+            let (start, count) = self.get_zone_info(zone_id)?.range();
+            Ok(start + ((i - start + count) as i32 + if right { 1 } else { -1 }) as u16 % count)
         };
 
         // Helper function to get the normalized direction of a point's handle.
         // If the handle's magnitude is 0 (e.g. the point is linear), instead returns the normalized direction to
         // the next point's opposite handle.
-        let handle_dir = |i: u16, right: bool| {
-            let point = self.get_point_info(i).unwrap();
+        let handle_dir = |i: u16, right: bool| -> anyhow::Result<Vec2> {
+            let point = self.get_point_info(i)?;
             let handle = if right { point.right_handle() } else { point.left_handle() };
             let mut dir = (handle - point.position()).normalized();
             if dir.magnitude() == 0.0 {
-                let neighbor = self.get_point_info(next(i, right)).unwrap();
+                let neighbor = self.get_point_info(next(i, right)?)?;
                 let handle = if right { neighbor.left_handle() } else { neighbor.right_handle() };
                 dir = (handle - point.position()).normalized();
             }
-            dir
+            Ok(dir)
         };
 
         // True if the edge leaving the point by the handle is shared with any other zone.
@@ -149,8 +149,8 @@ impl ObjectBuffers {
         let sweep_angle = {
             // +1.0 = interior is on the left of travel, so sweep counter-clockwise from back_dir.
             // -1.0 = interior is on the right, so sweep clockwise.
-            let start_zone_id = self.get_point_info(id).unwrap().zone_id();
-            let sweep = if (self.zone_signed_area(start_zone_id, true) > 0.0) == right { 1.0 } else { -1.0 };
+            let start_zone_id = self.get_point_info(id)?.zone_id();
+            let sweep = if (self.zone_signed_area(start_zone_id, true)? > 0.0) == right { 1.0 } else { -1.0 };
 
             move |from: Vec2, to: Vec2| -> f32 {
                 let a = (sweep * from.cross(to)).atan2(from.dot(to));
@@ -164,9 +164,9 @@ impl ObjectBuffers {
         while !end_siblings.contains(&id) {
             // Bail if we are in an infinite loop.
             if !seen.insert((id, right)) {
-                anyhow::bail!("Exterior path revisited state ({id}, {right}) from {start_id} to {end_id}");
+                anyhow::bail!("Couldn't trace the outside of the zone from point {start_id} to {end_id}!");
             }
-            let base_next_id = next(id, right);
+            let base_next_id = next(id, right)?;
             
             // Create the path segment that starts at this point and ends at the next point
             let segment = ExteriorPathSegment::new(id, right, base_next_id, !right);
@@ -181,7 +181,7 @@ impl ObjectBuffers {
             // Otherwise it's definitely not the next one to go to (by assumptions).
             if !next_siblings.is_empty() {
                 // Get the direction of the path we just took
-                let back_dir = handle_dir(base_next_id, !right);
+                let back_dir = handle_dir(base_next_id, !right)?;
                 
                 // Get the full sibling ring
                 let mut ring = next_siblings.clone();
@@ -204,7 +204,7 @@ impl ObjectBuffers {
                         if edge_shared(candidate_id, out_right)? { continue; }
 
                         // Determine the exterior angle to this branch point
-                        let angle = sweep_angle(back_dir, handle_dir(candidate_id, out_right));
+                        let angle = sweep_angle(back_dir, handle_dir(candidate_id, out_right)?);
                         if angle < best_angle {
                             best_angle = angle;
                             next_id = candidate_id;
@@ -222,8 +222,8 @@ impl ObjectBuffers {
         // Calculate area by checking each segment
         let mut signed_area = 0.0;
         for segment in &path[..] {
-            let start = self.get_point_info(segment.start_id).unwrap();
-            let end = self.get_point_info(segment.end_id).unwrap();
+            let start = self.get_point_info(segment.start_id)?;
+            let end = self.get_point_info(segment.end_id)?;
 
             let pos0 = start.position();
             let pos1 = if segment.start_handle { start.right_handle() } else { start.left_handle() };
@@ -247,11 +247,11 @@ impl ObjectBuffers {
     /// If start or end ID have siblings, traversal will start by going down to their free node.
     pub fn find_exterior_path(&self, start_id: u16, end_id: u16, zone_id: u16) -> anyhow::Result<(Vec<ExteriorPathSegment>, bool)> {
         // Find the signed area of the part we are creating, up to the endpoint which we take as linear
-        let (creating_start, creating_count) = self.get_zone_info(zone_id).unwrap().range();
+        let (creating_start, creating_count) = self.get_zone_info(zone_id)?.range();
         let signed_area = {
-            let mut area = self.zone_signed_area(zone_id, false);
-            let before_join = self.get_point_info(creating_start + creating_count - 1).unwrap();
-            let end = self.get_point_info(end_id).unwrap();
+            let mut area = self.zone_signed_area(zone_id, false)?;
+            let before_join = self.get_point_info(creating_start + creating_count - 1)?;
+            let end = self.get_point_info(end_id)?;
             area += bezier_signed_area(before_join.position(), before_join.right_handle(), end.position(), end.position());
             area
         };
@@ -287,9 +287,9 @@ impl ObjectBuffers {
     /// Returns the new IDs of the start and end points.
     /// Should only be used for a brand new zone, that doesn't have anything synced to it.
     pub fn flip_zone(&mut self, zone_id: u16) -> anyhow::Result<(u16, u16)> {
-        if zone_id != self.zone_count() - 1 { anyhow::bail!("Can only run flip_zone on the final zone, not zone {}!", zone_id); }
-        if self.point_count() == super::MAX_OBJECT_ID { anyhow::bail!("No space to flip the points in a zone!"); } // we should have checked at the beginning of whatever function
-        let (start, count) = self.get_zone_info(zone_id).unwrap().range();
+        if zone_id != self.zone_count() - 1 { anyhow::bail!("Can only flip the newest zone, not zone {}!", zone_id); }
+        if self.point_count() == super::MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); } // we should have checked at the beginning of whatever function
+        let (start, count) = self.get_zone_info(zone_id)?.range();
         let points = &mut self.points.borrow_mut().items;
         let siblings = &mut self.point_siblings.borrow_mut().items;
 
@@ -377,8 +377,8 @@ mod tests {
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]);
 
-        assert!((objects.zone_signed_area(0, true) - 100.0).abs() < 1e-3);
-        assert!((objects.zone_signed_area(1, true) + 100.0).abs() < 1e-3);
+        assert!((objects.zone_signed_area(0, true).unwrap() - 100.0).abs() < 1e-3);
+        assert!((objects.zone_signed_area(1, true).unwrap() + 100.0).abs() < 1e-3);
     }
 
     /// An open path only sums the curves between its points, so it has less area than when closed
@@ -387,8 +387,8 @@ mod tests {
         let mut objects = ObjectBuffers::headless();
         add_zone(&mut objects, &[(1.0, 0.0), (3.0, 0.0), (3.0, 2.0)]);
 
-        assert!((objects.zone_signed_area(0, false) - 3.0).abs() < 1e-3);
-        assert!((objects.zone_signed_area(0, true) - 2.0).abs() < 1e-3);
+        assert!((objects.zone_signed_area(0, false).unwrap() - 3.0).abs() < 1e-3);
+        assert!((objects.zone_signed_area(0, true).unwrap() - 2.0).abs() < 1e-3);
     }
 
     /// Flipping reverses point order, which flips the area, and returns the new start and end
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(30.0, 10.0));
         assert_eq!(objects.get_point_info(5).unwrap().position(), Vec2::new(30.0, 0.0));
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(20.0, 0.0));
-        assert!((objects.zone_signed_area(1, true) + 50.0).abs() < 1e-3);
+        assert!((objects.zone_signed_area(1, true).unwrap() + 50.0).abs() < 1e-3);
     }
 
     /// Flipping swaps the handles of each point

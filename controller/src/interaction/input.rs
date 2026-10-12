@@ -110,8 +110,7 @@ impl Controller {
 
             Input::MouseClicked(pos, modifiers) => {
                 if self.overlay_state.overlay_on() {
-                    let result = self.tool.handle_click(self.create_state(), pos, modifiers);
-                    self.handle_tool_result(result);
+                    self.run_tool(false, |tool, state| tool.handle_click(state, pos, modifiers));
                 }
             },
 
@@ -126,8 +125,7 @@ impl Controller {
 
                     // Check the tool
                     else {
-                        let result = self.tool.handle_drag_start(self.create_state(), pos, modifiers);
-                        self.handle_tool_result(result);
+                        self.run_tool(false, |tool, state| tool.handle_drag_start(state, pos, modifiers));
                     }
                 }
             }
@@ -140,8 +138,7 @@ impl Controller {
 
                 // Otherwise switch based on tool
                 else if self.overlay_state.overlay_on() {
-                    let result = self.tool.handle_dragging_to(self.create_state(), new, modifiers);
-                    self.handle_tool_result(result);
+                    self.run_tool(true, |tool, state| tool.handle_dragging_to(state, new, modifiers));
                 }
             },
 
@@ -151,19 +148,16 @@ impl Controller {
                 }
 
                 else if self.overlay_state.overlay_on() {
-                    let result = self.tool.handle_drag_released(self.create_state(), modifiers);
-                    self.handle_tool_result(result);
+                    self.run_tool(false, |tool, state| tool.handle_drag_released(state, modifiers));
                 }
             },
 
             Input::Cancel => {
-                let result = self.tool.handle_cancel(self.create_state());
-                self.handle_tool_result(result);
+                self.run_tool(false, |tool, state| tool.handle_cancel(state));
             },
 
             Input::Delete => {
-                let result = self.tool.handle_delete(self.create_state());
-                self.handle_tool_result(result);
+                self.run_tool(false, |tool, state| tool.handle_delete(state));
             },
 
             Input::Altitude(up) => {

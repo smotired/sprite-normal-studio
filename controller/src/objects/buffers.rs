@@ -1,6 +1,7 @@
 use wgpu::{Buffer, Device, Queue};
 
-use super::{ObjectBuffers, BufferStates, MIN_BUFFER_SIZE};
+use super::{ObjectBuffers, BufferStates, ControlPoint, MIN_BUFFER_SIZE};
+use super::zone::Zone;
 use crate::Controller;
 
 pub(super) struct VecWithBuffer<T> where T : bytemuck::Pod + bytemuck::Zeroable {
@@ -77,6 +78,33 @@ impl ObjectBuffers {
     }
 }
 
+/// A copy of every object list, which can be restored later.
+/// Only the items are copied, since the GPU buffers are resized and rewritten from the items every frame.
+#[derive(Clone)]
+pub struct ObjectSnapshot {
+    zones: Vec<Zone>,
+    points: Vec<ControlPoint>,
+    point_siblings: Vec<u16>,
+}
+
+impl ObjectBuffers {
+    /// Take a snapshot of every object list
+    pub fn snapshot(&self) -> ObjectSnapshot {
+        ObjectSnapshot {
+            zones: self.zones.borrow().items.clone(),
+            points: self.points.borrow().items.clone(),
+            point_siblings: self.point_siblings.borrow().items.clone(),
+        }
+    }
+
+    /// Replace every object list with the contents of a snapshot
+    pub fn restore(&self, snapshot: ObjectSnapshot) {
+        self.zones.borrow_mut().items = snapshot.zones;
+        self.points.borrow_mut().items = snapshot.points;
+        self.point_siblings.borrow_mut().items = snapshot.point_siblings;
+    }
+}
+
 /// Create a buffer for use with a VecWithBuffer. Return the buffer and its size of the buffer.
 fn create_buffer<T>(device: &Device, vector: &[T], label: &str) -> (Buffer, usize) where T : bytemuck::Pod + bytemuck::Zeroable {
     // Make buffer the smallest power of 2 above 32 that will fit
@@ -117,5 +145,28 @@ impl Controller {
         }
 
         queue.write_buffer(&self.selection_buffer, 0, &packed_bytes);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ObjectBuffers;
+    use super::super::test_utils::add_square;
+
+    /// Restoring a snapshot brings back the objects from when it was taken
+    #[test]
+    fn snapshot_restore() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let snapshot = objects.snapshot();
+
+        add_square(&mut objects, 20.0);
+        objects.create_branching_zone(1).unwrap();
+        assert_ne!(objects.object_counts(), (1, 4));
+
+        objects.restore(snapshot);
+        assert_eq!(objects.object_counts(), (1, 4));
+        assert_eq!(objects.get_point_info(2).unwrap().position(), studio_math::Vec2::new(10.0, 10.0));
+        assert_eq!(objects.get_siblings(1), Vec::<u16>::new());
     }
 }

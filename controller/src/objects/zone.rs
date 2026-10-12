@@ -32,7 +32,7 @@ impl Zone {
 
     // Decrease the point count
     pub fn dec_points(&mut self) -> anyhow::Result<()> {
-        if self.point_count == 0 { anyhow::bail!("Can't remove ponits from an empty zone!"); }
+        if self.point_count == 0 { anyhow::bail!("Can't remove points from an empty zone!"); }
         self.point_count -= 1;
         Ok(())
     }

@@ -11,8 +11,8 @@ use crate::assignment::ZoneAssigner;
 pub use crate::interaction::input::{Input, InputModifiers, Axis};
 use crate::interaction::tools::{EditorTool, EditorToolZone};
 pub use crate::interaction::viewport::ViewportDataUniform;
-pub use crate::interaction::tools::EditorToolKind;
-pub use crate::objects::{ObjectBuffers, BufferStates};
+pub use crate::interaction::tools::{EditorToolKind, EditorSnapshot};
+pub use crate::objects::{ObjectBuffers, ObjectSnapshot, BufferStates};
 
 /// The Controller manages our actual working pipeline.
 pub struct Controller {
@@ -45,6 +45,9 @@ pub struct Controller {
 
     /// Selection buffer which gets contents from the selected tool
     selection_buffer: Buffer,
+
+    /// The error from the latest tool action, if it failed
+    tool_error: Option<String>,
 }
 
 impl Controller {
@@ -71,6 +74,7 @@ impl Controller {
             cursor_pos: Default::default(),
             tool: EditorToolZone::init(),
             selection_buffer,
+            tool_error: None,
         }
     }
     

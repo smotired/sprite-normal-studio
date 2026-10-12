@@ -15,6 +15,7 @@ use zone::Zone;
 pub use point::ControlPoint;
 pub use point::ControlPointMode;
 use buffers::VecWithBuffer;
+pub use buffers::ObjectSnapshot;
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
@@ -65,22 +66,16 @@ impl ObjectBuffers {
         }
     }
 
-    /// Get a clone of a zone by its ID. Returns None if the zone does not exist.
-    pub fn get_zone_info(&self, zone_id: u16) -> Option<Zone> {
-        if zone_id >= self.zone_count() {
-            None
-        } else {
-            Some(self.zones.borrow().items[zone_id as usize])
-        }
+    /// Get a clone of a zone by its ID. Returns an error if the zone does not exist.
+    pub fn get_zone_info(&self, zone_id: u16) -> anyhow::Result<Zone> {
+        if zone_id >= self.zone_count() { anyhow::bail!("Zone {} does not exist!", zone_id); }
+        Ok(self.zones.borrow().items[zone_id as usize])
     }
 
-    /// Get a clone of a control point by its ID. Returns None if the point does not exist.
-    pub fn get_point_info(&self, point_id: u16) -> Option<ControlPoint> {
-        if point_id >= self.point_count() {
-            None
-        } else {
-            Some(self.points.borrow().items[point_id as usize])
-        }
+    /// Get a clone of a control point by its ID. Returns an error if the point does not exist.
+    pub fn get_point_info(&self, point_id: u16) -> anyhow::Result<ControlPoint> {
+        if point_id >= self.point_count() { anyhow::bail!("Point {} does not exist!", point_id); }
+        Ok(self.points.borrow().items[point_id as usize])
     }
 
     pub fn get_sibling(&self, point_id: u16) -> anyhow::Result<u16> {
@@ -137,8 +132,8 @@ mod tests {
     fn empty() {
         let objects = ObjectBuffers::headless();
         assert_eq!(objects.object_counts(), (0, 0));
-        assert!(objects.get_zone_info(0).is_none());
-        assert!(objects.get_point_info(0).is_none());
+        assert!(objects.get_zone_info(0).is_err());
+        assert!(objects.get_point_info(0).is_err());
         assert!(objects.get_sibling(0).is_err());
     }
 
@@ -153,8 +148,8 @@ mod tests {
         assert_eq!(objects.get_zone_info(1).unwrap().range(), (4, 2));
         assert_eq!(objects.get_point_info(5).unwrap().position(), Vec2::new(30.0, 0.0));
         assert_eq!(objects.get_point_info(5).unwrap().zone_id(), 1);
-        assert!(objects.get_zone_info(2).is_none());
-        assert!(objects.get_point_info(6).is_none());
+        assert!(objects.get_zone_info(2).is_err());
+        assert!(objects.get_point_info(6).is_err());
     }
 
     /// Points with no siblings are their own sibling

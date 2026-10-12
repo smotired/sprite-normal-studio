@@ -23,7 +23,7 @@ impl ObjectBuffers {
         if point_count == MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
         if zone_id >= zone_count { anyhow::bail!("Zone {} does not exist!", zone_id); }
 
-        let (start, count) = self.get_zone_info(zone_id).unwrap().range();
+        let (start, count) = self.get_zone_info(zone_id)?.range();
         if point_id < start || point_id > start + count {
             anyhow::bail!("Invalid point id {}: must be within range {}..={}", point_id, start, start + count);
         }
@@ -69,50 +69,51 @@ impl ObjectBuffers {
         if zone_id >= zone_count {
             anyhow::bail!("Zone {} does not exist!", zone_id);
         }
-        let (start, count) = self.get_zone_info(zone_id).unwrap().range();
+        let (start, count) = self.get_zone_info(zone_id)?.range();
         if start_id < start || start_id >= start + count {
             anyhow::bail!("Invalid start id {}: must be within range {}..{}", start_id, start, start + count);
         }
 
 
         // Get left sync target for the path end node.
-        let start_info = self.get_point_info(start_id).unwrap();
+        let start_info = self.get_point_info(start_id)?;
         let (start_sync_id, _) = ControlPoint::get_sync_id(start_id, true, &self.points.borrow().items)?; // TODO: what to do with flips
         let mut end_id = start + (start_id - start + 1) % count;
-        let end_info = self.get_point_info(end_id).unwrap();
+        let end_info = self.get_point_info(end_id)?;
         let (end_sync_id, _) = ControlPoint::get_sync_id(end_id, false, &self.points.borrow().items)?; // TODO: what to do with flips
         
         // First determine how many siblings need to be created, and ensure we have room.
         let mut synced_start_ids = {
             let immut_points = &self.points.borrow().items;
             let immut_siblings = &self.point_siblings.borrow().items;
-            let mut ids: Vec<u16> = ControlPoint::get_siblings(start_id, immut_siblings).into_iter()
-                // Only include siblings where the endpoints sync to the same values
-                .filter(|sibling_start_id| {
-                    let sibling_start_id = *sibling_start_id;
-                    let sibling_start_info = self.get_point_info(sibling_start_id).unwrap();
+            let mut ids: Vec<u16> = vec![];
+            // Only include siblings where the endpoints sync to the same values
+            for sibling_start_id in ControlPoint::get_siblings(start_id, immut_siblings) {
+                let sibling_start_info = self.get_point_info(sibling_start_id)?;
 
-                    // If there isn't even an end sibling in this zone, exclude
-                    let sibling_end_id = ControlPoint::find_in_zone(end_id, sibling_start_info.zone_id(), immut_points, immut_siblings);
-                    if sibling_end_id.is_err() || sibling_end_id.as_ref().unwrap().is_none() { return false; }
-                    let sibling_end_id = sibling_end_id.unwrap().unwrap();
+                // If there isn't even an end sibling in this zone, exclude
+                let sibling_end_id = ControlPoint::find_in_zone(end_id, sibling_start_info.zone_id(), immut_points, immut_siblings);
+                if sibling_end_id.is_err() || sibling_end_id.as_ref().unwrap().is_none() { continue; }
+                let sibling_end_id = sibling_end_id.unwrap().unwrap();
 
-                    // Make sure sibling end is right after sibling start
-                    let (start, count) = self.get_zone_info(sibling_start_info.zone_id()).unwrap().range();
-                    let projected_sibling_end_id = start + (sibling_start_id - start + 1) % count;
-                    if sibling_end_id != projected_sibling_end_id { return false; } // there is something else between
+                // Make sure sibling end is right after sibling start
+                let (start, count) = self.get_zone_info(sibling_start_info.zone_id())?.range();
+                let projected_sibling_end_id = start + (sibling_start_id - start + 1) % count;
+                if sibling_end_id != projected_sibling_end_id { continue; } // there is something else between
 
-                    // Determine what the start and end sync to
-                    let ss_right = ControlPoint::get_sync_id(sibling_start_id, true, immut_points); // TODO: what to do with flips
-                    let se_left  = ControlPoint::get_sync_id(sibling_end_id, false, immut_points); // TODO: what to do with flips
-                    if ss_right.is_err() || se_left.is_err() { return false; }
+                // Determine what the start and end sync to
+                let ss_right = ControlPoint::get_sync_id(sibling_start_id, true, immut_points); // TODO: what to do with flips
+                let se_left  = ControlPoint::get_sync_id(sibling_end_id, false, immut_points); // TODO: what to do with flips
+                if ss_right.is_err() || se_left.is_err() { continue; }
 
-                    // We must add a synced pair here IF:
-                    // The start's right syncs to the same eventual thing as the real start's right
-                    // AND
-                    // The end's left syncs to the same eventual thing as the real end's left
-                    ss_right.unwrap().0 == start_sync_id && se_left.unwrap().0 == end_sync_id
-                }).collect();
+                // We must add a synced pair here IF:
+                // The start's right syncs to the same eventual thing as the real start's right
+                // AND
+                // The end's left syncs to the same eventual thing as the real end's left
+                if ss_right.unwrap().0 == start_sync_id && se_left.unwrap().0 == end_sync_id {
+                    ids.push(sibling_start_id);
+                }
+            }
             ids.sort();
             ids
         };
@@ -136,7 +137,7 @@ impl ObjectBuffers {
         // Create the synced siblings and sync them as Both
         for i in 0..sibling_count {
             let sibling_start_id = synced_start_ids[i];
-            let sibling_zone_id = self.get_point_info(sibling_start_id).unwrap().zone_id();
+            let sibling_zone_id = self.get_point_info(sibling_start_id)?.zone_id();
 
             // Create the synced point
             let sibling_id = self.insert_point_helper(sibling_zone_id, sibling_start_id + 1, position)?;
@@ -159,8 +160,8 @@ impl ObjectBuffers {
         // Update the point to split the curve correctly (updating the siblings as well)
         // Determine mode and handles for the path to not change
         let (mode, left_handle, right_handle, start_rh, end_lh) = {
-            let start_sync_point_mode = self.get_point_info(start_sync_id).unwrap().mode();
-            let end_sync_point_mode = self.get_point_info(end_sync_id).unwrap().mode();
+            let start_sync_point_mode = self.get_point_info(start_sync_id)?.mode();
+            let end_sync_point_mode = self.get_point_info(end_sync_id)?.mode();
 
             // If both are linear, this should be linear.
             if start_sync_point_mode == ControlPointMode::Linear && end_sync_point_mode == ControlPointMode::Linear {
@@ -211,7 +212,7 @@ impl ObjectBuffers {
     /// a different zone, use insert_point.
     pub fn create_point(&mut self, zone_id: u16, position: Vec2) -> anyhow::Result<u16> {
         // Ensure we can create a point in this zone
-        if zone_id != self.zone_count() - 1 { anyhow::bail!("Can only use create_point in the final zone, not {}!", zone_id); }
+        if zone_id != self.zone_count() - 1 { anyhow::bail!("Can only add new points to the newest zone, not zone {}!", zone_id); }
         if self.point_count() == MAX_OBJECT_ID { anyhow::bail!("No room to create another control point!"); }
 
         // Create the point

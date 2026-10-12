@@ -2,6 +2,7 @@ mod file;
 mod editor;
 mod input;
 mod sidebar;
+mod status;
 mod toolbar;
 
 use controller::Controller;
@@ -27,6 +28,9 @@ pub struct StudioApp {
     render_state: eframe::egui_wgpu::RenderState,
     /// Renderer viewport texture ID
     viewport_texture_id: egui::TextureId,
+
+    /// If the dialog with the full tool error text is open
+    show_error_dialog: bool,
 }
 
 /// Default initializer for application state
@@ -45,6 +49,7 @@ impl StudioApp {
             renderer,
             render_state,
             viewport_texture_id,
+            show_error_dialog: false,
         }
     }
 
@@ -57,19 +62,22 @@ impl StudioApp {
 /// Root app UI
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Side panels must be shown before the central panel, left to right
+        // Side panels must be shown before the central panel, left to right, then the status bar below the workspace
         self.show_sidebar(ui);
         let toolbar_response = self.show_toolbar(ui);
+        let status_response = self.show_status_bar(ui);
 
         // The rest of the space will now be taken up by the editor
         let full_rect = ui.max_rect();
         let viewport_rect = egui::Rect::from_min_max(
             egui::Pos2::new(toolbar_response.rect.max.x, full_rect.min.y),
-            full_rect.max,
+            egui::Pos2::new(full_rect.max.x, status_response.rect.min.y),
         );
 
-        // Handle app-level input events
-        self.process_app_input(ui, viewport_rect);
+        // Handle app-level input events, unless the error dialog is open and should get them instead (i.e. escape to close it)
+        if !self.show_error_dialog {
+            self.process_app_input(ui, viewport_rect);
+        }
 
         // Call the controller's update method to regenerate any textures as needed
         self.controller.update(&self.render_state.device, &self.render_state.queue);
@@ -77,5 +85,7 @@ impl eframe::App for StudioApp {
         // Render the main editor component and handle input events on the image itself
         let response = self.show_editor(ui);
         self.process_editor_input(ui, response);
+
+        self.show_error_dialog(ui);
     }
 }

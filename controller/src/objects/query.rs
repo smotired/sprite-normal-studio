@@ -7,45 +7,46 @@ impl ObjectBuffers {
     /// Returns the ID of the closest control point to the given position within the specified zone, or None if no points exist.
     /// If no zone is specified, returns the closest point across all zones.
     /// Returns a tuple containing the zone ID and the point ID of the closest control point, or None if no points exist.
-    pub fn get_closest_point(&self, zone_id: Option<u16>, position: Vec2) -> Option<(u16, u16)> {
+    pub fn get_closest_point(&self, zone_id: Option<u16>, position: Vec2) -> anyhow::Result<Option<(u16, u16)>> {
         // Get the range of points to search for
         let (start, count) = if let Some(zone_id) = zone_id {
-            self.get_zone_info(zone_id)?.range()
+            let Ok(zone) = self.get_zone_info(zone_id) else { return Ok(None); };
+            zone.range()
         } else {
             (0, self.point_count())
         };
-        if count == 0 { return None; }
+        if count == 0 { return Ok(None); }
 
         // Find the closest point within the specified range
         let mut closest_id = None;
         let mut min_distance = f32::MAX;
         for i in 0..count {
-            let distance = self.get_point_info(start + i).unwrap().distance(position);
+            let distance = self.get_point_info(start + i)?.distance(position);
             if distance < min_distance {
                 min_distance = distance;
                 closest_id = Some(start + i);
             }
         }
         
-        closest_id.map(|point_id| (self.get_point_info(point_id).unwrap().zone_id(), point_id))
+        closest_id.map(|point_id| Ok((self.get_point_info(point_id)?.zone_id(), point_id))).transpose()
     }
 
     /// Get the closest point on any path to the given position.
     /// Returns the ID of the zone path, and the ID of the point that STARTS the path segment.
     /// Also returns the corrected position on the path, and the t value for that segment
     /// If inserting a point into the zone path, it would go after the returned point.
-    pub fn get_closest_path_point(&self, position: Vec2, scale: f32) -> Option<(u16, u16, Vec2, f32)> {
+    pub fn get_closest_path_point(&self, position: Vec2, scale: f32) -> anyhow::Result<Option<(u16, u16, Vec2, f32)>> {
         let mut best = None as Option<(u16, u16)>;
         let mut corrected = Vec2::ZERO;
         let mut t = 0.5;
         let mut min_path_dist = f32::MAX;
         for i in 0..self.zone_count() {
             // Get the amount of points in this zone
-            let (start, count) = self.get_zone_info(i).unwrap().range();
+            let (start, count) = self.get_zone_info(i)?.range();
             if count == 0 { panic!("Zone {} has zero points!", i); } // should never hit. could just continue but i want to catch 0-len zones
 
             // Check each point to the previous point on the path
-            let mut start_point = self.get_point_info(start + count - 1).unwrap();
+            let mut start_point = self.get_point_info(start + count - 1)?;
             let mut start_id = start + count - 1;
             let mut best_start_id = start_id;
             let mut min_point_dist = f32::MAX;
@@ -53,7 +54,7 @@ impl ObjectBuffers {
             let mut path_t = 0.5;
             for j in 0..count {
                 let end_id = start + j;
-                let end_point = self.get_point_info(end_id).unwrap();
+                let end_point = self.get_point_info(end_id)?;
                 let (distance, corrected_to_curve, curve_t) = correct_to_bezier(
                     position, 
                     start_point.position(), start_point.right_handle(),
@@ -82,17 +83,17 @@ impl ObjectBuffers {
         }
 
         // Fold in corrected position
-        best.map(|(z, p)| (z, p, corrected, t))
+        Ok(best.map(|(z, p)| (z, p, corrected, t)))
     }
 
     /// Get a list of all points connected to 
     /// If include_siblings is false, it will only include the first-reached sibling
     pub fn get_connected_points(&self, point_id: u16, include_siblings: bool) -> anyhow::Result<Vec<u16>> {
         // Helper function to get the next point in the same zone in the given direction.
-        let next = |i: u16| {
-            let zone_id = self.get_point_info(i).unwrap().zone_id();
-            let (start, count) = self.get_zone_info(zone_id).unwrap().range();
-            start + (i - start + 1) % count
+        let next = |i: u16| -> anyhow::Result<u16> {
+            let zone_id = self.get_point_info(i)?.zone_id();
+            let (start, count) = self.get_zone_info(zone_id)?.range();
+            Ok(start + (i - start + 1) % count)
         };
 
         // Run breadth-first search
@@ -119,14 +120,14 @@ impl ObjectBuffers {
             }
 
             // Enqueue next node
-            queue.push_back(next(point_id));
+            queue.push_back(next(point_id)?);
         }
 
         // Return the final list of connected nodes
         Ok(connected)
     }
 
-    pub fn get_points_in_rect(&self, min: Vec2, max: Vec2) -> Vec<u16> {
+    pub fn get_points_in_rect(&self, min: Vec2, max: Vec2) -> anyhow::Result<Vec<u16>> {
         // Correct the rectangle
         let (min, max) = {
             let x_min = min.x.min(max.x);
@@ -139,12 +140,12 @@ impl ObjectBuffers {
         // Find all points within the rectangle
         let mut points = vec![];
         for point_id in 0..self.point_count() {
-            let pos = self.get_point_info(point_id).unwrap().position();
+            let pos = self.get_point_info(point_id)?.position();
             if pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y {
                 points.push(point_id);
             }
         }
-        points
+        Ok(points)
     }
 }
 
@@ -282,8 +283,8 @@ mod tests {
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
-        assert_eq!(objects.get_closest_point(None, Vec2::new(11.0, 1.0)), Some((0, 1)));
-        assert_eq!(objects.get_closest_point(None, Vec2::new(28.0, 1.0)), Some((1, 5)));
+        assert_eq!(objects.get_closest_point(None, Vec2::new(11.0, 1.0)).unwrap(), Some((0, 1)));
+        assert_eq!(objects.get_closest_point(None, Vec2::new(28.0, 1.0)).unwrap(), Some((1, 5)));
     }
 
     /// With a zone given, only its points are searched
@@ -293,20 +294,20 @@ mod tests {
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
-        assert_eq!(objects.get_closest_point(Some(0), Vec2::new(28.0, 1.0)), Some((0, 1)));
-        assert_eq!(objects.get_closest_point(Some(1), Vec2::new(0.0, 0.0)), Some((1, 4)));
+        assert_eq!(objects.get_closest_point(Some(0), Vec2::new(28.0, 1.0)).unwrap(), Some((0, 1)));
+        assert_eq!(objects.get_closest_point(Some(1), Vec2::new(0.0, 0.0)).unwrap(), Some((1, 4)));
     }
 
     /// Nothing is found if there are no points, or if the zone is missing
     #[test]
     fn closest_point_none() {
         let mut objects = ObjectBuffers::headless();
-        assert_eq!(objects.get_closest_point(None, Vec2::ZERO), None);
+        assert_eq!(objects.get_closest_point(None, Vec2::ZERO).unwrap(), None);
 
         add_square(&mut objects, 10.0);
-        assert_eq!(objects.get_closest_point(Some(5), Vec2::ZERO), None);
+        assert_eq!(objects.get_closest_point(Some(5), Vec2::ZERO).unwrap(), None);
         objects.create_zone().unwrap();
-        assert_eq!(objects.get_closest_point(Some(1), Vec2::ZERO), None);
+        assert_eq!(objects.get_closest_point(Some(1), Vec2::ZERO).unwrap(), None);
     }
 
     /// The closest path point is on the nearest edge, and starts at the right point
@@ -315,13 +316,13 @@ mod tests {
         let mut objects = ObjectBuffers::headless();
         add_square(&mut objects, 10.0);
 
-        let (zone_id, start_id, corrected, t) = objects.get_closest_path_point(Vec2::new(5.0, -1.0), 1.0).unwrap();
+        let (zone_id, start_id, corrected, t) = objects.get_closest_path_point(Vec2::new(5.0, -1.0), 1.0).unwrap().unwrap();
         assert_eq!((zone_id, start_id), (0, 0));
         assert!(corrected.distance(Vec2::new(5.0, 0.0)) < 1e-3);
         assert!((t - 0.5).abs() < 1e-3);
 
         // The closing edge starts at the last point
-        let (zone_id, start_id, corrected, t) = objects.get_closest_path_point(Vec2::new(-1.0, 2.5), 1.0).unwrap();
+        let (zone_id, start_id, corrected, t) = objects.get_closest_path_point(Vec2::new(-1.0, 2.5), 1.0).unwrap().unwrap();
         assert_eq!((zone_id, start_id), (0, 3));
         assert!(corrected.distance(Vec2::new(0.0, 2.5)) < 1e-3);
         assert!((3.0 * t * t - 2.0 * t * t * t - 0.75).abs() < 1e-2); // linear points still use the curve parameter, which eases in and out
@@ -334,7 +335,7 @@ mod tests {
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
-        let (zone_id, start_id, _, _) = objects.get_closest_path_point(Vec2::new(25.0, -1.0), 1.0).unwrap();
+        let (zone_id, start_id, _, _) = objects.get_closest_path_point(Vec2::new(25.0, -1.0), 1.0).unwrap().unwrap();
         assert_eq!((zone_id, start_id), (1, 4));
     }
 
@@ -342,7 +343,7 @@ mod tests {
     #[test]
     fn closest_path_point_none() {
         let objects = ObjectBuffers::headless();
-        assert!(objects.get_closest_path_point(Vec2::ZERO, 1.0).is_none());
+        assert!(objects.get_closest_path_point(Vec2::ZERO, 1.0).unwrap().is_none());
     }
 
     use std::collections::HashSet;
@@ -451,7 +452,7 @@ mod tests {
 
         // Check by selecting a zone across the middle
         assert_eq!(
-            objects.get_points_in_rect(Vec2::new(7.0, -3.0), Vec2::new(13.0, 23.0))
+            objects.get_points_in_rect(Vec2::new(7.0, -3.0), Vec2::new(13.0, 23.0)).unwrap()
                 .into_iter().collect::<HashSet<u16>>(),
             HashSet::from([1, 2, 4, 6, 7]),
         );

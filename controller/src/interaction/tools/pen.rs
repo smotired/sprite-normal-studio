@@ -18,7 +18,7 @@ use super::result::{ToolResult, DefaultResults, EditorToolActionResult};
 /// CTRL: when dragging a handle, snap its end to the grid instead
 /// ALT: when releasing a dragged point, make it broken. It still acts continuous while dragging, so it gets a handle on both sides.
 ///      Doesn't apply to points synced with the points we branched from or joined to.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct EditorToolPen {
     /// The zone that is being created.
     creating_zone: Option<u16>,
@@ -91,9 +91,9 @@ impl EditorTool for EditorToolPen {
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         // Assume we are dragging the handle of the currently selected point
         if let Some(point_id) = self.latest_point {
-            let point = state.objects.get_point_info(point_id).unwrap();
+            let point = state.objects.get_point_info(point_id)?;
             let point_pos = point.position();
-            let (first_point_id, _) = state.objects.get_zone_info(self.creating_zone.unwrap()).unwrap().range();
+            let (first_point_id, _) = state.objects.get_zone_info(self.creating_zone.unwrap())?.range();
             let handle = if !self.dragging_reversed { pos - point_pos } else { point_pos - pos };
 
             // Ctrl snaps the end of the handle to the grid, otherwise shift snaps its direction
@@ -117,7 +117,7 @@ impl EditorTool for EditorToolPen {
         // Alt: the point acted continuous while dragging, but should be broken from now on.
         // Only applies to points that don't sync to other points, so it doesn't spread to the points we branched from or joined to.
         if modifiers.alt && self.handle.is_some() && let Some(point_id) = self.latest_point {
-            let point = state.objects.get_point_info(point_id).unwrap();
+            let point = state.objects.get_point_info(point_id)?;
             if point.mode() == ControlPointMode::Continuous && !point.self_syncs_in(point_id, false) && !point.self_syncs_in(point_id, true) {
                 state.objects.update_point(point_id, None, Some(ControlPointMode::Broken), None, None)?;
             }
@@ -128,7 +128,7 @@ impl EditorTool for EditorToolPen {
 
         // If the path has more than one point, and some other condition is met, finalize the path creation
         if let Some(zone_id) = self.creating_zone && let Some(point_id) = self.latest_point {
-            let (start_point, point_count) = state.objects.get_zone_info(zone_id).unwrap().range();
+            let (start_point, point_count) = state.objects.get_zone_info(zone_id)?.range();
             if point_count > 1 {
                 // Finalize path if this is the first point or we are joining to another path
                 if point_id == start_point || self.joined_source {
@@ -188,7 +188,7 @@ impl EditorToolPen {
         let created_ids = state.objects.complete_branching_zone(source_id, zone_id, point_id)?;
         // If nothing was created, we have joined our original point.
         let point_id = if created_ids.is_empty() {
-            state.objects.get_zone_info(zone_id).unwrap().range().0
+            state.objects.get_zone_info(zone_id)?.range().0
         } else { created_ids[0] };
 
         self.latest_point = Some(point_id);
@@ -202,7 +202,7 @@ impl EditorToolPen {
         // Otherwise, determine which handle to drag
         else {
             let right = {
-                let point = state.objects.get_point_info(point_id).unwrap();
+                let point = state.objects.get_point_info(point_id)?;
                 point.self_syncs_in(point_id, false)
             };
 
@@ -222,13 +222,13 @@ impl EditorToolPen {
         if let Some(zone_id) = self.creating_zone {
 
             // If we clicked a point, see if we should end the path.
-            if let Some((other_zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos) {
+            if let Some((other_zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos)? {
 
                 // If it's the same zone, only do anything if we clicked the first point
                 if other_zone_id == zone_id {
-                    let (first_point, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+                    let (first_point, count) = state.objects.get_zone_info(zone_id)?.range();
                     if point_id == first_point && count > 1 {
-                        let point = state.objects.get_point_info(point_id).unwrap();
+                        let point = state.objects.get_point_info(point_id)?;
                         self.latest_point = Some(point_id);
                         self.zone_points.push(point_id);
 
@@ -268,7 +268,7 @@ impl EditorToolPen {
 
             // If we are branching and clicked another zone's path, insert a point into it and join to that
             else if let Some(source_id) = self.branch_point_id
-                && let Some((path_zone_id, start_id, _, t)) = utils::get_clicked_zone_path(&state, pos)
+                && let Some((path_zone_id, start_id, _, t)) = utils::get_clicked_zone_path(&state, pos)?
                 && path_zone_id != zone_id {
                 // Check first, so we don't insert a point we can't join to
                 if !state.objects.check_points_connected(source_id, start_id)? {
@@ -302,7 +302,7 @@ impl EditorToolPen {
         // Otherwise, we should try to create a zone by adding a linear point
         else {
             // If we clicked a point, start a path with a sibling node
-            if let Some((_, sibling_id)) = utils::get_clicked_control_point(&state, None, pos) {
+            if let Some((_, sibling_id)) = utils::get_clicked_control_point(&state, None, pos)? {
                 let (zone_id, point_id) = state.objects.create_branching_zone(sibling_id)?;
                 self.creating_zone = Some(zone_id);
                 self.latest_point = Some(point_id);
@@ -312,7 +312,7 @@ impl EditorToolPen {
             }
 
             // If we clicked a path, add a vertex to that zone
-            else if let Some((zone_id, start_id, _, t)) = utils::get_clicked_zone_path(&state, pos) {
+            else if let Some((zone_id, start_id, _, t)) = utils::get_clicked_zone_path(&state, pos)? {
                 // Add the point, which should also fix its handles
                 let inserted_id = state.objects.insert_point(zone_id, start_id, t)?[0];
 
