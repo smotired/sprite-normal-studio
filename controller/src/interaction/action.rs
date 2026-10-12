@@ -1,6 +1,6 @@
-use studio_math::{Vec2, Vec3};
+use studio_math::Vec2;
 
-use crate::{Controller, ControlPointMode, EditorToolKind};
+use crate::{Controller, EditorToolKind, SpecialAction};
 
 pub enum Axis {
     Vertical,
@@ -73,27 +73,8 @@ pub enum Action {
     /// A specific editor tool is selected.
     ToolSelected(EditorToolKind),
 
-    /// The normal vector of the selected zones is set, in the zone tool.
-    /// The bool is true if this continues a drag, so a success doesn't hide an error from earlier in the drag.
-    ZoneNormalSet(Vec3, bool),
-
-    /// The selected points are separated from their unselected siblings, in the zone or point tool.
-    SelectionSeparated,
-
-    /// The handle mode of the selected point is set, in the point tool.
-    PointModeSet(ControlPointMode),
-
-    /// The handle mode of the selected point is toggled between linear and continuous, in the point tool.
-    PointModeToggled,
-
-    /// The selected point is replaced with its next sibling, in the point tool.
-    CycleSibling,
-
-    /// A point is inserted halfway along the selected path and selected, in the point tool.
-    PathSplit,
-
-    /// The selected points are merged into one group of siblings, in the point tool.
-    PointsMerged,
+    /// An action from the UI that the selected tool handles in its own way.
+    Special(SpecialAction),
 
     /// Lighting/shading is toggled.
     /// If none, toggle both. If true, toggling lighting, otherwise toggling normal.
@@ -101,12 +82,6 @@ pub enum Action {
 }
 
 impl Controller {
-    /// The selected point in the point tool, if exactly one point is selected
-    fn single_selected_point(&self) -> Option<u16> {
-        let selection = self.tool.selection();
-        (self.selected_tool() == EditorToolKind::Point && selection.len() == 1).then(|| selection[0])
-    }
-
     /// Set the cursor position in world space.
     pub fn set_cursor_pos(&mut self, pos: Vec2) {
         self.cursor_pos = pos;
@@ -228,54 +203,8 @@ impl Controller {
                 }
             },
 
-            Action::ZoneNormalSet(normal, continuing_drag) => {
-                let zones = self.selected_zones();
-                if self.selected_tool() == EditorToolKind::Zone && !zones.is_empty() {
-                    self.run_object_action(continuing_drag, true, |objects| objects.set_zone_normals(&zones, normal));
-                }
-            },
-
-            Action::SelectionSeparated => {
-                let points = Vec::from(self.tool.selection());
-                if matches!(self.selected_tool(), EditorToolKind::Zone | EditorToolKind::Point) && !points.is_empty() {
-                    self.run_object_action(false, false, |objects| objects.separate_points(&points));
-                }
-            },
-
-            Action::PointModeSet(mode) => {
-                if let Some(point_id) = self.single_selected_point() {
-                    self.run_object_action(false, true, |objects| objects.set_point_mode(point_id, mode));
-                }
-            },
-
-            Action::PointModeToggled => {
-                if let Some(point_id) = self.single_selected_point() {
-                    // Points whose handles sync to different points don't have a mode, so this will show why it can't change
-                    let mode = match self.point_handle_mode(point_id) {
-                        Some(ControlPointMode::Linear) => ControlPointMode::Continuous,
-                        _ => ControlPointMode::Linear,
-                    };
-                    self.run_object_action(false, true, |objects| objects.set_point_mode(point_id, mode));
-                }
-            },
-
-            Action::CycleSibling => {
-                if let Some(point_id) = self.single_selected_point() {
-                    self.run_selection_action(false, |objects, _| Ok(vec![objects.get_sibling(point_id)?]));
-                }
-            },
-
-            Action::PathSplit => {
-                if self.selected_tool() == EditorToolKind::Point && let Some((zone_id, start_id)) = self.selected_path() {
-                    // Only select the inserted point, not the ones inserted into sibling paths
-                    self.run_selection_action(true, |objects, _| Ok(vec![objects.insert_point(zone_id, start_id, 0.5)?[0]]));
-                }
-            },
-
-            Action::PointsMerged => {
-                if self.selected_tool() == EditorToolKind::Point && !self.tool.selection().is_empty() {
-                    self.run_selection_action(true, |objects, selection| objects.merge_points(selection));
-                }
+            Action::Special(action) => {
+                self.run_special_action(action);
             },
 
             Action::None => { },

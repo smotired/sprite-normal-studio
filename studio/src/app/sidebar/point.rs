@@ -1,4 +1,4 @@
-use controller::{Action, ControlPointMode, Controller};
+use controller::{Action, ControlPointMode, Controller, SpecialAction};
 use eframe::egui;
 
 use super::ToolSidebar;
@@ -29,17 +29,17 @@ impl ToolSidebar for PointSidebar {
 
             let cycle = egui::Button::new("Select sibling").min_size(button_size);
             if ui.add_enabled(controller.point_has_siblings(point_id), cycle).clicked() {
-                controller.handle_action(Action::CycleSibling);
+                controller.handle_action(Action::Special(SpecialAction::CycleSibling));
             }
         } else {
             // If a path is selected, it can be split
             if path_selected && ui.add(egui::Button::new("Split path").min_size(button_size)).clicked() {
-                controller.handle_action(Action::PathSplit);
+                controller.handle_action(Action::Special(SpecialAction::PathSplit));
             }
 
             let merge = egui::Button::new("Merge").min_size(button_size);
             if ui.add_enabled(controller.can_merge_selection(), merge).clicked() {
-                controller.handle_action(Action::PointsMerged);
+                controller.handle_action(Action::Special(SpecialAction::PointsMerged));
             }
         }
 
@@ -47,7 +47,7 @@ impl ToolSidebar for PointSidebar {
         if !path_selected {
             let separate = egui::Button::new("Separate").min_size(button_size);
             if ui.add_enabled(controller.can_separate_selection(), separate).clicked() {
-                controller.handle_action(Action::SelectionSeparated);
+                controller.handle_action(Action::Special(SpecialAction::SelectionSeparated));
             }
         }
     }
@@ -70,7 +70,7 @@ fn show_handle_mode(ui: &mut egui::Ui, controller: &mut Controller, point_id: u1
             ] {
                 let button = egui::Button::selectable(shown_mode == option, label).corner_radius(0);
                 if ui.add_sized(size, button).clicked() && shown_mode != option {
-                    controller.handle_action(Action::PointModeSet(option));
+                    controller.handle_action(Action::Special(SpecialAction::PointModeSet(option)));
                 }
             }
         });

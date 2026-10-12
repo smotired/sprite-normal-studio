@@ -1,4 +1,4 @@
-use controller::{Axis, Action, InputModifiers};
+use controller::{Axis, Action, InputModifiers, SpecialAction};
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
 use studio_math::Vec2;
 
@@ -157,28 +157,42 @@ impl StudioApp {
                         // Point the selected zones straight out
                         Key::Z => {
                             if pressed && !repeat && modifiers.shift && !modifiers.ctrl {
-                                Action::ZoneNormalSet(studio_math::Vec3::FORWARD, false)
+                                Action::Special(SpecialAction::NormalSet(studio_math::Vec3::FORWARD, false))
                             } else { Action::None }
                         },
 
                         // Toggle the selected point between linear and continuous
                         Key::B => {
                             if pressed && !repeat && modifiers.ctrl {
-                                Action::PointModeToggled
+                                Action::Special(SpecialAction::PointModeToggled)
                             } else { Action::None }
                         },
 
                         // Merge the selected points
                         Key::M => {
                             if pressed && !repeat && modifiers.ctrl {
-                                Action::PointsMerged
+                                Action::Special(SpecialAction::PointsMerged)
+                            } else { Action::None }
+                        },
+
+                        // Toggle if branching zones in the pen tool inherit their normal
+                        Key::I => {
+                            if pressed && !repeat {
+                                Action::Special(SpecialAction::ToggleInherit)
+                            } else { Action::None }
+                        },
+
+                        // Toggle if the pen tool stays active after finishing a zone
+                        Key::C => {
+                            if pressed && !repeat && !modifiers.any() {
+                                Action::Special(SpecialAction::ToggleStayActive)
                             } else { Action::None }
                         },
 
                         // Separate the selected zones or points from their siblings
                         Key::K => {
                             if pressed && !repeat && modifiers.ctrl {
-                                Action::SelectionSeparated
+                                Action::Special(SpecialAction::SelectionSeparated)
                             } else { Action::None }
                         },
 

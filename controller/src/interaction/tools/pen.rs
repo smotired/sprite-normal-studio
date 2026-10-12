@@ -1,9 +1,9 @@
-use studio_math::Vec2;
+use studio_math::{Vec2, Vec3};
 
 use crate::InputModifiers;
 use crate::objects::ControlPointMode;
 
-use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
+use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, SpecialAction, SpecialQuery, SpecialValue, utils};
 use super::result::{ToolResult, DefaultResults, EditorToolActionResult};
 
 /// The Pen tool allows creating a new zone by dragging out a bezier path.
@@ -18,7 +18,8 @@ use super::result::{ToolResult, DefaultResults, EditorToolActionResult};
 /// CTRL: when dragging a handle, snap its end to the grid instead
 /// ALT: when releasing a dragged point, make it broken. It still acts continuous while dragging, so it gets a handle on both sides.
 ///      Doesn't apply to points synced with the points we branched from or joined to.
-#[derive(Default, Clone)]
+/// ALT: when clicking a point or path, copy its zone's normal as the normal for new zones, and for the zone being drawn.
+#[derive(Clone)]
 pub struct EditorToolPen {
     /// The zone that is being created.
     creating_zone: Option<u16>,
@@ -40,13 +41,20 @@ pub struct EditorToolPen {
 
     /// If dragging a point sets the handle to the opposite position. Only used when rejoining to a broken path.
     dragging_reversed: bool,
+
+    /// The normal vector that new zones get.
+    normal: Vec3,
+
+    /// If zones that branch off of another zone start with that zone's normal, instead of the normal for new zones.
+    inherit_normal: bool,
+
+    /// If the pen stays active after finishing a zone, instead of selecting the zone in the zone tool.
+    stay_active: bool,
 }
 
-impl EditorTool for EditorToolPen {
-    fn init() -> Box<Self> where Self : Sized { Box::default() }
-
-    fn select(_selection: SelectionType, _state: ControllerStateInput) -> Box<Self> where Self : Sized {
-        Box::new(Self {
+impl Default for EditorToolPen {
+    fn default() -> Self {
+        Self {
             creating_zone: None,
             latest_point: None,
             zone_points: vec![],
@@ -54,8 +62,17 @@ impl EditorTool for EditorToolPen {
             branch_point_id: None,
             joined_source: false,
             dragging_reversed: false,
-        })
+            normal: Vec3::FORWARD,
+            inherit_normal: true,
+            stay_active: false,
+        }
     }
+}
+
+impl EditorTool for EditorToolPen {
+    fn init() -> Box<Self> where Self : Sized { Box::default() }
+
+    fn select(_selection: SelectionType, _state: ControllerStateInput) -> Box<Self> where Self : Sized { Box::default() }
 
     fn deselect(&mut self, mut state: ControllerStateInput) -> SelectionType<'_> {
         // If we are creating a zone, delete the whole zone.
@@ -79,7 +96,20 @@ impl EditorTool for EditorToolPen {
 
     fn selection(&self) -> SelectionType<'_> { &self.zone_points[..] }
 
-    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
+    fn handle_click(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
+        // Alt: copy the normal of the clicked zone instead of adding a point
+        if modifiers.alt {
+            let zone_id = match utils::get_clicked_control_point(&state, None, pos)? {
+                Some((zone_id, _)) => Some(zone_id),
+                None => utils::get_clicked_zone_path(&state, pos)?.map(|(zone_id, ..)| zone_id),
+            };
+            if let Some(zone_id) = zone_id {
+                let normal = state.objects.get_zone_info(zone_id)?.normal();
+                return self.set_normal(&mut state, normal);
+            }
+            return self.ok();
+        }
+
         self.handle_create_point(state, pos, false, modifiers)
     }
 
@@ -168,13 +198,69 @@ impl EditorTool for EditorToolPen {
         }
         self.ok()
     }
+
+    fn handle_special_action(&mut self, mut state: ControllerStateInput, action: SpecialAction) -> ToolResult {
+        match action {
+            SpecialAction::NormalSet(normal, _) => self.set_normal(&mut state, normal),
+            SpecialAction::ToggleInherit => {
+                self.inherit_normal = !self.inherit_normal;
+                self.ok()
+            },
+            SpecialAction::ToggleStayActive => {
+                self.stay_active = !self.stay_active;
+                self.ok()
+            },
+            _ => self.ok(),
+        }
+    }
+
+    fn handle_special_query(&self, query: SpecialQuery) -> Option<SpecialValue> {
+        match query {
+            SpecialQuery::Normal => Some(SpecialValue::Normal(self.normal)),
+            SpecialQuery::InheritNormal => Some(SpecialValue::Flag(self.inherit_normal)),
+            SpecialQuery::StayActive => Some(SpecialValue::Flag(self.stay_active)),
+        }
+    }
 }
 
 impl EditorToolPen {
     /// Return a result for when the path is complete and we should move to another zone.
+    /// If the pen stays active, get ready to create another zone instead.
     fn path_complete(&mut self) -> ToolResult {
         self.creating_zone = None; // finished, so deselecting must not delete it
+        if self.stay_active {
+            self.latest_point = None;
+            self.zone_points.clear();
+            self.handle = None;
+            self.branch_point_id = None;
+            self.joined_source = false;
+            self.dragging_reversed = false;
+            return Ok(EditorToolActionResult::new(EditorToolKind::Pen, true));
+        }
         Ok(EditorToolActionResult::new(EditorToolKind::Zone, true))
+    }
+
+    /// Set the normal for new zones, and for the zone being drawn if there is one.
+    fn set_normal(&mut self, state: &mut ControllerStateInput, normal: Vec3) -> ToolResult {
+        self.normal = normal;
+        if let Some(zone_id) = self.creating_zone {
+            state.objects.set_zone_normals(&[zone_id], normal)?;
+            return self.stale();
+        }
+        self.ok()
+    }
+
+    /// Set the normal of a zone we just started creating.
+    /// Zones branching off of a point in another zone get that zone's normal if inheriting it, and everything else gets the normal for new zones.
+    fn set_new_zone_normal(&self, state: &mut ControllerStateInput, zone_id: u16, parent_point_id: Option<u16>) -> anyhow::Result<()> {
+        let normal = match parent_point_id {
+            Some(point_id) if self.inherit_normal => {
+                let parent_zone_id = state.objects.get_point_info(point_id)?.zone_id();
+                state.objects.get_zone_info(parent_zone_id)?.normal()
+            },
+            _ => self.normal,
+        };
+        state.objects.set_zone_normals(&[zone_id], normal)
     }
     /// Return a result for when the path is joined to another path, and we should select it
     fn path_joined(&mut self) -> ToolResult {
@@ -304,6 +390,7 @@ impl EditorToolPen {
             // If we clicked a point, start a path with a sibling node
             if let Some((_, sibling_id)) = utils::get_clicked_control_point(&state, None, pos)? {
                 let (zone_id, point_id) = state.objects.create_branching_zone(sibling_id)?;
+                self.set_new_zone_normal(&mut state, zone_id, Some(sibling_id))?;
                 self.creating_zone = Some(zone_id);
                 self.latest_point = Some(point_id);
                 self.zone_points.push(point_id);
@@ -319,6 +406,7 @@ impl EditorToolPen {
                 // If dragging, start a path branching off of the inserted point
                 if dragging {
                     let (zone_id, point_id) = state.objects.create_branching_zone(inserted_id)?;
+                    self.set_new_zone_normal(&mut state, zone_id, Some(inserted_id))?;
                     self.creating_zone = Some(zone_id);
                     self.latest_point = Some(point_id);
                     self.zone_points.push(point_id);
@@ -338,6 +426,7 @@ impl EditorToolPen {
             // Otherwise start creating a new path.
             else {
                 let zone_id = state.objects.create_zone()?;
+                self.set_new_zone_normal(&mut state, zone_id, None)?;
                 self.creating_zone = Some(zone_id);
                 let point_id = state.objects.create_point(zone_id, new_point_pos)?;
                 self.latest_point = Some(point_id);
@@ -806,5 +895,143 @@ mod tests {
         assert_eq!(shift_id_after_insert(3, &[3]), 4);
         assert_eq!(shift_id_after_insert(3, &[9, 1]), 4);
         assert_eq!(shift_id_after_insert(3, &[4, 2]), 5); // 3 -> 4 after inserting 2, then 4 -> 5 after inserting 4
+    }
+
+    /// Make a square at (0, 0) with a size of 10, whose zone has an upward normal
+    fn up_square() -> ObjectBuffers {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.set_zone_normals(&[0], Vec3::UP).unwrap();
+        objects
+    }
+
+    /// New zones get the normal for new zones
+    #[test]
+    fn new_zone_gets_pen_normal() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.normal = Vec3::RIGHT;
+
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+        assert_eq!(objects.get_zone_info(0).unwrap().normal(), Vec3::RIGHT);
+    }
+
+    /// Zones branching off of another zone start with that zone's normal by default
+    #[test]
+    fn branch_inherits_parent_normal() {
+        let objects = up_square();
+        let mut tool = EditorToolPen::init();
+        tool.normal = Vec3::RIGHT;
+
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
+        assert_eq!(objects.zone_count(), 2);
+        assert_eq!(objects.get_zone_info(1).unwrap().normal(), Vec3::UP);
+    }
+
+    /// Zones branching off of another zone get the normal for new zones if not inheriting
+    #[test]
+    fn branch_uses_pen_normal_without_inherit() {
+        let objects = up_square();
+        let mut tool = EditorToolPen::init();
+        tool.normal = Vec3::RIGHT;
+        tool.inherit_normal = false;
+
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
+        assert_eq!(objects.get_zone_info(1).unwrap().normal(), Vec3::RIGHT);
+    }
+
+    /// Setting the normal also sets it for the zone being drawn, even one that inherited its parent's normal
+    #[test]
+    fn normal_set_updates_drawing_zone() {
+        let objects = up_square();
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::NormalSet(Vec3::LEFT, false)).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(tool.normal, Vec3::LEFT);
+        assert_eq!(objects.get_zone_info(1).unwrap().normal(), Vec3::LEFT);
+        assert_eq!(objects.get_zone_info(0).unwrap().normal(), Vec3::UP);
+    }
+
+    /// Alt clicking a point copies its zone's normal, without adding anything
+    #[test]
+    fn alt_click_point_copies_normal() {
+        let objects = up_square();
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), IM::alt()).unwrap();
+        assert_eq!(tool.normal, Vec3::UP);
+        assert_eq!(objects.object_counts(), (1, 4));
+        assert_eq!(tool.creating_path(), None);
+    }
+
+    /// Alt clicking a path copies its zone's normal
+    #[test]
+    fn alt_click_path_copies_normal() {
+        let objects = up_square();
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_click(state(&objects), Vec2::new(5.0, 0.0), IM::alt()).unwrap();
+        assert_eq!(tool.normal, Vec3::UP);
+        assert_eq!(objects.object_counts(), (1, 4));
+    }
+
+    /// Alt clicking empty space does nothing
+    #[test]
+    fn alt_click_empty_does_nothing() {
+        let objects = up_square();
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_click(state(&objects), Vec2::new(100.0, 100.0), IM::alt()).unwrap();
+        assert_eq!(tool.normal, Vec3::FORWARD);
+        assert_eq!(objects.object_counts(), (1, 4));
+    }
+
+    /// Alt clicking also sets the normal of the zone being drawn
+    #[test]
+    fn alt_click_updates_drawing_zone() {
+        let objects = up_square();
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(150.0, 100.0), Default::default()).unwrap();
+
+        let result = tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), IM::alt()).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_zone_info(1).unwrap().normal(), Vec3::UP);
+        assert_eq!(objects.object_counts(), (2, 6));
+    }
+
+    /// If the pen stays active, finishing a zone keeps the pen tool and gets ready for the next zone
+    #[test]
+    fn stay_active_keeps_tool() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.stay_active = true;
+        start_triangle(&mut tool, &objects);
+
+        let result = tool.handle_click(state(&objects), Vec2::new(1.0, 1.0), Default::default()).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Pen);
+        assert_eq!(tool.creating_path(), None);
+        assert!(tool.selection().is_empty());
+
+        // The finished zone is kept, and clicking starts another one
+        tool.handle_click(state(&objects), Vec2::new(200.0, 200.0), Default::default()).unwrap();
+        assert_eq!(objects.object_counts(), (2, 4));
+    }
+
+    /// The flags can be toggled, and the UI can ask about them and the normal
+    #[test]
+    fn toggles_and_queries() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        assert_eq!(tool.handle_special_query(SpecialQuery::Normal), Some(SpecialValue::Normal(Vec3::FORWARD)));
+        assert_eq!(tool.handle_special_query(SpecialQuery::InheritNormal), Some(SpecialValue::Flag(true)));
+        assert_eq!(tool.handle_special_query(SpecialQuery::StayActive), Some(SpecialValue::Flag(false)));
+
+        tool.handle_special_action(state(&objects), SpecialAction::ToggleInherit).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::ToggleStayActive).unwrap();
+        assert_eq!(tool.handle_special_query(SpecialQuery::InheritNormal), Some(SpecialValue::Flag(false)));
+        assert_eq!(tool.handle_special_query(SpecialQuery::StayActive), Some(SpecialValue::Flag(true)));
     }
 }
