@@ -40,16 +40,16 @@ impl ObjectBuffers {
         // Get the ID of the very first point
         let first_id = {
             let zone_id = *zone_ids.iter().min().unwrap();
-            self.get_zone_info(zone_id).unwrap().range().0
+            self.get_zone_info(zone_id)?.range().0
         };
 
         // Determine how much to move it
-        let delta = first_point_position - self.get_point_info(first_id).unwrap().position();
+        let delta = first_point_position - self.get_point_info(first_id)?.position();
 
         // Get all point IDs in all zones
         let mut point_ids = vec![];
         for &zone_id in zone_ids {
-            let (start, count) = self.get_zone_info(zone_id).unwrap().range();
+            let (start, count) = self.get_zone_info(zone_id)?.range();
             point_ids.extend(start..start+count);
         }
         self.move_points(&point_ids[..], delta)
@@ -81,9 +81,9 @@ impl ObjectBuffers {
     /// Remove a control point from the points list.
     /// Returns true if the path was deleted.
     fn delete_point_with_threshold(&mut self, point_id: u16, threshold: u16) -> anyhow::Result<bool> {
-        let point = self.get_point_info(point_id).unwrap();
+        let point = self.get_point_info(point_id)?;
         let zone_id = point.zone_id();
-        let (_, count) = self.get_zone_info(zone_id).unwrap().range();
+        let (_, count) = self.get_zone_info(zone_id)?.range();
 
         // If there are two or fewer points, delete the whole zone instead, as that's the minimum requirement for a path.
         if count.max(1) <= threshold { self.delete_zone(zone_id)?; return Ok(true); }
@@ -114,7 +114,7 @@ impl ObjectBuffers {
 
     /// Remove a whole zone and all its points.
     pub fn delete_zone(&mut self, zone_id: u16) -> anyhow::Result<()> {
-        let (start, count) = self.get_zone_info(zone_id).unwrap().range();
+        let (start, count) = self.get_zone_info(zone_id)?.range();
         
         // Remove points backwards to preserve indices
         for i in 0..count {

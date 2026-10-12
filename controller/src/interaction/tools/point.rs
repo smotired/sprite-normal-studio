@@ -30,7 +30,7 @@ use super::result::{ToolResult, DefaultResults};
 /// Dragging a selection box:
 /// Uses the same selection rules as above, applied against the selection from before the drag started.
 /// The result is tentative until the drag is released, and can be cancelled.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct EditorToolPoint {
     /// The points that are selected.
     selected_points: Vec<u16>,
@@ -90,7 +90,7 @@ impl EditorTool for EditorToolPoint {
 
     fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         // Reselect unless we clicked the current control point's handle
-        if let Some(point_id) = self.single_selected_point() && utils::get_clicked_handle(point_id, &state, pos).is_some() {
+        if let Some(point_id) = self.single_selected_point() && utils::get_clicked_handle(point_id, &state, pos)?.is_some() {
             return self.ok();
         }
         (self.selected_points, _) = self.get_updated_selection(&state, pos, false, modifiers)?;
@@ -99,8 +99,8 @@ impl EditorTool for EditorToolPoint {
 
     fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         // If we select a handle of the control point start dragging it
-        if let Some(point_id) = self.single_selected_point() && let Some(right) = utils::get_clicked_handle(point_id, &state, pos) {
-            let point = state.objects.get_point_info(point_id).unwrap();
+        if let Some(point_id) = self.single_selected_point() && let Some(right) = utils::get_clicked_handle(point_id, &state, pos)? {
+            let point = state.objects.get_point_info(point_id)?;
             self.handle = Some(right);
             self.handle_start = Some((point.left_handle() - point.position(), point.right_handle() - point.position()));
             return self.ok();
@@ -108,7 +108,7 @@ impl EditorTool for EditorToolPoint {
 
         // If we grabbed something that's already selected, drag the selection as is.
         // Otherwise update the selection first.
-        let anchor_id = match self.grabbed_selected(&state, pos) {
+        let anchor_id = match self.grabbed_selected(&state, pos)? {
             Some(anchor_id) => Some(anchor_id),
             None => {
                 let (new_selection, anchor_id) = self.get_updated_selection(&state, pos, true, modifiers)?;
@@ -120,7 +120,7 @@ impl EditorTool for EditorToolPoint {
         // Start dragging the selected points
         if let Some(anchor_id) = anchor_id {
             self.drag_origin = Some(pos);
-            self.drag_anchor = Some(state.objects.get_point_info(anchor_id).unwrap().position());
+            self.drag_anchor = Some(state.objects.get_point_info(anchor_id)?.position());
             self.drag_offset = Vec2::ZERO;
         }
 
@@ -137,7 +137,7 @@ impl EditorTool for EditorToolPoint {
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         // If we are dragging the handle of a single point, adjust that
         if let Some(point_id) = self.single_selected_point() && let Some(right) = self.handle {
-            let point = state.objects.get_point_info(point_id).unwrap();
+            let point = state.objects.get_point_info(point_id)?;
             let current = if right { point.right_handle() } else { point.left_handle() } - point.position();
             let handle = Some(utils::enforce_handle_length(pos - point.position(), current));
             let (lh, rh) = if right { (None, handle) } else { (handle, None) };
@@ -158,7 +158,7 @@ impl EditorTool for EditorToolPoint {
         // Or if we are dragging a selection box, tentatively select the points in the box
         else if let Some(selection_origin) = self.selection_origin {
             self.selection_box_end = Some(pos);
-            let boxed_points = state.objects.get_points_in_rect(selection_origin, pos);
+            let boxed_points = state.objects.get_points_in_rect(selection_origin, pos)?;
             self.set_tentative_selection(&boxed_points[..], &state, modifiers)?;
         }
         self.ok()
@@ -220,8 +220,8 @@ impl EditorTool for EditorToolPoint {
             for &point_id in point_ids.iter().rev() {
                 if let Some((start, end)) = deleted_zone_range && point_id >= start && point_id < end { continue; }
 
-                let zone_id = state.objects.get_point_info(point_id).unwrap().zone_id();
-                let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+                let zone_id = state.objects.get_point_info(point_id)?.zone_id();
+                let (start, count) = state.objects.get_zone_info(zone_id)?.range();
                 let point_count = state.objects.point_count();
                 state.objects.delete_point(point_id)?;
                 if point_count - state.objects.point_count() > 1 {
@@ -243,11 +243,12 @@ impl EditorToolPoint {
     }
 
     /// The selected zone, if all selected points are in the same zone.
-    fn single_selected_zone(&self, state: &ControllerStateInput) -> Option<u16> {
-        let mut zones = self.selected_points.iter()
-            .map(|&point_id| state.objects.get_point_info(point_id).unwrap().zone_id());
-        let first = zones.next()?;
-        if zones.all(|zone_id| zone_id == first) { Some(first) } else { None }
+    fn single_selected_zone(&self, state: &ControllerStateInput) -> anyhow::Result<Option<u16>> {
+        let zones = self.selected_points.iter()
+            .map(|&point_id| Ok(state.objects.get_point_info(point_id)?.zone_id()))
+            .collect::<anyhow::Result<Vec<u16>>>()?;
+        let Some(&first) = zones.first() else { return Ok(None); };
+        Ok(if zones.iter().all(|&zone_id| zone_id == first) { Some(first) } else { None })
     }
 
     /// Clear everything about an in-progress drag, other than the selection
@@ -268,7 +269,7 @@ impl EditorToolPoint {
     /// If this is a click without any modifier keys on a point, it gives a single instance of the point, cycling through its siblings.
     fn clicked_unit(&self, state: &ControllerStateInput, pos: Vec2, modifiers: InputModifiers, dragging: bool) -> anyhow::Result<Option<(Vec<u16>, u16)>> {
         // Check the point
-        if let Some((_, point_id)) = utils::get_clicked_control_point(state, None, pos) {
+        if let Some((_, point_id)) = utils::get_clicked_control_point(state, None, pos)? {
             if modifiers.ctrl {
                 return Ok(Some((state.objects.get_connected_points(point_id, true)?, point_id)));
             }
@@ -280,7 +281,7 @@ impl EditorToolPoint {
             let selected_point = self.single_selected_point();
             let point_id =
                 // If the clicked point has a sibling in the selected zone, select it.
-                if let Some(selected_zone_id) = self.single_selected_zone(state) && let Some(sibling_id) = state.objects.sibling_in_zone(point_id, selected_zone_id) {
+                if let Some(selected_zone_id) = self.single_selected_zone(state)? && let Some(sibling_id) = state.objects.sibling_in_zone(point_id, selected_zone_id) {
                     // If the clicked point's sibling in the selected zone IS our selected point (i.e. we clicked our selected point), select its sibling.
                     if selected_point == Some(sibling_id) { state.objects.get_sibling(sibling_id)? }
 
@@ -294,11 +295,11 @@ impl EditorToolPoint {
         }
 
         // Check the path
-        if let Some((zone_id, start_id, _, _)) = utils::get_clicked_zone_path(state, pos) {
+        if let Some((zone_id, start_id, _, _)) = utils::get_clicked_zone_path(state, pos)? {
             if modifiers.ctrl {
                 return Ok(Some((state.objects.get_connected_points(start_id, true)?, start_id)));
             }
-            let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+            let (start, count) = state.objects.get_zone_info(zone_id)?.range();
             let end_id = start + (start_id - start + 1) % count;
             return Ok(Some((with_siblings(&[start_id, end_id], state), start_id)));
         }
@@ -309,20 +310,20 @@ impl EditorToolPoint {
 
     /// If the point or path at a position is already selected, get the ID of the grabbed point.
     /// A point counts as selected if any of its siblings are, and a path counts as selected if the points at both ends are.
-    fn grabbed_selected(&self, state: &ControllerStateInput, pos: Vec2) -> Option<u16> {
+    fn grabbed_selected(&self, state: &ControllerStateInput, pos: Vec2) -> anyhow::Result<Option<u16>> {
         let is_selected = |point_id: u16| {
             self.selected_points.contains(&point_id)
                 || state.objects.get_siblings(point_id).iter().any(|sibling_id| self.selected_points.contains(sibling_id))
         };
 
-        if let Some((_, point_id)) = utils::get_clicked_control_point(state, None, pos) {
-            if is_selected(point_id) { Some(point_id) } else { None }
-        } else if let Some((zone_id, start_id, _, _)) = utils::get_clicked_zone_path(state, pos) {
-            let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
+        if let Some((_, point_id)) = utils::get_clicked_control_point(state, None, pos)? {
+            Ok(if is_selected(point_id) { Some(point_id) } else { None })
+        } else if let Some((zone_id, start_id, _, _)) = utils::get_clicked_zone_path(state, pos)? {
+            let (start, count) = state.objects.get_zone_info(zone_id)?.range();
             let end_id = start + (start_id - start + 1) % count;
-            if is_selected(start_id) && is_selected(end_id) { Some(start_id) } else { None }
+            Ok(if is_selected(start_id) && is_selected(end_id) { Some(start_id) } else { None })
         } else {
-            None
+            Ok(None)
         }
     }
 

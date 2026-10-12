@@ -33,14 +33,14 @@ impl ObjectBuffers {
         if sibling_id >= point_count { anyhow::bail!("Sibling point {} does not exist!", sibling_id); }
         if source_point_id >= point_count { anyhow::bail!("Source point {} does not exist!", source_point_id); }
         if creating_zone_id >= zone_count { anyhow::bail!("Current zone {} does not exist!", creating_zone_id); }
-        let source_zone_id = self.get_point_info(source_point_id).unwrap().zone_id();
+        let source_zone_id = self.get_point_info(source_point_id)?.zone_id();
 
         // When start = end, convert first point to a free node with a broken handle instead and don't add any other points.
         // This also means we don't have to flip
         let same_zone_id = ControlPoint::find_in_zone(sibling_id, source_zone_id, &self.points.borrow().items, &self.point_siblings.borrow().items)?;
         if let Some(sibling_id) = same_zone_id
             && source_point_id == sibling_id {
-                let (first_id, _) = self.get_zone_info(creating_zone_id).unwrap().range();
+                let (first_id, _) = self.get_zone_info(creating_zone_id)?.range();
                 self.points.borrow_mut().items[first_id as usize].force_free(first_id);
                 return Ok(vec![]);
             }
@@ -73,7 +73,7 @@ impl ObjectBuffers {
 
         // Ensure the start and end of the path point to the right places
         {
-            let (start, count) = self.get_zone_info(creating_zone_id).unwrap().range();
+            let (start, count) = self.get_zone_info(creating_zone_id)?.range();
             let points = &mut self.points.borrow_mut().items;
 
             let first_seg = exterior_path.first().unwrap();

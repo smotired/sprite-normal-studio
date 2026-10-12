@@ -30,7 +30,7 @@ impl ControlPoint {
             // Continue traversal
             id = siblings[id as usize];
         }
-        anyhow::bail!("Infinite loop in traverse_siblings around {}.", id);
+        anyhow::bail!("Siblings of point {} loop forever! The siblings list is broken.", id);
     }
 
     /// Run a function across all siblings until we make it back to the start sibling, which may change the control points (but not the siblings list)
@@ -60,7 +60,7 @@ impl ControlPoint {
             // Continue traversal
             id = siblings[id as usize];
         }
-        anyhow::bail!("Infinite loop in traverse_siblings around {}.", id);
+        anyhow::bail!("Siblings of point {} loop forever! The siblings list is broken.", id);
     }
 
     /// Get a list of IDs of points that are siblings with a given point.
@@ -142,7 +142,7 @@ impl ControlPoint {
             id = if right { point.right_sync_id } else { point.left_sync_id };
             if sync_mode.is_flipped() { right = !right; }
         }
-        anyhow::bail!("Infinite loop in get_sync_id around {}.", id);
+        anyhow::bail!("Handle syncing loops forever around point {}!", id);
     }
 }
 
