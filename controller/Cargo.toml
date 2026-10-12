@@ -11,3 +11,7 @@ studio_math = { workspace = true }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1.0.151"

@@ -2,6 +2,7 @@ mod generator;
 mod interaction;
 mod objects;
 mod assignment;
+mod save;
 
 use studio_math::Vec2;
 use studio_math::bounds::{bounds_clamp, bounds_correct};
@@ -15,7 +16,8 @@ use crate::interaction::tools::{EditorTool, EditorToolZone};
 use crate::interaction::history::History;
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorChange, SpecialAction, SpecialQuery, SpecialValue};
-pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds};
+pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects};
+pub use crate::save::{SavedScene, SavedLight};
 use crate::objects::merge_bounds;
 
 /// The Controller manages our actual working pipeline.

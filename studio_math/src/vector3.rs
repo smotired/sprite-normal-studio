@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::ops;
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq, Default, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, PartialEq, Default, bytemuck::Pod, bytemuck::Zeroable, serde::Serialize, serde::Deserialize)]
 pub struct Vec3 { pub x: f32, pub y: f32, pub z: f32 }
 
 /// Basic vector2 struct

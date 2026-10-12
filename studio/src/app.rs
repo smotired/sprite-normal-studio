@@ -1,9 +1,13 @@
 mod file;
 mod editor;
 mod input;
+mod menu;
 mod sidebar;
 mod status;
 mod toolbar;
+mod workspace;
+
+use std::path::PathBuf;
 
 use controller::Controller;
 use eframe::egui;
@@ -18,6 +22,9 @@ pub struct StudioApp {
     sprite_path: SpriteFileSelection,
     /// Path to the current normal map file which is not modified
     normal_path: SpriteFileSelection,
+
+    /// Path to the workspace file that was last opened or saved
+    workspace_path: Option<PathBuf>,
 
     /// Controller object
     controller: Controller,
@@ -48,6 +55,7 @@ impl StudioApp {
         Self {
             sprite_path: SpriteFileSelection::new("spritesheet".to_owned(), &render_state, None),
             normal_path: SpriteFileSelection::new("normal_map".to_owned(), &render_state, None),
+            workspace_path: None,
             controller,
             renderer,
             render_state,
@@ -66,7 +74,9 @@ impl StudioApp {
 /// Root app UI
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Side panels must be shown before the central panel, left to right, then the status bar below the workspace
+        // The menu bar spans the whole window, then side panels must be shown before the central panel,
+        // left to right, then the status bar below the workspace
+        let menu_command = self.show_menu_bar(ui);
         self.show_sidebar(ui);
         let toolbar_response = self.show_toolbar(ui);
         let status_response = self.show_status_bar(ui);
@@ -79,8 +89,12 @@ impl eframe::App for StudioApp {
         );
 
         // Handle app-level input events, unless the error dialog is open and should get them instead (i.e. escape to close it)
+        let mut workspace_command = menu_command;
         if !self.show_error_dialog {
-            self.process_app_input(ui, viewport_rect);
+            workspace_command = workspace_command.or(self.process_app_input(ui, viewport_rect));
+        }
+        if let Some(command) = workspace_command {
+            self.run_workspace_command(&ui.ctx().clone(), command);
         }
 
         // Call the controller's update method to regenerate any textures as needed

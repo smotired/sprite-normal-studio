@@ -81,7 +81,7 @@ impl StudioApp {
                     generate_normal_map_filename(path.as_path()),
                     &self.render_state,
                     size,
-                    [128, 128, 255, 255],
+                    file::loader::FLAT_NORMAL_COLOR,
                 );
 
                 must_update_textures = true;
