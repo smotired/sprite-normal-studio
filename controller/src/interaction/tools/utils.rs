@@ -12,6 +12,21 @@ const GRID_SIZE: u32 = 1;
 /// tan(22.5 degrees), the slope that splits orthagonal from diagonal when snapping directions.
 const TAN_HALF_OCTANT: f32 = 0.414_213_56;
 
+/// Minimum length in world space of a handle set by the user.
+/// Zero-length handles are reserved for linear points and sibling joins.
+const MIN_HANDLE_LENGTH: f32 = 2.0;
+
+/// Make sure a handle (relative to its point) set by the user is at least MIN_HANDLE_LENGTH long, by pushing it out along its own direction.
+/// If it has no direction it is pushed out along `fallback` instead, or to the right if that has no direction either.
+pub fn enforce_handle_length(handle: Vec2, fallback: Vec2) -> Vec2 {
+    if handle.magnitude() >= MIN_HANDLE_LENGTH { return handle; }
+    let direction = [handle, fallback, Vec2::hz(1.0)].into_iter()
+        .map(Vec2::normalized)
+        .find(|&direction| direction != Vec2::ZERO)
+        .unwrap();
+    direction * MIN_HANDLE_LENGTH
+}
+
 /// Apply the drag modifiers to the target position of whatever is being dragged.
 /// `start` is where the target was when the drag began, and `origin` is where the mouse was.
 /// SHIFT: snap movement to horizontal, vertical, or diagonal, whichever is closest to the direction moved
@@ -84,17 +99,18 @@ pub fn get_clicked_control_point(state: &ControllerStateInput, zone_id: Option<u
 
 /// Get the handle that was clicked for the selected control point, if applicable.
 /// Returns true if the right handle was clicked, and None if no handle was clicked.
+/// Zero-length handles are on top of the point itself, so they can't be clicked and the point is clicked instead.
 pub fn get_clicked_handle(point_id: u16, state: &ControllerStateInput, pos: Vec2) -> Option<bool> {
     let point = state.objects.get_point_info(point_id).unwrap();
     if let ControlPointMode::Linear = point.mode() { return None; }
 
     // Check the left handle
-    if point.left_handle().distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
+    if point.left_handle() != point.position() && point.left_handle().distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
         return Some(false); // left handle clicked
     }
 
     // Check the right handle
-    if point.right_handle().distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
+    if point.right_handle() != point.position() && point.right_handle().distance(pos) <= CLICK_TOLERANCE * state.camera_inv_scale {
         return Some(true); // right handle clicked
     }
 
@@ -154,6 +170,25 @@ mod tests {
         assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(-10.0, 1.0)), Some(false));
         assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(10.0, 31.0)), Some(true));
         assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(50.0, 50.0)), None);
+    }
+
+    /// Zero-length handles sit on top of their point, so they can't be clicked
+    #[test]
+    fn clicked_handle_zero_length() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::ZERO), Some(Vec2::new(0.0, 30.0))).unwrap();
+        assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(10.0, 0.0)), None);
+        assert_eq!(get_clicked_handle(1, &state(&objects), Vec2::new(10.0, 30.0)), Some(true));
+    }
+
+    /// Handles shorter than the minimum are pushed out along their own direction, or the fallback if they have none
+    #[test]
+    fn enforce_handle_length_minimum() {
+        assert_eq!(enforce_handle_length(Vec2::new(0.0, 5.0), Vec2::ZERO), Vec2::new(0.0, 5.0));
+        assert_eq!(enforce_handle_length(Vec2::new(0.0, -0.5), Vec2::hz(1.0)), Vec2::new(0.0, -2.0));
+        assert_eq!(enforce_handle_length(Vec2::ZERO, Vec2::new(-3.0, 0.0)), Vec2::new(-2.0, 0.0));
+        assert_eq!(enforce_handle_length(Vec2::ZERO, Vec2::ZERO), Vec2::new(2.0, 0.0));
     }
 
     /// Clicking near a path finds the zone, the start of the segment, and the position on the path
