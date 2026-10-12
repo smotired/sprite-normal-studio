@@ -54,6 +54,17 @@ impl<T> ListDiff<T> where T : bytemuck::Pod + bytemuck::Zeroable {
             items[span.start..span.start + span.new.len()].copy_from_slice(&span.new);
         }
     }
+
+    /// Combine diffs that were made one after another into one diff, given the list as it is after the last of them.
+    /// Returns None if the list ended up the way it was before the first diff.
+    pub(super) fn collapse(mut diffs: Vec<Self>, items: &[T]) -> Option<Self> {
+        if diffs.len() <= 1 { return diffs.pop(); }
+
+        // Revert every diff to find the list from before the first one
+        let mut before = items.to_vec();
+        for diff in diffs.iter().rev() { diff.revert(&mut before); }
+        Self::between(&before, items)
+    }
 }
 
 /// The changes made to every object list by one action, which can be reverted or applied again.
@@ -82,6 +93,21 @@ impl ObjectDiff {
         if let Some(diff) = &self.zones { diff.apply(&mut objects.zones.borrow_mut().items); }
         if let Some(diff) = &self.points { diff.apply(&mut objects.points.borrow_mut().items); }
         if let Some(diff) = &self.point_siblings { diff.apply(&mut objects.point_siblings.borrow_mut().items); }
+    }
+
+    /// Combine diffs that were made one after another into one diff, given the objects as they are after the last of them
+    pub fn collapse(diffs: Vec<ObjectDiff>, objects: &ObjectBuffers) -> ObjectDiff {
+        let (mut zones, mut points, mut point_siblings) = (vec![], vec![], vec![]);
+        for diff in diffs {
+            zones.extend(diff.zones);
+            points.extend(diff.points);
+            point_siblings.extend(diff.point_siblings);
+        }
+        ObjectDiff {
+            zones: ListDiff::collapse(zones, &objects.zones.borrow().items),
+            points: ListDiff::collapse(points, &objects.points.borrow().items),
+            point_siblings: ListDiff::collapse(point_siblings, &objects.point_siblings.borrow().items),
+        }
     }
 }
 
@@ -133,6 +159,36 @@ mod tests {
         let diff = round_trip(&[1, 2, 3, 4], &[1, 5]);
         assert_eq!(diff.spans.len(), 2);
         assert_eq!(diff.spans[1].old, vec![3, 4]);
+    }
+
+    /// Diffs made one after another collapse into one diff covering all of them
+    #[test]
+    fn collapse_sequence() {
+        let first = ListDiff::between(&[1u16, 2], &[1, 2, 3, 4]).unwrap();
+        let second = ListDiff::between(&[1u16, 2, 3, 4], &[1, 9, 3, 4]).unwrap();
+        let diff = ListDiff::collapse(vec![first, second], &[1, 9, 3, 4]).unwrap();
+        let mut items = vec![1, 9, 3, 4];
+        diff.revert(&mut items);
+        assert_eq!(items, vec![1, 2]);
+        diff.apply(&mut items);
+        assert_eq!(items, vec![1, 9, 3, 4]);
+    }
+
+    /// Changes that undo each other collapse to nothing
+    #[test]
+    fn collapse_back_to_start() {
+        let first = ListDiff::between(&[1u16, 2], &[1, 5]).unwrap();
+        let second = ListDiff::between(&[1u16, 5], &[1, 2]).unwrap();
+        assert!(ListDiff::collapse(vec![first, second], &[1, 2]).is_none());
+    }
+
+    /// A single diff is kept as it is, and no diffs collapse to nothing
+    #[test]
+    fn collapse_single() {
+        let diff = ListDiff::between(&[1u16, 2], &[1, 5]).unwrap();
+        let diff = ListDiff::collapse(vec![diff], &[1, 5]).unwrap();
+        assert_eq!(diff.spans[0].new, vec![5]);
+        assert!(ListDiff::<u16>::collapse(vec![], &[1, 5]).is_none());
     }
 
     /// Moving a point only records the points list, and can be reverted and applied

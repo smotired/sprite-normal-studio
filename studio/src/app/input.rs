@@ -152,10 +152,17 @@ impl StudioApp {
                             } else { Action::None }
                         },
 
-                        // Point the selected zones straight out
+                        // Undo, redo, or point the selected zones straight out
                         Key::Z => {
-                            if pressed && !repeat && modifiers.shift && !modifiers.ctrl {
+                            if pressed && modifiers.ctrl {
+                                if modifiers.shift { Action::Redo } else { Action::Undo }
+                            } else if pressed && !repeat && modifiers.shift {
                                 Action::Special(SpecialAction::NormalSet(studio_math::Vec3::FORWARD, false))
+                            } else { Action::None }
+                        },
+                        Key::Y => {
+                            if pressed && modifiers.ctrl {
+                                if modifiers.shift { Action::Undo } else { Action::Redo }
                             } else { Action::None }
                         },
 

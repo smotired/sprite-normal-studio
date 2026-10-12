@@ -1,6 +1,7 @@
 use studio_math::Vec2;
 
 use crate::{Controller, EditorToolKind, SpecialAction};
+use super::history::DragStep;
 
 pub enum Axis {
     Vertical,
@@ -67,6 +68,12 @@ pub enum Action {
     /// Delete key is pressed
     Delete,
 
+    /// Undo the latest action or drag
+    Undo,
+
+    /// Redo the latest undone action or drag
+    Redo,
+
     /// Overlay is toggled on or off. Maybe later I will add an enum for OverlayComponentKind which is passed here.
     OverlayToggled,
 
@@ -113,7 +120,7 @@ impl Controller {
 
             Action::MouseClicked(pos, modifiers) => {
                 if self.overlay_state.overlay_on() {
-                    self.run_tool(false, |tool, state| tool.handle_click(state, pos, modifiers));
+                    self.run_tool(DragStep::None, |tool, state| tool.handle_click(state, pos, modifiers));
                 }
             },
 
@@ -128,7 +135,7 @@ impl Controller {
 
                     // Check the tool
                     else {
-                        self.run_tool(false, |tool, state| tool.handle_drag_start(state, pos, modifiers));
+                        self.run_tool(DragStep::None, |tool, state| tool.handle_drag_start(state, pos, modifiers));
                     }
                 }
             }
@@ -141,7 +148,7 @@ impl Controller {
 
                 // Otherwise switch based on tool
                 else if self.overlay_state.overlay_on() {
-                    self.run_tool(true, |tool, state| tool.handle_dragging_to(state, new, modifiers));
+                    self.run_tool(DragStep::Continue, |tool, state| tool.handle_dragging_to(state, new, modifiers));
                 }
             },
 
@@ -151,16 +158,24 @@ impl Controller {
                 }
 
                 else if self.overlay_state.overlay_on() {
-                    self.run_tool(false, |tool, state| tool.handle_drag_released(state, modifiers));
+                    self.run_tool(DragStep::Release, |tool, state| tool.handle_drag_released(state, modifiers));
                 }
             },
 
             Action::Cancel => {
-                self.run_tool(false, |tool, state| tool.handle_cancel(state));
+                self.run_tool(DragStep::None, |tool, state| tool.handle_cancel(state));
             },
 
             Action::Delete => {
-                self.run_tool(false, |tool, state| tool.handle_delete(state));
+                self.run_tool(DragStep::None, |tool, state| tool.handle_delete(state));
+            },
+
+            Action::Undo => {
+                self.undo();
+            },
+
+            Action::Redo => {
+                self.redo();
             },
 
             Action::Altitude(up) => {

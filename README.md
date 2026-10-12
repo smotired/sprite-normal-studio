@@ -188,6 +188,11 @@ This section will be added to as I add keybinds (and remember).
 > `I` - Toggle if branching zones inherit the normal of the zone they branch from in the pen tool.  
 > `C` - Toggle if the pen tool stays active after finishing a zone.
 
+### History
+
+> `Ctrl + Z` - Undo.
+> `Ctrl + Shift + Z` - Redo.  
+
 ### Rendering
 
 > `L` - Toggle lighting. If normal maps are on and light is off, the normal map itself is visible.  

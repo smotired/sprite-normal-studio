@@ -6,6 +6,7 @@ mod overlay;
 pub mod viewport;
 pub mod action;
 pub mod tools;
+pub mod history;
 
 pub use camera::Camera;
 pub use light::Light;
