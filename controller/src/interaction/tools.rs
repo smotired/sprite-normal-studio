@@ -6,10 +6,12 @@ mod result;
 pub use zone::EditorToolZone;
 pub use pen::EditorToolPen;
 pub use point::EditorToolPoint;
-use result::{ToolResult, EditorToolActionResult, DefaultResults};
+pub(super) use result::ToolResult;
+use result::{EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
-use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectDiff, InputModifiers};
+use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers};
+use super::history::{History, DragStep};
 
 /// Options for which tool we are using in the editor.
 /// Tool options may later be added as tuple parameters in this enum.
@@ -72,9 +74,9 @@ pub enum SpecialAction {
 }
 
 impl SpecialAction {
-    /// Returns true if this continues a drag, so a success shouldn't hide an error from earlier in the drag.
-    pub fn continuing_drag(&self) -> bool {
-        matches!(self, Self::NormalSet(_, true))
+    /// How this action relates to a drag. Continuing to set a normal continues the drag, everything else starts something new.
+    pub fn drag_step(&self) -> DragStep {
+        if matches!(self, Self::NormalSet(_, true)) { DragStep::Continue } else { DragStep::None }
     }
 }
 
@@ -167,47 +169,39 @@ pub trait EditorTool: EditorToolClone {
 impl Controller {
     pub fn selected_tool(&self) -> EditorToolKind { self.tool.kind() }
 
-    /// Select a tool, and perform related side-effects
+    /// Select a tool, and perform related side-effects. Changes to the objects are recorded for undo.
     pub fn select_tool(&mut self, tool: EditorToolKind) {
-        // If this is the current tool, don't do anything.
-        // Unless we have sub modes in which case cycle those instead of this stuff.
-        if tool == self.tool.kind() { return; }
-
-        // Deselecting a tool that is creating a path deletes it, and it may have been assigned if its normal was set.
-        // The path being created is always the last zone.
-        if self.tool.creating_path().is_some() && let Some(zone_id) = self.objects.zone_count().checked_sub(1) {
-            self.mark_normals_stale(self.objects.zone_bounds(zone_id).ok().flatten());
-        }
-
-        // Drop the old tool
-        let selection = Vec::from(self.tool.deselect(self.create_state())); // cloning should be okay
-
-        // Select the new tool
-        let state = self.create_state();
-        self.tool = match tool {
-            EditorToolKind::Zone  => EditorToolZone::select(&selection, state),
-            EditorToolKind::Point => EditorToolPoint::select(&selection, state),
-            EditorToolKind::Pen   => EditorToolPen::select(&selection, state),
-        };
+        self.history.close(&self.objects, self.tool.as_ref());
+        let (deselect_state, select_state) = (self.create_state(), self.create_state());
+        let normals_stale = switch_tool(&mut self.tool, &mut self.history, tool, deselect_state, select_state);
+        self.history.close(&self.objects, self.tool.as_ref());
+        self.mark_normals_stale(normals_stale);
     }
 
     /// The error from the latest tool action, if it failed
     pub fn tool_error(&self) -> Option<&str> { self.tool_error.as_deref() }
 
-    /// Run a tool action, restoring the objects and tool state if it fails.
-    /// Set continuing_drag when this action continues a drag, so a success doesn't hide an error from earlier in the drag.
-    pub(crate) fn run_tool(&mut self, continuing_drag: bool, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
+    /// Run a tool action, restoring the objects and tool state if it fails, and recording its changes for undo.
+    /// The step decides how errors are kept and how the changes are grouped with other actions in a drag.
+    pub(crate) fn run_tool(&mut self, step: DragStep, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
+        if step == DragStep::None { self.history.close(&self.objects, self.tool.as_ref()); }
+
         let state = self.create_state();
-        // The change will go on the undo stack once there is one
-        if let Some((EditorToolActionResult { new_tool, normals_stale }, _change)) = run_tool_action(&mut self.tool, state, &mut self.tool_error, continuing_drag, action) {
+        if let Some((EditorToolActionResult { new_tool, normals_stale }, change)) = run_tool_action(&mut self.tool, state, &mut self.tool_error, step == DragStep::Continue, action) {
+            self.history.record(change, normals_stale);
             self.mark_normals_stale(normals_stale);
-            self.select_tool(new_tool);
+
+            let (deselect_state, select_state) = (self.create_state(), self.create_state());
+            let normals_stale = switch_tool(&mut self.tool, &mut self.history, new_tool, deselect_state, select_state);
+            self.mark_normals_stale(normals_stale);
         }
+
+        if step == DragStep::Release { self.history.close(&self.objects, self.tool.as_ref()); }
     }
 
     /// Run an action from the UI that the selected tool handles in its own way, with the same rollback and error handling as other tool actions.
     pub(crate) fn run_special_action(&mut self, action: SpecialAction) {
-        self.run_tool(action.continuing_drag(), |tool, state| tool.handle_special_action(state, action));
+        self.run_tool(action.drag_step(), |tool, state| tool.handle_special_action(state, action));
     }
 
     /// Ask the selected tool about its state, if it supports the question
@@ -283,10 +277,46 @@ pub struct EditorChange {
     pub tool: Box<dyn EditorTool>,
 }
 
+/// Switch to a different tool, recording any changes to the objects for undo. Does nothing if the tool is already selected.
+/// Returns the region where normals might have changed.
+pub(super) fn switch_tool(
+    tool: &mut Box<dyn EditorTool>,
+    history: &mut History,
+    kind: EditorToolKind,
+    deselect_state: ControllerStateInput,
+    select_state: ControllerStateInput,
+) -> Option<Bounds> {
+    // If this is the current tool, don't do anything.
+    // Unless we have sub modes in which case cycle those instead of this stuff.
+    if kind == tool.kind() { return None; }
+    let objects = deselect_state.objects.clone();
+
+    // Deselecting a tool that is creating a path deletes it, and it may have been assigned if its normal was set.
+    // The path being created is always the last zone.
+    let normals_stale = match objects.zone_count().checked_sub(1) {
+        Some(zone_id) if tool.creating_path().is_some() => objects.zone_bounds(zone_id).ok().flatten(),
+        _ => None,
+    };
+
+    // Drop the old tool
+    let tool_before = tool.clone_box();
+    objects.begin_change();
+    let selection = Vec::from(tool.deselect(deselect_state)); // cloning should be okay
+
+    // Select the new tool
+    *tool = match kind {
+        EditorToolKind::Zone  => EditorToolZone::select(&selection, select_state),
+        EditorToolKind::Point => EditorToolPoint::select(&selection, select_state),
+        EditorToolKind::Pen   => EditorToolPen::select(&selection, select_state),
+    };
+    history.record(EditorChange { objects: objects.finish_change(), tool: tool_before }, normals_stale);
+    normals_stale
+}
+
 /// Run a tool action, restoring the objects and tool state if it fails.
 /// Errors always replace the previous error, and successes clear it unless we are continuing a drag.
 /// Returns the result of the action and the change it made if it succeeded.
-fn run_tool_action(
+pub(super) fn run_tool_action(
     tool: &mut Box<dyn EditorTool>,
     state: ControllerStateInput,
     error: &mut Option<String>,
@@ -312,14 +342,14 @@ fn run_tool_action(
 
 /// Helpers for running tools against objects in tests
 #[cfg(test)]
-mod test_utils {
+pub(super) mod test_utils {
     use studio_math::Vec2;
 
     use crate::ObjectBuffers;
     use super::ControllerStateInput;
 
     /// Create the input state for a tool, as if the camera is at 1:1 scale
-    pub(super) fn state(objects: &ObjectBuffers) -> ControllerStateInput {
+    pub(crate) fn state(objects: &ObjectBuffers) -> ControllerStateInput {
         state_scaled(objects, 1.0)
     }
 

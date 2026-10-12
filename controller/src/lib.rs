@@ -12,6 +12,7 @@ use crate::assignment::ZoneAssigner;
 
 pub use crate::interaction::action::{Action, InputModifiers, Axis};
 use crate::interaction::tools::{EditorTool, EditorToolZone};
+use crate::interaction::history::History;
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorChange, SpecialAction, SpecialQuery, SpecialValue};
 pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds};
@@ -51,6 +52,9 @@ pub struct Controller {
 
     /// The error from the latest tool action, if it failed
     tool_error: Option<String>,
+
+    /// The changes that can be undone and redone
+    history: History,
 }
 
 impl Controller {
@@ -78,13 +82,15 @@ impl Controller {
             tool: EditorToolZone::init(),
             selection_buffer,
             tool_error: None,
+            history: History::default(),
         }
     }
     
     /// When sprite or normal map are loaded from files, update child objects.
     pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
     {
-        // Reset selection
+        // Reset selection, finishing any changes in progress so they can still be undone
+        self.history.close(&self.objects, self.tool.as_ref());
         self.tool = EditorToolZone::init();
 
         // Regenerate the normal map's output texture
