@@ -11,8 +11,8 @@ use crate::assignment::ZoneAssigner;
 pub use crate::interaction::action::{Action, InputModifiers, Axis};
 use crate::interaction::tools::{EditorTool, EditorToolZone};
 pub use crate::interaction::viewport::ViewportDataUniform;
-pub use crate::interaction::tools::{EditorToolKind, EditorSnapshot, SpecialAction, SpecialQuery, SpecialValue};
-pub use crate::objects::{ObjectBuffers, ObjectSnapshot, BufferStates, ControlPointMode};
+pub use crate::interaction::tools::{EditorToolKind, EditorChange, SpecialAction, SpecialQuery, SpecialValue};
+pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode};
 
 /// The Controller manages our actual working pipeline.
 pub struct Controller {

@@ -9,7 +9,7 @@ pub use point::EditorToolPoint;
 use result::{ToolResult, EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
-use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectSnapshot, InputModifiers};
+use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectDiff, InputModifiers};
 
 /// Options for which tool we are using in the editor.
 /// Tool options may later be added as tuple parameters in this enum.
@@ -192,7 +192,8 @@ impl Controller {
     /// Set continuing_drag when this action continues a drag, so a success doesn't hide an error from earlier in the drag.
     pub(crate) fn run_tool(&mut self, continuing_drag: bool, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
         let state = self.create_state();
-        if let Some(EditorToolActionResult { new_tool, normals_stale }) = run_tool_action(&mut self.tool, state, &mut self.tool_error, continuing_drag, action) {
+        // The change will go on the undo stack once there is one
+        if let Some((EditorToolActionResult { new_tool, normals_stale }, _change)) = run_tool_action(&mut self.tool, state, &mut self.tool_error, continuing_drag, action) {
             self.normals_stale |= normals_stale;
             self.select_tool(new_tool);
         }
@@ -260,12 +261,6 @@ impl Controller {
         self.objects.can_separate(self.tool.selection())
     }
 
-    /// Take a snapshot of the objects and tool state
-    pub fn snapshot(&self) -> EditorSnapshot { EditorSnapshot::take(&self.objects, self.tool.as_ref()) }
-
-    /// Restore the objects and tool state from a snapshot
-    pub fn restore(&mut self, snapshot: EditorSnapshot) { snapshot.restore_into(&self.objects, &mut self.tool); }
-
     pub fn create_state(&self) -> ControllerStateInput {
         ControllerStateInput {
             mouse: self.cursor_pos,
@@ -276,43 +271,33 @@ impl Controller {
 }
 
 
-/// A copy of the objects and the tool state, which can be restored later.
-#[derive(Clone)]
-pub struct EditorSnapshot {
-    objects: ObjectSnapshot,
-    tool: Box<dyn EditorTool>,
-}
-
-impl EditorSnapshot {
-    fn take(objects: &ObjectBuffers, tool: &dyn EditorTool) -> Self {
-        Self { objects: objects.snapshot(), tool: tool.clone_box() }
-    }
-
-    fn restore_into(self, objects: &ObjectBuffers, tool: &mut Box<dyn EditorTool>) {
-        objects.restore(self.objects);
-        *tool = self.tool;
-    }
+/// The changes one action made to the objects, and the tool state from before it.
+pub struct EditorChange {
+    pub objects: ObjectDiff,
+    pub tool: Box<dyn EditorTool>,
 }
 
 /// Run a tool action, restoring the objects and tool state if it fails.
 /// Errors always replace the previous error, and successes clear it unless we are continuing a drag.
-/// Returns the result of the action if it succeeded.
+/// Returns the result of the action and the change it made if it succeeded.
 fn run_tool_action(
     tool: &mut Box<dyn EditorTool>,
     state: ControllerStateInput,
     error: &mut Option<String>,
     continuing_drag: bool,
     action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult,
-) -> Option<EditorToolActionResult> {
+) -> Option<(EditorToolActionResult, EditorChange)> {
     let objects = state.objects.clone();
-    let snapshot = EditorSnapshot::take(&objects, tool.as_ref());
+    let tool_before = tool.clone_box();
+    objects.begin_change();
     match action(tool.as_mut(), state) {
         Ok(result) => {
             if !continuing_drag { *error = None; }
-            Some(result)
+            Some((result, EditorChange { objects: objects.finish_change(), tool: tool_before }))
         },
         Err(e) => {
-            snapshot.restore_into(&objects, tool);
+            objects.rollback_change();
+            *tool = tool_before;
             *error = Some(format!("{e:#}"));
             None
         },
