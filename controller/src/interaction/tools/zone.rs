@@ -5,34 +5,35 @@ use crate::InputModifiers;
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
 use super::result::{ToolResult, DefaultResults};
 
-// TODO: Modifier keys for dragging
-//
-// dragging position:
-// Shift - move along axis
-// Ctrl - snap to grid (1px grid for now)
-//
-// dragging box:
-// shift: add to selection
-// alt: remove from selection
-// ctrl: only select exact zones
-// same multi rules as below except toggle affects the normal selected list instead of the tentative list
+/// Size in pixels of the grid that dragging zones snaps to while holding ctrl.
+/// This will be replaced with a user setting in the future.
+const GRID_SIZE: u32 = 1;
 
-// also maybe only actually make it save the changed selection when ending drag, so you can like cancel or whatever. add a tentative_selection list, and join em in selection()
+/// tan(22.5 degrees), the slope that splits orthagonal from diagonal when snapping directions.
+const TAN_HALF_OCTANT: f32 = 0.414_213_56;
 
-/// The Zone tool allows mananging entire zones at once. 
-/// 
-/// SELECTION RULES:
+/// The Zone tool allows mananging entire zones at once.
+///
+/// Selection rules:
 /// SHIFT: add to selection instead of replacing
 /// ALT: remove from selection instead of replacing
 /// CTRL: select a single zone instead of all connected zones
-/// 
+///
 /// Rules that follow from these:
 /// Ctrl + Shift: add single zone to selection
 /// Ctrl + Alt: remove single zone from selection
 /// Shift + Alt: toggle zones in selection
 /// Shift + Alt + Ctrl: toggle single zone in selected
-/// 
+///
 /// When clicking and dragging instead of just clicking: should only change selection if not clicking on a selected zone
+///
+/// Dragging zones:
+/// SHIFT: snap movement to horizontal, vertical, or diagonal, whichever is closest to the direction moved
+/// CTRL: snap to the grid (see GRID_SIZE)
+///
+/// Dragging a selection box:
+/// Uses the same selection rules as above, applied against the selection from before the drag started.
+/// The result is tentative until the drag is released, and can be cancelled.
 #[derive(Default)]
 pub struct EditorToolZone {
     /// The zone that is selected.
@@ -41,8 +42,15 @@ pub struct EditorToolZone {
     /// Reference to selected points, generated when doing selection()
     selected_points_reference: Vec<u16>,
 
+    /// The zones and their points being selected by an in-progress selection box.
+    /// Replaces the selection once the drag is released.
+    tentative_selection: Option<(Vec<u16>, Vec<u16>)>,
+
     /// The reference point for if we are dragging a zone, relative to the position of the first point.
     reference_delta: Option<Vec2>,
+
+    /// The mouse position where we started dragging a zone.
+    drag_origin: Option<Vec2>,
 
     /// The start point for our selection box if we are instead dragging out a box of zones
     selection_origin: Option<Vec2>,
@@ -63,16 +71,21 @@ impl EditorTool for EditorToolZone {
 
         let selected_points_reference = points_from_zone_selection(&selected_zones[..], &state);
 
-        Box::new(Self { selected_zones, selected_points_reference, reference_delta: None, selection_origin: None, selection_box_end: None })
+        Box::new(Self { selected_zones, selected_points_reference, ..Default::default() })
     }
 
     fn deselect(&mut self, _state: ControllerStateInput) -> SelectionType<'_> {
         // Just return selection
-        &self.selected_points_reference[..]
+        self.selection()
     }
 
     fn kind(&self) -> EditorToolKind { EditorToolKind::Zone }
-    fn selection(&self) -> SelectionType<'_> { &self.selected_points_reference[..] }
+    fn selection(&self) -> SelectionType<'_> {
+        match &self.tentative_selection {
+            Some((_, points)) => &points[..],
+            None => &self.selected_points_reference[..],
+        }
+    }
     fn selection_box(&self) -> Option<(Vec2, Vec2)> {
         if let (Some(start), Some(end)) = (self.selection_origin, self.selection_box_end) {
             Some((start, end))
@@ -90,6 +103,7 @@ impl EditorTool for EditorToolZone {
     fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         let clicked_zone_info = self.zone_from_pos(&state, pos);
         let (new_selection, reference_delta) = self.get_updated_selection(&state, pos, true, modifiers);
+        self.drag_origin = Some(pos);
 
         // If we clicked a zone, only update selection if the clicked zone isn't selected.
         if let Some(clicked_zone_id) = clicked_zone_info.0 {
@@ -128,62 +142,101 @@ impl EditorTool for EditorToolZone {
             }
         }
 
-        // If we didn't click a zone, just update the selection
+        // If we didn't click a zone, start dragging a box instead of the reference delta.
+        // The selection is tentative until released, when it will select everything within the box.
         else {
-            // If new_selection is empty, start dragging a box instead of the reference delta. When released, will select everything within the box.
-            if new_selection.is_empty() {
-                self.selection_origin = Some(pos);
-                self.selection_box_end = Some(pos);
-            } else {
-                self.reference_delta = reference_delta;
-            }
-
-            self.set_selection(new_selection, &state);
+            self.selection_origin = Some(pos);
+            self.selection_box_end = Some(pos);
+            self.set_tentative_selection(&[], &state, modifiers);
         }
         self.ok()
     }
 
-    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
+    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         // Drag selected zones if we are doing that
         if let Some(reference_delta) = self.reference_delta && !self.selected_zones.is_empty() {
+            let mut target = pos - reference_delta;
+
+            if let Some(origin) = self.drag_origin {
+                let first_point_start = origin - reference_delta;
+
+                // Shift: only move orthagonally/diagonally
+                if modifiers.shift {
+                    let delta = pos - origin;
+                    let (abs_x, abs_y) = (delta.x.abs(), delta.y.abs());
+
+                    // Snap delta to whichever of 8 directions is correct
+                    let snapped_delta = if abs_y < abs_x * TAN_HALF_OCTANT {
+                        Vec2::new(delta.x, 0.0)
+                    } else if abs_x < abs_y * TAN_HALF_OCTANT {
+                        Vec2::new(0.0, delta.y)
+                    } else {
+                        let diagonal = (abs_x + abs_y) / 2.0;
+                        Vec2::new(diagonal.copysign(delta.x), diagonal.copysign(delta.y))
+                    };
+                    target = first_point_start + snapped_delta;
+                }
+            }
+
+            // Ctrl: snap to the grid
+            if modifiers.ctrl {
+                let grid = GRID_SIZE as f32;
+                target = Vec2::new((target.x / grid).round() * grid, (target.y / grid).round() * grid);
+            }
+
             // Move the first point to the position across all the selected zones.
-            state.objects.move_zones(&self.selected_zones[..], pos - reference_delta)?;
+            state.objects.move_zones(&self.selected_zones[..], target)?;
             return self.stale();
         }
-        // Or if we are dragging a selection box, set our selected zones to be the ones in the box
+        // Or if we are dragging a selection box, tentatively select the zones in the box
         else if let Some(selection_origin) = self.selection_origin {
             self.selection_box_end = Some(pos);
             let selected_points = state.objects.get_points_in_rect(selection_origin, pos);
-            let mut selected_zones = std::collections::HashSet::new();
-            for point_id in selected_points {
-                let zone_id = state.objects.get_point_info(point_id).unwrap().zone_id();
-                let all_connected = get_connected_zones(zone_id, &state);
-                selected_zones.extend(all_connected);
-            }
-            self.set_selection(selected_zones.into_iter().collect(), &state);
+            self.set_tentative_selection(&selected_points[..], &state, modifiers);
         }
         self.ok()
     }
 
     fn handle_drag_released(&mut self, _state: ControllerStateInput, _modifiers: InputModifiers) -> ToolResult {
+        // Commit the tentative selection, if any
+        if let Some((zones, points)) = self.tentative_selection.take() {
+            self.selected_zones = zones;
+            self.selected_points_reference = points;
+        }
+
         // Release drag on selected zones, but keep them selected
         self.reference_delta = None;
+        self.drag_origin = None;
         self.selection_origin = None;
         self.selection_box_end = None;
         self.ok()
     }
 
-    fn handle_cancel(&mut self, state: ControllerStateInput) -> ToolResult {
-        // Clear selection
-        self.set_selection(vec![], &state);
-        self.selection_origin = None;
-        self.selection_box_end = None;
+    fn handle_cancel(&mut self, mut state: ControllerStateInput) -> ToolResult {
+        // If dragging zones, put them back where they started
+        if let (Some(reference_delta), Some(origin)) = (self.reference_delta.take(), self.drag_origin.take()) {
+            if !self.selected_zones.is_empty() {
+                state.objects.move_zones(&self.selected_zones[..], origin - reference_delta)?;
+                return self.stale();
+            }
+        }
+        // If dragging a selection box, just abandon the box and keep the previous selection
+        else if self.selection_origin.is_some() {
+            self.tentative_selection = None;
+            self.selection_origin = None;
+            self.selection_box_end = None;
+        }
+        // Otherwise clear selection
+        else {
+            self.set_selection(vec![], &state);
+        }
         self.ok()
     }
 
     fn handle_delete(&mut self, mut state: ControllerStateInput) -> ToolResult {
         // Stop dragging out selection box
         if self.selection_origin.is_some() {
+            self.tentative_selection = None;
             self.selection_origin = None;
             self.selection_box_end = None;
         }
@@ -210,6 +263,35 @@ impl EditorToolZone {
     fn set_selection(&mut self, selected_zones: Vec<u16>, state: &ControllerStateInput) {
         self.selected_zones = selected_zones;
         self.selected_points_reference = points_from_zone_selection(&self.selected_zones[..], state);
+    }
+
+    /// Set the tentative selection from the points inside a selection box, applying modifiers against the committed selection.
+    /// SHIFT adds, ALT removes, SHIFT+ALT toggles, and CTRL only selects the exact zones instead of all connected zones.
+    fn set_tentative_selection(&mut self, boxed_points: &[u16], state: &ControllerStateInput, modifiers: InputModifiers) {
+        let mut boxed = std::collections::HashSet::new();
+        for &point_id in boxed_points {
+            let zone_id = state.objects.get_point_info(point_id).unwrap().zone_id();
+            if modifiers.ctrl {
+                boxed.insert(zone_id);
+            } else {
+                boxed.extend(get_connected_zones(zone_id, state));
+            }
+        }
+
+        let mut selected: std::collections::HashSet<u16> = self.selected_zones.iter().copied().collect();
+        match (modifiers.shift, modifiers.alt) {
+            (true, true) => for zone_id in boxed {
+                if !selected.insert(zone_id) { selected.remove(&zone_id); }
+            },
+            (true, false) => selected.extend(boxed),
+            (false, true) => for zone_id in boxed { selected.remove(&zone_id); },
+            (false, false) => selected = boxed,
+        }
+
+        let mut zones: Vec<u16> = selected.into_iter().collect();
+        zones.sort();
+        let points = points_from_zone_selection(&zones[..], state);
+        self.tentative_selection = Some((zones, points));
     }
 
     /// Get a single zone selection from a click position.
@@ -824,6 +906,57 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         assert_eq!(objects.get_point_info(7).unwrap().position(), Vec2::new(40.0, 10.0));
     }
 
+    /// Shift constrains dragging to an axis, and ctrl snaps to the grid
+    #[test]
+    fn drag_modifiers() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(15.0, 12.0), IM::shift()).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 0.0));
+
+        tool.handle_dragging_to(state(&objects), Vec2::new(11.0, 18.0), IM::shift()).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(0.0, 8.0));
+
+        // Diagonal: mouse moved (+4, -6), which is closer to the diagonal than the vertical
+        tool.handle_dragging_to(state(&objects), Vec2::new(14.0, 4.0), IM::shift()).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, -5.0));
+
+        tool.handle_dragging_to(state(&objects), Vec2::new(15.4, 12.6), IM::ctrl()).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 3.0));
+    }
+
+    /// Box selection is tentative until released, follows modifiers, and can be cancelled
+    #[test]
+    fn drag_box_modifiers() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_click(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
+        assert_eq!(tool.selection().len(), 4);
+
+        // Shift adds to the selection, but only tentatively
+        tool.handle_drag_start(state(&objects), Vec2::new(35.0, -7.0), IM::shift()).unwrap();
+        assert_eq!(tool.selection().len(), 4);
+        tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 12.0), IM::shift()).unwrap();
+        assert_eq!(tool.selection().len(), 7);
+        tool.handle_cancel(state(&objects)).unwrap();
+        assert_eq!(tool.selection().len(), 4);
+        tool.handle_drag_released(state(&objects), IM::shift()).unwrap();
+        assert_eq!(tool.selection().len(), 4);
+
+        // Alt removes from the selection once released
+        tool.handle_drag_start(state(&objects), Vec2::new(-40.0, -40.0), IM::alt()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(5.0, 5.0), IM::alt()).unwrap();
+        assert!(tool.selection().is_empty());
+        tool.handle_drag_released(state(&objects), IM::alt()).unwrap();
+        assert!(tool.selection().is_empty());
+    }
+
     /// Cancel input should deselect everything
     #[test]
     fn cancel_deselects() {
@@ -838,6 +971,59 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         tool.handle_cancel(state(&objects)).unwrap();
         assert!(tool.selection().is_empty());
+    }
+
+    /// Cancel while dragging zones puts them back and keeps the selection
+    #[test]
+    fn cancel_drag_restores_position() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(25.0, 32.0), Default::default()).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(15.0, 22.0));
+
+        let result = tool.handle_cancel(state(&objects)).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
+        assert_eq!(tool.selection().len(), 4);
+
+        // The drag is over, so releasing or moving more does nothing
+        tool.handle_drag_released(state(&objects), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(50.0, 50.0), Default::default()).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
+
+        // A second cancel deselects
+        tool.handle_cancel(state(&objects)).unwrap();
+        assert!(tool.selection().is_empty());
+    }
+
+    /// Cancel while dragging a selection box stops the box and restores the previous selection
+    #[test]
+    fn cancel_box_restores_selection() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+        assert_eq!(tool.selection().len(), 4);
+
+        // Drag a box over the other zone, replacing the selection tentatively
+        tool.handle_drag_start(state(&objects), Vec2::new(30.0, -30.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 20.0), Default::default()).unwrap();
+        assert_eq!(tool.selection().len(), 3);
+        assert!(tool.selection_box().is_some());
+
+        tool.handle_cancel(state(&objects)).unwrap();
+        assert_eq!(tool.selection().len(), 4);
+        assert_eq!(tool.selection_box(), None);
+
+        // Releasing afterwards doesn't change anything
+        tool.handle_drag_released(state(&objects), Default::default()).unwrap();
+        assert_eq!(tool.selection().len(), 4);
     }
 
     /// Deleting removes selected zones, and clears the selection
