@@ -138,6 +138,39 @@ impl ObjectBuffers {
         Ok(())
     }
 
+    /// Get the IDs of the points before and after a point in its zone.
+    pub fn get_neighbors(&self, point_id: u16) -> anyhow::Result<(u16, u16)> {
+        let zone_id = self.get_point_info(point_id)?.zone_id();
+        let (start, count) = self.get_zone_info(zone_id)?.range();
+        let index = point_id - start;
+        Ok((start + (index + count - 1) % count, start + (index + 1) % count))
+    }
+
+    /// Get the mode of the point that a point's handles sync to, or None if its two handles sync to different points.
+    pub fn get_point_mode(&self, point_id: u16) -> anyhow::Result<Option<ControlPointMode>> {
+        let points = &self.points.borrow().items;
+        let (left_root, _) = ControlPoint::get_sync_id(point_id, false, points)?;
+        let (right_root, _) = ControlPoint::get_sync_id(point_id, true, points)?;
+        Ok((left_root == right_root).then(|| points[left_root as usize].mode()))
+    }
+
+    /// Change the handle mode of a point, which changes the point its handles sync to.
+    /// Converting to continuous lines up the handles, and gives the point new handles if it's missing one.
+    pub fn set_point_mode(&mut self, point_id: u16, mode: ControlPointMode) -> anyhow::Result<()> {
+        let root_id = {
+            let points = &self.points.borrow().items;
+            let (left_root, _) = ControlPoint::get_sync_id(point_id, false, points)?;
+            let (right_root, _) = ControlPoint::get_sync_id(point_id, true, points)?;
+            if left_root != right_root { anyhow::bail!("Can't change the handle mode of a point whose handles sync to different points!"); }
+            left_root
+        };
+
+        let (prev_id, next_id) = self.get_neighbors(root_id)?;
+        let points = &mut self.points.borrow_mut().items;
+        let siblings = &self.point_siblings.borrow().items;
+        ControlPoint::convert_mode(root_id, mode, prev_id, next_id, points, siblings)
+    }
+
     /// Set the base surface normal vector of every listed zone.
     pub fn set_zone_normals(&mut self, zone_ids: &[u16], normal: Vec3) -> anyhow::Result<()> {
         let zone_count = self.zone_count();
@@ -359,5 +392,124 @@ mod tests {
         assert!(!objects.can_separate(&[point_id]));
         assert!(objects.get_siblings(1).is_empty());
         assert_eq!(objects.sibling_in_zone(1, zone_id), None);
+    }
+
+    /// Get a point's handles relative to its position
+    fn handles(objects: &ObjectBuffers, point_id: u16) -> (Vec2, Vec2) {
+        let point = objects.get_point_info(point_id).unwrap();
+        (point.left_handle() - point.position(), point.right_handle() - point.position())
+    }
+
+    fn assert_near(a: Vec2, b: Vec2) {
+        assert!(a.distance(b) < 1e-4, "{a} != {b}");
+    }
+
+    /// Make a square with broken handles on point 1, which is at (10, 0) between (0, 0) and (10, 10)
+    fn square_with_handles(left: Vec2, right: Vec2) -> ObjectBuffers {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(1, None, Some(ControlPointMode::Broken), Some(left), Some(right)).unwrap();
+        objects
+    }
+
+    /// Converting to linear only changes the mode, so the handles come back when converting away from it
+    #[test]
+    fn mode_to_linear_keeps_handles() {
+        let mut objects = square_with_handles(Vec2::new(-3.0, 0.0), Vec2::new(0.0, 4.0));
+
+        objects.set_point_mode(1, ControlPointMode::Linear).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Linear);
+        assert_eq!(handles(&objects, 1), (Vec2::ZERO, Vec2::ZERO));
+
+        objects.set_point_mode(1, ControlPointMode::Broken).unwrap();
+        assert_eq!(handles(&objects, 1), (Vec2::new(-3.0, 0.0), Vec2::new(0.0, 4.0)));
+    }
+
+    /// Handles that are already on a line stay as they are when converting to continuous
+    #[test]
+    fn mode_continuous_collinear_unchanged() {
+        let mut objects = square_with_handles(Vec2::new(-3.0, 0.0), Vec2::new(5.0, 0.0));
+        objects.set_point_mode(1, ControlPointMode::Continuous).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Continuous);
+        assert_eq!(handles(&objects, 1), (Vec2::new(-3.0, 0.0), Vec2::new(5.0, 0.0)));
+    }
+
+    /// Broken handles are lined up keeping their lengths, without either handle flipping around, for corners turning either way
+    #[test]
+    fn mode_continuous_aligns_broken_handles() {
+        let corners = [
+            (Vec2::new(-4.0, 0.0), Vec2::new(0.0, 3.0)),
+            (Vec2::new(-4.0, 0.0), Vec2::new(0.0, -3.0)),
+            (Vec2::new(4.0, 0.0), Vec2::new(0.0, -3.0)),
+            (Vec2::new(0.0, 4.0), Vec2::new(2.0, -3.0)),
+        ];
+        for (left, right) in corners {
+            let mut objects = square_with_handles(left, right);
+            objects.set_point_mode(1, ControlPointMode::Continuous).unwrap();
+            let (new_left, new_right) = handles(&objects, 1);
+
+            assert!((new_left.magnitude() - left.magnitude()).abs() < 1e-4);
+            assert!((new_right.magnitude() - right.magnitude()).abs() < 1e-4);
+            assert!(new_left.cross(new_right).abs() < 1e-3 && new_left.dot(new_right) < 0.0);
+            assert!(new_left.dot(left) > 0.0 && new_right.dot(right) > 0.0, "{left} {right} -> {new_left} {new_right}");
+        }
+    }
+
+    /// A linear point with no handles gets new ones halfway to its neighbors, then lined up
+    #[test]
+    fn mode_continuous_from_zero_handles() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+
+        objects.set_point_mode(1, ControlPointMode::Continuous).unwrap();
+        let direction = Vec2::new(1.0, 1.0).normalized();
+        let (left, right) = handles(&objects, 1);
+        assert_near(left, -direction * 5.0);
+        assert_near(right, direction * 5.0);
+    }
+
+    /// Handles pointing the same way are lined up along the direction from the previous point to the next point
+    #[test]
+    fn mode_continuous_cusp_fallback() {
+        let mut objects = square_with_handles(Vec2::new(3.0, 0.0), Vec2::new(5.0, 0.0));
+        objects.set_point_mode(1, ControlPointMode::Continuous).unwrap();
+
+        let direction = Vec2::new(1.0, 1.0).normalized();
+        let (left, right) = handles(&objects, 1);
+        assert_near(left, -direction * 3.0);
+        assert_near(right, direction * 5.0);
+    }
+
+    /// Make two squares where point 5 is a sibling of point 1, with its left handle synced to point 1's left handle
+    fn synced_squares() -> ObjectBuffers {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (10.0, 0.0), (20.0, 10.0)]);
+        {
+            let siblings = &mut objects.point_siblings.borrow_mut().items;
+            (siblings[1], siblings[5]) = (5, 1);
+        }
+        ControlPoint::retarget(5, false, 1, false, &mut objects.points.borrow_mut().items).unwrap();
+        objects
+    }
+
+    /// Changing the mode of a point that syncs to another point changes the mode of that point
+    #[test]
+    fn mode_cascades_to_sync_root() {
+        let mut objects = synced_squares();
+        ControlPoint::retarget(5, true, 1, true, &mut objects.points.borrow_mut().items).unwrap();
+        objects.update_point(1, None, Some(ControlPointMode::Broken), None, None).unwrap();
+
+        objects.set_point_mode(5, ControlPointMode::Linear).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Linear);
+        assert_eq!(objects.get_point_mode(5).unwrap(), Some(ControlPointMode::Linear));
+    }
+
+    /// Points whose handles sync to different points have no mode, and it can't be changed
+    #[test]
+    fn mode_different_roots_errors() {
+        let mut objects = synced_squares();
+        assert_eq!(objects.get_point_mode(5).unwrap(), None);
+        assert!(objects.set_point_mode(5, ControlPointMode::Linear).is_err());
     }
 }

@@ -110,12 +110,12 @@ mod tests {
     #[test]
     fn faceted_rings() {
         let phi_at = |r: f32| faceted_normal(Vec2::new(r, 0.0)).z.acos();
-        assert_eq!(faceted_normal(Vec2::new(0.19, 0.05)), Vec3::FORWARD);
-        assert!((phi_at(0.2) - FACET_ANGLE_STEP).abs() < 1e-5);
-        assert!((phi_at(0.449) - FACET_ANGLE_STEP).abs() < 1e-5);
-        assert!((phi_at(0.45) - 2.0 * FACET_ANGLE_STEP).abs() < 1e-5);
-        assert!((phi_at(0.7) - 3.0 * FACET_ANGLE_STEP).abs() < 1e-5);
-        assert_near(faceted_normal(Vec2::new(0.9, 0.0)), Vec3::RIGHT);
+        assert_eq!(faceted_normal(Vec2::new(FACET_BREAKPOINTS[0] - 0.01, 0.0)), Vec3::FORWARD);
+        for (i, &breakpoint) in FACET_BREAKPOINTS.iter().enumerate() {
+            assert!((phi_at(breakpoint - 0.001) - i as f32 * FACET_ANGLE_STEP).abs() < 1e-5);
+            assert!((phi_at(breakpoint) - (i + 1) as f32 * FACET_ANGLE_STEP).abs() < 1e-5);
+        }
+        assert_near(faceted_normal(Vec2::new(0.99, 0.0)), Vec3::RIGHT);
         assert_near(faceted_normal(Vec2::new(5.0, 0.0)), Vec3::RIGHT);
     }
 
@@ -134,8 +134,12 @@ mod tests {
     #[test]
     fn faceted_positions() {
         assert_eq!(faceted_position(Vec3::FORWARD), Some(Vec2::ZERO));
-        assert_near_2d(faceted_position(faceted_normal(Vec2::new(0.3, 0.0))).unwrap(), Vec2::new(0.325, 0.0));
-        assert_near_2d(faceted_position(Vec3::UP).unwrap(), Vec2::new(0.0, 0.9375));
+        let first_ring = faceted_normal(Vec2::new(FACET_BREAKPOINTS[0] + 0.01, 0.0));
+        let first_ring_middle = (FACET_BREAKPOINTS[0] + FACET_BREAKPOINTS[1]) / 2.0;
+        assert_near_2d(faceted_position(first_ring).unwrap(), Vec2::new(first_ring_middle, 0.0));
+
+        let rim_middle = (FACET_BREAKPOINTS[FACET_BREAKPOINTS.len() - 1] + 1.0) / 2.0;
+        assert_near_2d(faceted_position(Vec3::UP).unwrap(), Vec2::new(0.0, rim_middle));
         assert!(faceted_position(smooth_normal(Vec2::new(0.3, 0.1))).is_none());
         assert!(faceted_position(Vec3::BACK).is_none());
     }

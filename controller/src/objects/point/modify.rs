@@ -131,6 +131,51 @@ impl ControlPoint {
         Ok(())
     }
     
+    /// Change the mode of a point whose handles both sync to itself, updating its handles if needed for the new mode.
+    /// prev_id and next_id are the points before and after it in its zone, which give it new handles if it needs them to be continuous.
+    pub fn convert_mode(point_id: u16, mode: ControlPointMode, prev_id: u16, next_id: u16, points: &mut [ControlPoint], siblings: &SiblingsList) -> anyhow::Result<()> {
+        if mode == ControlPointMode::Continuous {
+            let point = points[point_id as usize];
+            let (prev, next) = (points[prev_id as usize], points[next_id as usize]);
+
+            // If a handle is missing, start from halfway to the neighbors' handles instead
+            let (mut left, mut right) = (point.left_handle, point.right_handle);
+            if left == Vec2::ZERO || right == Vec2::ZERO {
+                left = (prev.right_handle() - point.position) * 0.5;
+                right = (next.left_handle() - point.position) * 0.5;
+            }
+
+            let (left, right) = align_handles(left, right, next.position - prev.position);
+            points[point_id as usize].left_handle = left;
+            points[point_id as usize].right_handle = right;
+        }
+
+        // Also propagates the handles to everything syncing to them
+        Self::set_handle_mode(point_id, mode, points, siblings)
+    }
+
+    /// Set both handles of a point whose handles both sync to itself, relative to its position, and pick its mode from them.
+    /// Linear if both are zero, continuous if they're on a line through the point, and broken otherwise.
+    pub fn set_handles_with_mode(point_id: u16, left_handle: Vec2, right_handle: Vec2, points: &mut [ControlPoint], siblings: &SiblingsList) -> anyhow::Result<()> {
+        if point_id as usize >= points.len() { anyhow::bail!("Point {} does not exist!", point_id); }
+        let mode = if left_handle == Vec2::ZERO && right_handle == Vec2::ZERO { ControlPointMode::Linear }
+            else if handles_continuous(left_handle, right_handle) { ControlPointMode::Continuous }
+            else { ControlPointMode::Broken };
+
+        let point = &mut points[point_id as usize];
+        point.left_handle = left_handle;
+        point.right_handle = right_handle;
+        Self::set_handle_mode(point_id, mode, points, siblings)
+    }
+
+    /// Sync one handle of a point to a handle of another point, making the point broken as synced points must be.
+    /// Doesn't update the stored handle value, so call resync_handles after.
+    pub fn sync_handle(point_id: u16, right: bool, target_id: u16, target_right: bool, points: &mut [ControlPoint]) -> anyhow::Result<()> {
+        Self::retarget(point_id, right, target_id, target_right, points)?;
+        points[point_id as usize].set_mode(ControlPointMode::Broken);
+        Ok(())
+    }
+
     /// Refresh the stored value of every synced handle from the handle it eventually syncs to.
     /// Should be done after flipping.
     pub fn resync_handles(point_id: u16, points: &mut [ControlPoint]) -> anyhow::Result<()> {
@@ -149,6 +194,28 @@ impl ControlPoint {
     }
 }
 
+
+/// Returns true if both handles are nonzero and on a line through the point, pointing opposite ways.
+pub fn handles_continuous(left: Vec2, right: Vec2) -> bool {
+    if left == Vec2::ZERO || right == Vec2::ZERO { return false; }
+    let (left, right) = (left.normalized(), right.normalized());
+    left.cross(right).abs() < 1e-4 && left.dot(right) < 0.0
+}
+
+/// Line two handles up through their point, keeping their lengths, so they make a continuous curve.
+/// The new direction is halfway between the right handle and the reverse of the left handle, so it's the direction the path travels,
+/// regardless of which way the path goes around or which way it turns. Falls back to `fallback` if the handles point the same way.
+/// Handles that are already continuous, or that are zero, are left alone.
+fn align_handles(left: Vec2, right: Vec2, fallback: Vec2) -> (Vec2, Vec2) {
+    if left == Vec2::ZERO || right == Vec2::ZERO || handles_continuous(left, right) { return (left, right); }
+
+    let mut tangent = right.normalized() - left.normalized();
+    if tangent.magnitude() < 1e-6 { tangent = fallback; }
+    if tangent.magnitude() < 1e-6 { return (left, right); }
+
+    let tangent = tangent.normalized();
+    (-tangent * left.magnitude(), tangent * right.magnitude())
+}
 
 
 #[cfg(test)]

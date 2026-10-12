@@ -127,6 +127,30 @@ impl ObjectBuffers {
         Ok(connected)
     }
 
+    /// Get the sibling groups that the listed points are in, in the order they're first listed.
+    /// Each group starts with the first listed point in it, followed by its siblings.
+    pub fn sibling_groups(&self, point_ids: &[u16]) -> Vec<Vec<u16>> {
+        let mut groups: Vec<Vec<u16>> = vec![];
+        for &point_id in point_ids {
+            if point_id >= self.point_count() || groups.iter().any(|group| group.contains(&point_id)) { continue; }
+            let mut group = vec![point_id];
+            group.extend(self.get_siblings(point_id));
+            groups.push(group);
+        }
+        groups
+    }
+
+    /// If two sibling groups are next to each other in some zone, get that zone and the ID of the point that starts the path between them.
+    pub fn path_between(&self, group_a: &[u16], group_b: &[u16]) -> anyhow::Result<Option<(u16, u16)>> {
+        for &point_id in group_a {
+            let (prev_id, next_id) = self.get_neighbors(point_id)?;
+            let zone_id = self.get_point_info(point_id)?.zone_id();
+            if group_b.contains(&next_id) { return Ok(Some((zone_id, point_id))); }
+            if group_b.contains(&prev_id) { return Ok(Some((zone_id, prev_id))); }
+        }
+        Ok(None)
+    }
+
     /// Returns true if any of the listed points has a sibling that isn't listed, i.e. separate_points would do something.
     pub fn can_separate(&self, point_ids: &[u16]) -> bool {
         point_ids.iter().any(|&point_id| {

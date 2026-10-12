@@ -12,7 +12,7 @@ pub use crate::interaction::action::{Action, InputModifiers, Axis};
 use crate::interaction::tools::{EditorTool, EditorToolZone};
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorSnapshot};
-pub use crate::objects::{ObjectBuffers, ObjectSnapshot, BufferStates};
+pub use crate::objects::{ObjectBuffers, ObjectSnapshot, BufferStates, ControlPointMode};
 
 /// The Controller manages our actual working pipeline.
 pub struct Controller {

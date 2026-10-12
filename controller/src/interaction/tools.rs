@@ -9,7 +9,7 @@ pub use point::EditorToolPoint;
 use result::{ToolResult, EditorToolActionResult};
 
 use studio_math::{Vec2, Vec3};
-use crate::{Controller, ObjectBuffers, ObjectSnapshot, InputModifiers};
+use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectSnapshot, InputModifiers};
 
 /// Options for which tool we are using in the editor.
 /// Tool options may later be added as tuple parameters in this enum.
@@ -139,6 +139,47 @@ impl Controller {
             action(&mut state.objects)?;
             Ok(EditorToolActionResult::new(tool.kind(), normals_stale))
         });
+    }
+
+    /// Run an action on the objects that isn't part of a tool and replaces the selection, in the point tool.
+    /// The action gets the current selection and returns the new one. Has the same rollback and error handling as tool actions.
+    pub(crate) fn run_selection_action(&mut self, normals_stale: bool, action: impl FnOnce(&mut ObjectBuffers, &[u16]) -> anyhow::Result<Vec<u16>>) {
+        let selection = Vec::from(self.tool.selection());
+        let mut new_selection = None;
+        self.run_tool(false, |tool, mut state| {
+            new_selection = Some(action(&mut state.objects, &selection)?);
+            Ok(EditorToolActionResult::new(tool.kind(), normals_stale))
+        });
+
+        if let Some(selection) = new_selection {
+            self.tool = EditorToolPoint::select(&selection, self.create_state());
+        }
+    }
+
+    /// Get the IDs of the selected points
+    pub fn selected_points(&self) -> &[u16] { self.tool.selection() }
+
+    /// Get the handle mode of the point a point's handles sync to, or None if they sync to different points
+    pub fn point_handle_mode(&self, point_id: u16) -> Option<ControlPointMode> {
+        self.objects.get_point_mode(point_id).ok().flatten()
+    }
+
+    /// Returns true if a point has any siblings
+    pub fn point_has_siblings(&self, point_id: u16) -> bool {
+        point_id < self.objects.point_count() && !self.objects.get_siblings(point_id).is_empty()
+    }
+
+    /// If the selection is two sibling groups next to each other in a zone (i.e. a clicked path),
+    /// get that zone and the ID of the point that starts the path between them.
+    pub fn selected_path(&self) -> Option<(u16, u16)> {
+        let groups = self.objects.sibling_groups(self.tool.selection());
+        if groups.len() != 2 { return None; }
+        self.objects.path_between(&groups[0], &groups[1]).ok().flatten()
+    }
+
+    /// Returns true if the selected points are from more than one sibling group
+    pub fn can_merge_selection(&self) -> bool {
+        self.objects.sibling_groups(self.tool.selection()).len() > 1
     }
 
     /// Get the IDs of the zones that have selected points, sorted.
