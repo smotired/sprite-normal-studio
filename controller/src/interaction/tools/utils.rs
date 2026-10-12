@@ -1,8 +1,75 @@
 use studio_math::Vec2;
+use crate::InputModifiers;
 use crate::interaction::tools::ControllerStateInput;
 use crate::objects::ControlPointMode;
 
 const CLICK_TOLERANCE: f32 = 6.0; // since of control point boxes in the overlay plus 3 pixels
+
+/// Size in pixels of the grid that dragging snaps to while holding ctrl.
+/// This will be replaced with a user setting in the future.
+const GRID_SIZE: u32 = 1;
+
+/// tan(22.5 degrees), the slope that splits orthagonal from diagonal when snapping directions.
+const TAN_HALF_OCTANT: f32 = 0.414_213_56;
+
+/// Apply the drag modifiers to the target position of whatever is being dragged.
+/// `start` is where the target was when the drag began, and `origin` is where the mouse was.
+/// SHIFT: snap movement to horizontal, vertical, or diagonal, whichever is closest to the direction moved
+/// CTRL: snap to the grid (see GRID_SIZE)
+pub fn snap_drag_target(mut target: Vec2, start: Vec2, origin: Vec2, pos: Vec2, modifiers: InputModifiers) -> Vec2 {
+    // Shift: only move orthagonally/diagonally
+    if modifiers.shift {
+        let delta = pos - origin;
+        let (abs_x, abs_y) = (delta.x.abs(), delta.y.abs());
+
+        // Snap delta to whichever of 8 directions is correct
+        let snapped_delta = if abs_y < abs_x * TAN_HALF_OCTANT {
+            Vec2::new(delta.x, 0.0)
+        } else if abs_x < abs_y * TAN_HALF_OCTANT {
+            Vec2::new(0.0, delta.y)
+        } else {
+            let diagonal = (abs_x + abs_y) / 2.0;
+            Vec2::new(diagonal.copysign(delta.x), diagonal.copysign(delta.y))
+        };
+        target = start + snapped_delta;
+    }
+
+    // Ctrl: snap to the grid
+    if modifiers.ctrl {
+        let grid = GRID_SIZE as f32;
+        target = Vec2::new((target.x / grid).round() * grid, (target.y / grid).round() * grid);
+    }
+    target
+}
+
+/// Combine a unit of IDs with the current selection, based on modifier keys.
+/// SHIFT adds, ALT removes, SHIFT+ALT toggles, and no modifiers replaces the selection.
+/// If `toggle_all` is true, toggling removes the unit only if all of it is selected, and adds all of it otherwise.
+/// If it is false, every ID in the unit is toggled on its own.
+/// Returns the new selection, sorted.
+pub fn combine_selection(selected: &[u16], unit: &[u16], modifiers: InputModifiers, toggle_all: bool) -> Vec<u16> {
+    let mut selected: std::collections::HashSet<u16> = selected.iter().copied().collect();
+    match (modifiers.shift, modifiers.alt) {
+        (true, true) => if toggle_all {
+            if unit.iter().all(|id| selected.contains(id)) {
+                for id in unit { selected.remove(id); }
+            } else {
+                selected.extend(unit);
+            }
+        } else {
+            for &id in unit {
+                if !selected.insert(id) { selected.remove(&id); } // if it was already present, remove it
+            }
+        },
+        (true, false) => selected.extend(unit),
+        (false, true) => for id in unit { selected.remove(id); },
+        (false, false) => selected = unit.iter().copied().collect(),
+    }
+
+    let mut selected: Vec<u16> = selected.into_iter().collect();
+    selected.sort();
+    selected
+}
 
 /// Get the closest control point to a click position, if it's in the click range corrected for camera scale.
 pub fn get_clicked_control_point(state: &ControllerStateInput, zone_id: Option<u16>, pos: Vec2) -> Option<(u16, u16)> {

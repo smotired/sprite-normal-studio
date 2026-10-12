@@ -88,6 +88,11 @@ impl ObjectBuffers {
         Ok(self.point_siblings.borrow().items[point_id as usize])
     }
 
+    /// Get the IDs of every sibling of a control point, not including the point itself.
+    pub fn get_siblings(&self, point_id: u16) -> Vec<u16> {
+        ControlPoint::get_siblings(point_id, &self.point_siblings.borrow().items)
+    }
+
     /// Find a sibling to the control point in the selected zone.
     pub fn sibling_in_zone(&self, point_id: u16, zone_id: u16) -> Option<u16> {
         ControlPoint::find_in_zone(point_id, zone_id, &self.points.borrow().items, &self.point_siblings.borrow().items).unwrap()
