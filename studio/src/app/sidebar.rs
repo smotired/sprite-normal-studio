@@ -1,18 +1,65 @@
+mod zone;
+mod point;
+mod pen;
+mod utils;
+
+use controller::{Controller, EditorToolKind};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
 use crate::app::{file, StudioApp};
 
+/// A section of the sidebar with options for one editor tool.
+/// Each one keeps its own state, which is kept when switching between tools.
+trait ToolSidebar {
+    fn ui(&mut self, ui: &mut egui::Ui, controller: &mut Controller);
+}
+
+/// The sidebar sections for every editor tool
+#[derive(Default)]
+pub(super) struct ToolSidebars {
+    zone: zone::ZoneSidebar,
+    point: point::PointSidebar,
+    pen: pen::PenSidebar,
+}
+
+impl ToolSidebars {
+    /// Get the sidebar section for a tool
+    fn get(&mut self, tool: EditorToolKind) -> &mut dyn ToolSidebar {
+        match tool {
+            EditorToolKind::Zone  => &mut self.zone,
+            EditorToolKind::Point => &mut self.point,
+            EditorToolKind::Pen   => &mut self.pen,
+        }
+    }
+}
+
 impl StudioApp {
     /// Render the left sidebar panel. Must be shown before the central panel.
     pub(super) fn show_sidebar(&mut self, ui: &mut egui::Ui) {
+        // The padding goes on the contents instead of the panel, so the scrollbar is at the edge of the panel
+        let margin = egui::Margin::symmetric(8, 2);
         egui::Panel::left("sidebar")
             .exact_size(240.0)
             .resizable(false)
+            .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(0))
             .show(ui, |ui| {
-                ui.heading("Sprite Normal Studio");
+                // The heading stays at the top while the rest scrolls
+                egui::Frame::new().inner_margin(margin).show(ui, |ui| {
+                    ui.heading("Sprite Normal Studio");
+                });
 
-                self.show_file_selectors(ui);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        egui::Frame::new().inner_margin(margin).show(ui, |ui| {
+                            self.show_file_selectors(ui);
+                            ui.separator();
+
+                            // Options for the selected tool
+                            self.tool_sidebars.get(self.controller.selected_tool()).ui(ui, &mut self.controller);
+                        });
+                    });
             });
     }
 

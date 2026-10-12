@@ -1,4 +1,4 @@
-use studio_math::Vec2;
+use studio_math::{Vec2, Vec3};
 
 use super::{ObjectBuffers, ControlPoint, ControlPointMode};
 
@@ -136,6 +136,25 @@ impl ObjectBuffers {
         }
 
         Ok(())
+    }
+
+    /// Set the base surface normal vector of every listed zone.
+    pub fn set_zone_normals(&mut self, zone_ids: &[u16], normal: Vec3) -> anyhow::Result<()> {
+        let zone_count = self.zone_count();
+        let zones = &mut self.zones.borrow_mut().items;
+        for &zone_id in zone_ids {
+            if zone_id >= zone_count { anyhow::bail!("Zone {} does not exist!", zone_id); }
+            zones[zone_id as usize].set_normal(normal);
+        }
+        Ok(())
+    }
+
+    /// Separate the listed points from their unlisted siblings, so they can be moved independently.
+    /// Listed siblings stay siblings with each other, and unlisted siblings stay siblings with each other.
+    pub fn separate_points(&mut self, point_ids: &[u16]) -> anyhow::Result<()> {
+        let points = &mut self.points.borrow_mut().items;
+        let siblings = &mut self.point_siblings.borrow_mut().items;
+        ControlPoint::separate_siblings(point_ids, points, siblings)
     }
 }
 
@@ -313,5 +332,32 @@ mod tests {
         for id in 0..4 {
             assert_eq!(objects.get_sibling(id).unwrap(), id);
         }
+    }
+
+    /// Zone normals can be set for several zones at once, but not for zones that don't exist
+    #[test]
+    fn set_zone_normals() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+
+        objects.set_zone_normals(&[0, 1], Vec3::RIGHT).unwrap();
+        assert_eq!(objects.get_zone_info(0).unwrap().normal(), Vec3::RIGHT);
+        assert_eq!(objects.get_zone_info(1).unwrap().normal(), Vec3::RIGHT);
+        assert!(objects.set_zone_normals(&[2], Vec3::UP).is_err());
+    }
+
+    /// Separated points keep their positions but no longer move with their old siblings
+    #[test]
+    fn separate_points() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (zone_id, point_id) = objects.create_branching_zone(1).unwrap();
+        assert!(objects.can_separate(&[point_id]));
+
+        objects.separate_points(&[point_id]).unwrap();
+        assert!(!objects.can_separate(&[point_id]));
+        assert!(objects.get_siblings(1).is_empty());
+        assert_eq!(objects.sibling_in_zone(1, zone_id), None);
     }
 }

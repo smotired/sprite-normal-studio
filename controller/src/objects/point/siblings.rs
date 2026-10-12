@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use anyhow::Ok;
 
 use super::{ControlPoint, ControlPointHandleSyncMode, PointsList, SiblingsList};
@@ -112,6 +114,65 @@ impl ControlPoint {
             }
         })?;
         Ok(point_id)
+    }
+
+    /// Separate the selected points from their unselected siblings.
+    /// Selected siblings stay siblings with each other, and unselected siblings stay siblings with each other.
+    /// Handles that synced across the two groups are re-rooted within their own group, keeping their current values.
+    pub fn separate_siblings(selected: &[u16], points: &mut [ControlPoint], siblings: &mut SiblingsList) -> anyhow::Result<()> {
+        let selected_set: HashSet<u16> = selected.iter().copied().collect();
+        let mut visited = HashSet::new();
+        for &start_id in selected {
+            if (start_id as usize) >= points.len() { anyhow::bail!("Point {} does not exist!", start_id); }
+            if visited.contains(&start_id) { continue; }
+
+            // Get the ring starting after the selected point, so the first handle promoted to a root is the same one get_watchers finds first
+            let mut ring = Self::get_siblings(start_id, siblings);
+            ring.push(start_id);
+            let (selected_group, unselected_group): (Vec<u16>, Vec<u16>) = ring.iter().partition(|id| selected_set.contains(id));
+            visited.extend(selected_group.iter().copied());
+            if unselected_group.is_empty() { continue; }
+
+            // Record the root of every handle before changing anything
+            let mut roots = HashMap::new();
+            for &id in &ring {
+                for right in [false, true] {
+                    roots.insert((id, right), Self::get_sync_id(id, right, points)?);
+                }
+            }
+
+            for group in [&selected_group, &unselected_group] {
+                // Link the group into its own ring
+                for (i, &id) in group.iter().enumerate() {
+                    siblings[id as usize] = group[(i + 1) % group.len()];
+                }
+
+                // Make sure every handle syncs within the group, to the same root as before if it's in the group
+                let mut new_roots = HashMap::new();
+                for &id in group {
+                    for right in [false, true] {
+                        let point = points[id as usize];
+                        let sync_id = if right { point.right_sync_id } else { point.left_sync_id };
+                        if group.contains(&sync_id) { continue; } // the link stays in the group, so the root is unchanged
+
+                        // If the root is still in the group, sync directly to it.
+                        // Otherwise the first handle we find with that root becomes the new root for the rest.
+                        let root = roots[&(id, right)];
+                        let target = if group.contains(&root.0) { Some(root) } else { new_roots.get(&root).copied() };
+                        match target {
+                            Some((target_id, target_right)) if target_id != id => Self::retarget(id, right, target_id, target_right, points)?,
+                            _ => {
+                                let point = &mut points[id as usize];
+                                if right { point.right_sync_id = id; } else { point.left_sync_id = id; }
+                                point.set_sync_mode(right, ControlPointHandleSyncMode::Synced);
+                                new_roots.insert(root, (id, right));
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Get the ID and handle direction of the handle we are eventually syncing this handle to.
@@ -272,5 +333,72 @@ mod tests {
         ControlPoint::retarget(0, false, 1, false, &mut points).unwrap();
         ControlPoint::retarget(1, false, 0, false, &mut points).unwrap();
         assert!(ControlPoint::get_sync_id(0, false, &points).is_err());
+    }
+
+    /// Separating splits each ring into a selected ring and an unselected ring, keeping the order
+    #[test]
+    fn separate_siblings_splits_rings() {
+        let (mut points, mut siblings) = solo_points(6);
+        link_ring(&[0, 1, 2, 3, 4], &mut siblings);
+
+        ControlPoint::separate_siblings(&[1, 3, 5], &mut points, &mut siblings).unwrap();
+        assert_eq!(ControlPoint::get_siblings(1, &siblings), vec![3]);
+        assert_eq!(ControlPoint::get_siblings(0, &siblings), vec![2, 4]);
+        assert!(ControlPoint::get_siblings(5, &siblings).is_empty());
+
+        // A fully selected ring is unchanged
+        ControlPoint::separate_siblings(&[0, 2, 4], &mut points, &mut siblings).unwrap();
+        assert_eq!(ControlPoint::get_siblings(0, &siblings), vec![2, 4]);
+    }
+
+    /// A single separated point ends up alone, with nothing syncing to it
+    #[test]
+    fn separate_siblings_single_point() {
+        let (mut points, mut siblings) = solo_points(3);
+        link_ring(&[0, 1, 2], &mut siblings);
+        ControlPoint::retarget(1, false, 0, false, &mut points).unwrap();
+        ControlPoint::retarget(0, true, 2, true, &mut points).unwrap();
+
+        ControlPoint::separate_siblings(&[0], &mut points, &mut siblings).unwrap();
+        assert_eq!(siblings[0], 0);
+        assert_eq!(ControlPoint::get_siblings(1, &siblings), vec![2]);
+        assert_eq!(ControlPoint::get_sync_id(0, true, &points).unwrap(), (0, true));
+        assert_eq!(ControlPoint::get_sync_id(1, false, &points).unwrap(), (1, false));
+    }
+
+    /// When a root ends up in the other group, the first handle synced to it becomes the root for the others, keeping flips
+    #[test]
+    fn separate_siblings_promotes_root() {
+        let (mut points, mut siblings) = solo_points(3);
+        link_ring(&[0, 1, 2], &mut siblings);
+        ControlPoint::retarget(1, false, 0, false, &mut points).unwrap(); // synced
+        ControlPoint::retarget(2, true, 0, false, &mut points).unwrap();  // flipped
+
+        ControlPoint::separate_siblings(&[0], &mut points, &mut siblings).unwrap();
+        assert_eq!(ControlPoint::get_sync_id(1, false, &points).unwrap(), (1, false));
+        assert_eq!(ControlPoint::get_sync_id(2, true, &points).unwrap(), (1, false));
+        assert_eq!(points[2].right_sync_id(), 1);
+        assert!(points[2].sync_modes().1.is_flipped());
+    }
+
+    /// Handles that synced through the other group sync directly to their root if it's still in their group
+    #[test]
+    fn separate_siblings_skips_other_group() {
+        let (mut points, mut siblings) = solo_points(3);
+        link_ring(&[0, 1, 2], &mut siblings);
+        ControlPoint::retarget(1, false, 0, false, &mut points).unwrap();
+        ControlPoint::retarget(2, false, 1, false, &mut points).unwrap(); // 2 -> 1 -> 0
+
+        ControlPoint::separate_siblings(&[1], &mut points, &mut siblings).unwrap();
+        assert_eq!(points[2].left_sync_id(), 0);
+        assert_eq!(ControlPoint::get_sync_id(2, false, &points).unwrap(), (0, false));
+        assert_eq!(ControlPoint::get_sync_id(1, false, &points).unwrap(), (1, false));
+    }
+
+    /// Can't separate a point that doesn't exist
+    #[test]
+    fn separate_siblings_missing_point() {
+        let (mut points, mut siblings) = solo_points(2);
+        assert!(ControlPoint::separate_siblings(&[5], &mut points, &mut siblings).is_err());
     }
 }

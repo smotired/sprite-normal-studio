@@ -44,6 +44,12 @@ impl Zone {
     }
 
     pub fn range(&self) -> (u16, u16) { (self.point_start, self.point_count) }
+
+    /// Get the base surface normal vector of this zone.
+    pub fn normal(&self) -> Vec3 { self.normal }
+
+    /// Set the base surface normal vector of this zone.
+    pub fn set_normal(&mut self, normal: Vec3) { self.normal = normal; }
 }
 
 

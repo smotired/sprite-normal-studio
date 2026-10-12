@@ -1,4 +1,4 @@
-use controller::{Axis, Input, InputModifiers};
+use controller::{Axis, Action, InputModifiers};
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
 use studio_math::Vec2;
 
@@ -21,7 +21,7 @@ impl StudioApp {
 
         ui.input_mut(|i| {
             for event in self.handle_app_input(i, (viewport_rect, ppp)) {
-                self.controller.handle_input(event);
+                self.controller.handle_action(event);
             }
 
             // Set world space cursor position
@@ -41,12 +41,12 @@ impl StudioApp {
     /// Forward input events on the editor image, i.e. click and drag, to the controller
     pub(super) fn process_editor_input(&mut self, ui: &Ui, response: Response) {
         for event in self.handle_editor_input(ui, response) {
-            self.controller.handle_input(event);
+            self.controller.handle_action(event);
         }
     }
 
     // Convert egui inputs into something our controller can use.
-    pub fn handle_app_input<'a>(&mut self, i: &'a mut InputState, (viewport_rect, ppp): (Rect, f32)) -> Box<dyn Iterator<Item = Input> + 'a> {
+    pub fn handle_app_input<'a>(&mut self, i: &'a mut InputState, (viewport_rect, ppp): (Rect, f32)) -> Box<dyn Iterator<Item = Action> + 'a> {
         // Get movement constants
         let movement = |shift: bool| { if shift { 100.0 } else { 10.0 } };
         let scale = |shift: bool| { if shift { 2 } else { 1 } };
@@ -63,21 +63,24 @@ impl StudioApp {
         // Handle specific events
         Box::new(i.events.clone().into_iter().map(move |event| {
             match event {                
+                // Ignore scrolling outside the workspace, e.g. in the sidebar
+                Event::MouseWheel { .. } if mouse_world.is_none() => Action::None,
+
                 // Mouse wheel event: Handles move or zoom depending on if shift is held
                 Event::MouseWheel { delta, modifiers, .. } => {
                     if modifiers.shift {
                         let scale = scale(modifiers.ctrl);
                         if delta.y > 0.0 {
-                            Input::CameraScale(scale, mouse_world)
+                            Action::CameraScale(scale, mouse_world)
                         } else if delta.y < 0.0 {
-                            Input::CameraScale(-scale, mouse_world)
-                        } else { Input::NoInput }
+                            Action::CameraScale(-scale, mouse_world)
+                        } else { Action::None }
                     } else {
                         if modifiers.ctrl && delta.y != 0.0 {
-                            Input::CameraMove(Axis::Horizontal, delta.y * 8.0)
+                            Action::CameraMove(Axis::Horizontal, delta.y * 8.0)
                         } else if !modifiers.ctrl && delta.y != 0.0 {
-                            Input::CameraMove(Axis::Vertical, -delta.y * 8.0)
-                        } else { Input::NoInput }
+                            Action::CameraMove(Axis::Vertical, -delta.y * 8.0)
+                        } else { Action::None }
                     }
                 },
 
@@ -87,118 +90,132 @@ impl StudioApp {
                         // Recenter camera
                         Key::Home => {
                             if pressed && !repeat {
-                                Input::Recenter
-                            } else { Input::NoInput }
+                                Action::Recenter
+                            } else { Action::None }
                         }
 
                         // Camera movement
                         Key::W => {
                             if pressed {
-                                Input::CameraMove(Axis::Vertical, -movement(modifiers.shift))
-                            } else { Input::NoInput }
+                                Action::CameraMove(Axis::Vertical, -movement(modifiers.shift))
+                            } else { Action::None }
                         },
                         Key::A => {
                             if pressed {
-                                Input::CameraMove(Axis::Horizontal, -movement(modifiers.shift))
-                            } else { Input::NoInput }
+                                Action::CameraMove(Axis::Horizontal, -movement(modifiers.shift))
+                            } else { Action::None }
                         },
                         Key::S => {
                             if pressed {
-                                Input::CameraMove(Axis::Vertical, movement(modifiers.shift))
-                            } else { Input::NoInput }
+                                Action::CameraMove(Axis::Vertical, movement(modifiers.shift))
+                            } else { Action::None }
                         },
                         Key::D => {
                             if pressed {
-                                Input::CameraMove(Axis::Horizontal, movement(modifiers.shift))
-                            } else { Input::NoInput }
+                                Action::CameraMove(Axis::Horizontal, movement(modifiers.shift))
+                            } else { Action::None }
                         },
 
                         // Camera zoom
                         Key::Equals => {
                             if pressed && !repeat && modifiers.ctrl {
                                 i.consume_key(Modifiers::CTRL, Key::Equals); // prevent app from also zooming
-                                Input::CameraScale(scale(modifiers.shift), mouse_world)
-                            } else { Input::NoInput }
+                                Action::CameraScale(scale(modifiers.shift), mouse_world)
+                            } else { Action::None }
                         },
                         Key::Minus => {
                             if pressed && !repeat && modifiers.ctrl {
                                 i.consume_key(Modifiers::CTRL, Key::Minus); // prevent app from also zooming
-                                Input::CameraScale(-scale(modifiers.shift), mouse_world)
-                            } else { Input::NoInput }
+                                Action::CameraScale(-scale(modifiers.shift), mouse_world)
+                            } else { Action::None }
                         },
 
                         // Altitude
                         Key::PageUp => {
                             if pressed {
-                                Input::Altitude(true)
-                            } else { Input::NoInput }
+                                Action::Altitude(true)
+                            } else { Action::None }
                         },
                         Key::PageDown => {
                             if pressed {
-                                Input::Altitude(false)
-                            } else { Input::NoInput }
+                                Action::Altitude(false)
+                            } else { Action::None }
                         },
 
                         // Action controls
                         Key::Escape => {
                             if pressed && !repeat {
-                                Input::Cancel
-                            } else { Input::NoInput }
+                                Action::Cancel
+                            } else { Action::None }
                         },
                         Key::Delete => {
                             if pressed && !repeat {
-                                Input::Delete
-                            } else { Input::NoInput }
+                                Action::Delete
+                            } else { Action::None }
+                        },
+
+                        // Point the selected zones straight out
+                        Key::Z => {
+                            if pressed && !repeat && modifiers.shift && !modifiers.ctrl {
+                                Action::ZoneNormalSet(studio_math::Vec3::FORWARD, false)
+                            } else { Action::None }
+                        },
+
+                        // Separate the selected zones from their neighbors
+                        Key::K => {
+                            if pressed && !repeat && modifiers.ctrl {
+                                Action::SelectionSeparated
+                            } else { Action::None }
                         },
 
                         // Tool selection
                         Key::V => {
                             if pressed && !repeat {
                                 if modifiers.shift {
-                                    Input::ToolSelected(controller::EditorToolKind::Point)
+                                    Action::ToolSelected(controller::EditorToolKind::Point)
                                 } else {
-                                    Input::ToolSelected(controller::EditorToolKind::Zone)
+                                    Action::ToolSelected(controller::EditorToolKind::Zone)
                                 }
-                            } else { Input::NoInput }
+                            } else { Action::None }
                         },
                         Key::P => {
                             if pressed && !repeat {
-                                Input::ToolSelected(controller::EditorToolKind::Pen)
-                            } else { Input::NoInput }
+                                Action::ToolSelected(controller::EditorToolKind::Pen)
+                            } else { Action::None }
                         },
 
                         // Toggling lighting
                         Key::L => {
                             if pressed && !repeat {
                                 if modifiers.ctrl {
-                                    Input::LightingToggled(None) // Toggle both lighting and normal map
+                                    Action::LightingToggled(None) // Toggle both lighting and normal map
                                 } else if modifiers.shift {
-                                    Input::LightingToggled(Some(false)) // Toggle normal map
+                                    Action::LightingToggled(Some(false)) // Toggle normal map
                                 } else {
-                                    Input::LightingToggled(Some(true)) // Toggle just lighting
+                                    Action::LightingToggled(Some(true)) // Toggle just lighting
                                 }
-                            } else { Input::NoInput }
+                            } else { Action::None }
                         },
 
                         // Toggling the overlay
                         Key::O => {
                             if pressed && !repeat {
-                                Input::OverlayToggled
-                            } else { Input::NoInput }
+                                Action::OverlayToggled
+                            } else { Action::None }
                         },
 
                         // Everything else
-                        _ => Input::NoInput,
+                        _ => Action::None,
                     }
                 },
 
-                _ => Input::NoInput,
+                _ => Action::None,
             }
         }))
     }
 
     // Handle inputs on the editor image itself
-    pub fn handle_editor_input(&mut self, ui: &Ui, response: Response) ->  Vec<Input> {
+    pub fn handle_editor_input(&mut self, ui: &Ui, response: Response) ->  Vec<Action> {
         // Get information about the editor image window
         let ppp = ui.ctx().pixels_per_point();
         let rect = response.rect;
@@ -217,14 +234,14 @@ impl StudioApp {
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos() {
                 let modifiers = ui.input(|i| i.modifiers);
-                inputs.push(Input::MouseClicked(to_world(pos), modifiers.convert()));
+                inputs.push(Action::MouseClicked(to_world(pos), modifiers.convert()));
             }
 
         // Handle starting drag
         if response.drag_started_by(PointerButton::Primary) {
             let (press_origin, modifiers) = ui.input(|i| (i.pointer.press_origin(), i.modifiers));
             if let Some(start_screen) = press_origin {
-                inputs.push(Input::MouseDragStarted(to_world(start_screen), modifiers.convert()));
+                inputs.push(Action::MouseDragStarted(to_world(start_screen), modifiers.convert()));
             }
         }
 
@@ -239,14 +256,14 @@ impl StudioApp {
                     let final_screen = start_screen + total_delta;
                     let final_world = to_world(final_screen);
 
-                    inputs.push(Input::MouseDragged(start_world, final_world, modifiers.convert()));
+                    inputs.push(Action::MouseDragged(start_world, final_world, modifiers.convert()));
                 }
         }
 
         // Handle stopping drag
         if response.drag_stopped_by(PointerButton::Primary) {
             let modifiers = ui.input(|i| i.modifiers);
-            inputs.push(Input::MouseDragReleased(modifiers.convert()));
+            inputs.push(Action::MouseDragReleased(modifiers.convert()));
         }
 
         // Handle an active drag with the middle mouse button for camera
@@ -258,7 +275,7 @@ impl StudioApp {
             let delta_pos_in_world = to_world(Pos2::new(delta.x, delta.y));
             let world_delta = delta_pos_in_world - world_origin;
 
-            inputs.push(Input::CameraDragged(world_delta));
+            inputs.push(Action::CameraDragged(world_delta));
         }
 
         inputs

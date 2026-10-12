@@ -1,4 +1,4 @@
-use studio_math::Vec2;
+use studio_math::{Vec2, Vec3};
 
 use crate::{Controller, EditorToolKind};
 
@@ -28,10 +28,10 @@ impl InputModifiers {
     pub fn all()        -> Self { Self { shift: true,  ctrl: true,  alt: true  }}
 }
 
-/// Defines input types
-pub enum Input {
-    /// No input, used so that we don't kill the iterator early
-    NoInput,
+/// Defines actions that can be performed on the controller, from raw input or from the UI
+pub enum Action {
+    /// No action, used so that we don't kill the iterator early
+    None,
 
     /// Recentering camera to image center and scale 1
     Recenter,
@@ -73,6 +73,13 @@ pub enum Input {
     /// A specific editor tool is selected.
     ToolSelected(EditorToolKind),
 
+    /// The normal vector of the selected zones is set, in the zone tool.
+    /// The bool is true if this continues a drag, so a success doesn't hide an error from earlier in the drag.
+    ZoneNormalSet(Vec3, bool),
+
+    /// The selected points are separated from their unselected siblings, in the zone tool.
+    SelectionSeparated,
+
     /// Lighting/shading is toggled.
     /// If none, toggle both. If true, toggling lighting, otherwise toggling normal.
     LightingToggled(Option<bool>),
@@ -84,16 +91,16 @@ impl Controller {
         self.cursor_pos = pos;
     }
 
-    // Handle different inputs from the UI
-    pub fn handle_input(&mut self, input: Input) {
-        match input {
-            Input::Recenter => {
+    // Handle different actions from the UI
+    pub fn handle_action(&mut self, action: Action) {
+        match action {
+            Action::Recenter => {
                 let center = Vec2::from(self.output().size()) * 0.5;
                 self.camera.reset_position(center);
                 self.light.set_pos(center);
             },
 
-            Input::CameraMove(axis, amount) => {
+            Action::CameraMove(axis, amount) => {
                 match axis {
                     Axis::Vertical => {
                         self.camera.move_position(Vec2::vt(amount * self.camera.inv_scale()));
@@ -104,17 +111,17 @@ impl Controller {
                 }
             },
 
-            Input::CameraScale(amount, relative_to) => {
+            Action::CameraScale(amount, relative_to) => {
                 self.camera.apply_scale(amount, relative_to);
             },
 
-            Input::MouseClicked(pos, modifiers) => {
+            Action::MouseClicked(pos, modifiers) => {
                 if self.overlay_state.overlay_on() {
                     self.run_tool(false, |tool, state| tool.handle_click(state, pos, modifiers));
                 }
             },
 
-            Input::MouseDragStarted(pos, modifiers) => {
+            Action::MouseDragStarted(pos, modifiers) => {
                 self.overlay_state.dragging_light = false;
 
                 if self.overlay_state.overlay_on() {
@@ -130,7 +137,7 @@ impl Controller {
                 }
             }
 
-            Input::MouseDragged(_start, new, modifiers) => {
+            Action::MouseDragged(_start, new, modifiers) => {
                 // Move the light if we are dragging it
                 if self.overlay_state.dragging_light {
                     self.light.set_pos(new);
@@ -142,7 +149,7 @@ impl Controller {
                 }
             },
 
-            Input::MouseDragReleased(modifiers) => {
+            Action::MouseDragReleased(modifiers) => {
                 if self.overlay_state.dragging_light {
                     self.overlay_state.dragging_light = false;
                 }
@@ -152,15 +159,15 @@ impl Controller {
                 }
             },
 
-            Input::Cancel => {
+            Action::Cancel => {
                 self.run_tool(false, |tool, state| tool.handle_cancel(state));
             },
 
-            Input::Delete => {
+            Action::Delete => {
                 self.run_tool(false, |tool, state| tool.handle_delete(state));
             },
 
-            Input::Altitude(up) => {
+            Action::Altitude(up) => {
                 if self.overlay_state.dragging_light {
                     self.light.adjust_height(if up { 100.0 } else { -100.0 });
                 }
@@ -169,19 +176,19 @@ impl Controller {
                 // Layers are in like phase 6 or something though
             },
 
-            Input::OverlayToggled => {
+            Action::OverlayToggled => {
                 self.overlay_state.toggle_overlay();
             },
 
-            Input::ToolSelected(tool) => {
+            Action::ToolSelected(tool) => {
                 self.select_tool(tool);
             },
 
-            Input::CameraDragged(delta) => {
+            Action::CameraDragged(delta) => {
                 self.camera.move_position(-delta);
             },
 
-            Input::LightingToggled(toggle) => {
+            Action::LightingToggled(toggle) => {
                 if let Some(toggling_lighting) = toggle {
                     if toggling_lighting {
                         self.overlay_state.lighting_on = !self.overlay_state.lighting_on;
@@ -200,7 +207,21 @@ impl Controller {
                 }
             },
 
-            Input::NoInput => { },
+            Action::ZoneNormalSet(normal, continuing_drag) => {
+                let zones = self.selected_zones();
+                if self.selected_tool() == EditorToolKind::Zone && !zones.is_empty() {
+                    self.run_object_action(continuing_drag, true, |objects| objects.set_zone_normals(&zones, normal));
+                }
+            },
+
+            Action::SelectionSeparated => {
+                let points = Vec::from(self.tool.selection());
+                if self.selected_tool() == EditorToolKind::Zone && !points.is_empty() {
+                    self.run_object_action(false, false, |objects| objects.separate_points(&points));
+                }
+            },
+
+            Action::None => { },
         }
     }
 }

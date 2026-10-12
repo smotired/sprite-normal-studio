@@ -87,50 +87,9 @@ impl ControlPoint {
     pub fn remove_point(point_id: u16, points: &mut Vec<ControlPoint>, siblings: &mut SiblingsList) -> anyhow::Result<()> {
         if (point_id as usize) >= points.len() { anyhow::bail!("Point {} does not exist!", point_id); }
         
-        // Remove syncing dependency on this point without breaking anything else.
-        for right in [false, true] {            
-            // Get the handle this handle is syncing to
-            let (mut sync_id, sync_right) = Self::get_sync_id(point_id, right, points)?;
-            let mut sync_flipped = sync_right != right;
-            
-            // If we have nothing syncing to this handle we don't have to do anything else
-            let watchers = Self::get_watchers(point_id, points, siblings, right);
-            if watchers.is_empty() { continue; }
-
-            // If this handle was syncing to itself, promote a watcher to the sync target
-            if sync_id == point_id {
-                if sync_flipped { anyhow::bail!("Point {} was syncing flipped to itself!", point_id); }
-
-                // Promote the very first watcher to the candidate point
-                let (promoted_id, promoted_mode) = watchers[0];
-                sync_id = promoted_id;
-
-                // If this watcher was flipped, we must flip all the other watchers
-                if promoted_mode.is_flipped() { sync_flipped = true; }
-            }
-
-            // Make all watchers sync to the target, handling flip logic correctly
-            for (watcher_id, watcher_mode) in watchers {
-                // Update the sync ID
-                if right {
-                    points[watcher_id as usize].right_sync_id = sync_id;
-                } else {
-                    points[watcher_id as usize].left_sync_id = sync_id;
-                }
-
-                // If the point is flipped, flip the watcher's flipped status.
-                // A flipped watcher should become synced, and vice versa.
-                if sync_flipped {
-                    points[watcher_id as usize].set_sync_mode(right, watcher_mode.flip());
-                }
-            }
-        }
-
-        // Skip the point in the siblings loop
+        // Separate the point from its siblings, so nothing syncs to it or links to it in the siblings loop
+        Self::separate_siblings(&[point_id], points, siblings)?;
         let index = point_id as usize;
-        if index >= points.len() { anyhow::bail!("Point {} does not exist!", index); }
-        let precursor_id = Self::get_precursor(point_id, siblings)?;
-        siblings[precursor_id as usize] = siblings[index];
 
         // Remove the point from the vector
         points.remove(index);

@@ -67,7 +67,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
     Shift+select in zone mode should select all connected zones.
     Shift+select in point mode should select all points in the clicked zone.
     Ctrl+select in point mode should select all points in all connected zones.
-[ ] Selection options panel which allows you to set base normal for a zone,
+[x] Selection options panel which allows you to set base normal for a zone,
     which will be applied before all shapes. Shapes will not influence past this
     base layer
 [ ] Changing vertex mode in tool panel, and changing coupling with siblings.
@@ -179,8 +179,9 @@ This section will be added to as I add keybinds (and remember).
 > `Left Click + Drag` - Drag light or selected zones/control points/shapes.
 > `PageUp/PageDown` - Adjust light height while dragging it.  
 > `Escape` - Cancel zone path or shape creation.  
-> `Delete` - Delete selected zone path/vertex or shape.
-
+> `Delete` - Delete selected zone path/vertex or shape.  
+> `Shift + Z` - Set the selected zones' normal vectors to straight out.  
+> `Ctrl + K` - Separate the selected zones from neighbors.
 
 ### Rendering
 
