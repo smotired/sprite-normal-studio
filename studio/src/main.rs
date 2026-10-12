@@ -40,6 +40,9 @@ fn main() -> eframe::Result {
             // Ensure we are rendering with wgpu
             let render_state = cc.wgpu_render_state.clone().expect("wgpu renderer required");
 
+            // Always use dark mode, regardless of the system theme
+            cc.egui_ctx.set_theme(egui::Theme::Dark);
+
             // Ensure we have image support
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
