@@ -17,19 +17,17 @@ impl IntoInputModifiers for Modifiers {
 impl StudioApp {
     /// Forward app-level input events to the controller and update the world space cursor position
     pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) {
-        let ppp = ui.pixels_per_point();
-
         ui.input_mut(|i| {
-            for event in self.handle_app_input(i, (viewport_rect, ppp)) {
+            for event in self.handle_app_input(i, viewport_rect) {
                 self.controller.handle_action(event);
             }
 
             // Set world space cursor position
-            let viewport_size = self.renderer.size();
+            let viewport_size = Vec2::from(viewport_rect.size());
             if let Some(mouse_world) = i.pointer.latest_pos()
                 .filter(|pos| viewport_rect.contains(*pos))
                 .map(|pos| {
-                    let local = (pos - viewport_rect.min) * ppp; // egui::Vec2, points -> local origin
+                    let local = pos - viewport_rect.min; // egui::Vec2, points relative to the viewport origin
                     self.controller.screen_to_world(Vec2::from(local), viewport_size)
                 })
             {
@@ -46,17 +44,17 @@ impl StudioApp {
     }
 
     // Convert egui inputs into something our controller can use.
-    pub fn handle_app_input<'a>(&mut self, i: &'a mut InputState, (viewport_rect, ppp): (Rect, f32)) -> Box<dyn Iterator<Item = Action> + 'a> {
+    pub fn handle_app_input<'a>(&mut self, i: &'a mut InputState, viewport_rect: Rect) -> Box<dyn Iterator<Item = Action> + 'a> {
         // Get movement constants
         let movement = |shift: bool| { if shift { 100.0 } else { 10.0 } };
         let scale = |shift: bool| { if shift { 2 } else { 1 } };
 
         // Get mouse position in world space over the image. None if mouse is not over image.
-        let viewport_size = self.renderer.size();
+        let viewport_size = Vec2::from(viewport_rect.size());
         let mouse_world = i.pointer.latest_pos()
             .filter(|pos| viewport_rect.contains(*pos))
             .map(|pos| {
-                let local = (pos - viewport_rect.min) * ppp; // egui::Vec2, points -> local origin
+                let local = pos - viewport_rect.min; // egui::Vec2, points relative to the viewport origin
                 self.controller.screen_to_world(Vec2::from(local), viewport_size)
             });
 
@@ -245,13 +243,12 @@ impl StudioApp {
     // Handle inputs on the editor image itself
     pub fn handle_editor_input(&mut self, ui: &Ui, response: Response) ->  Vec<Action> {
         // Get information about the editor image window
-        let ppp = ui.ctx().pixels_per_point();
         let rect = response.rect;
 
-        // Screen-space Pos2 -> local physical-pixel coordinates -> world space coordinates
-        let viewport_size = Vec2::new(response.rect.width(), response.rect.height());
+        // Screen-space Pos2 -> points relative to the viewport origin -> world space coordinates
+        let viewport_size = Vec2::new(rect.width(), rect.height());
         let to_world = |pos: Pos2| {
-            let local = (pos - rect.min) * ppp;
+            let local = pos - rect.min;
             self.controller.screen_to_world(Vec2::from(local), viewport_size)
         };
 

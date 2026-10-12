@@ -11,7 +11,7 @@ pub struct ViewportDataUniform {
     // Pixel the camera is centered on, from top left, ignoring scale
     pub camera_pos: Vec2,
 
-    // Inverted scale of the camera. 1/2 means each sprite pixel takes up 2 screen pixels each direction.
+    // Inverted scale of the camera. 1/2 means each sprite pixel takes up 2 screen points each direction.
     // We never need the non inverted version, but this is used frequently to normalize stuff that doesn't depend on the camera scale like the overlay.
     pub inv_scale: f32,
 
@@ -41,6 +41,13 @@ pub struct ViewportDataUniform {
 
     // Bottom right corner of the selection box. Should be 0,0 if no selection box.
     pub selection_box_end: Vec2,
+
+    // Physical pixels per screen point. The viewport texture is rendered in physical pixels, but everything else is in points.
+    // Set by the renderer, since the controller doesn't know about the display.
+    pub pixels_per_point: f32,
+
+    // Keeps the struct size a multiple of 16 bytes
+    _padding: [f32; 3],
 }
 
 impl ViewportDataUniform {
@@ -71,6 +78,8 @@ impl ViewportDataUniform {
             point_count: point_count as u32,
             selection_box_start,
             selection_box_end,
+            pixels_per_point: 1.0,
+            _padding: [0.0; 3],
         }
     }
 
@@ -114,6 +123,7 @@ mod tests {
         assert_eq!((uniform.zone_count, uniform.point_count), (3, 12));
         assert_eq!(uniform.selection_box_start, Vec2::new(0.0, 0.0));
         assert_eq!(uniform.selection_box_end, Vec2::new(0.0, 0.0));
+        assert_eq!(uniform.pixels_per_point, 1.0);
     }
 
     /// Bytes should cover the whole struct

@@ -16,7 +16,8 @@
 struct Params {
     // Position of the camera center ignoring scale
     camera_pos: vec2<f32>,
-    // Inverse scale of pixels in the camera. If one spritesheet pixel is 2 pixels onscreen, this is 0.5
+    // Inverse scale of pixels in the camera. If one spritesheet pixel is 2 points onscreen, this is 0.5.
+    // Overlay sizes are in points, so they are corrected by this alone.
     inv_scale: f32,
 
     // Extra flags for which parts of the overlay are shown.
@@ -76,6 +77,9 @@ struct Params {
 
     // Bottom right corner of the selection box. Should be 0,0 if no selection box.
     selection_box_end: vec2<f32>,
+
+    // Physical pixels per screen point. The output texture is in physical pixels, so this converts its pixels to points.
+    pixels_per_point: f32,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 

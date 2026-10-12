@@ -122,11 +122,12 @@ impl Renderer {
     }
 
     /// Render the editor UI. Runs the shader and updates the texture, and returns the texture ID for use in egui.
-    pub fn render(&mut self, device: &Device, queue: &Queue, controller: &mut Controller, size: Vec2) -> &TextureView {
+    /// Size is in physical pixels.
+    pub fn render(&mut self, device: &Device, queue: &Queue, controller: &mut Controller, size: Vec2, pixels_per_point: f32) -> &TextureView {
         // Ensure we aren't rendering too small
         let size = {
-            let width = size.x.max(16.0);
-            let height = size.y.max(16.0);
+            let width = size.x.round().max(16.0);
+            let height = size.y.round().max(16.0);
             Vec2::new(width, height)
         };
 
@@ -173,7 +174,9 @@ impl Renderer {
         }
 
         // Write uniforms
-        queue.write_buffer(&self.control.uniform_buffer, 0, controller.uniform().bytes());
+        let mut uniform = controller.uniform();
+        uniform.pixels_per_point = pixels_per_point;
+        queue.write_buffer(&self.control.uniform_buffer, 0, uniform.bytes());
 
         // Submit workload
         queue.submit([encoder.finish()]);
