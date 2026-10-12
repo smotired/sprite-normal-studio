@@ -15,6 +15,36 @@ impl IntoInputModifiers for Modifiers {
 }
 
 impl StudioApp {
+    /// Forward app-level input events to the controller and update the world space cursor position
+    pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) {
+        let ppp = ui.pixels_per_point();
+
+        ui.input_mut(|i| {
+            for event in self.handle_app_input(i, (viewport_rect, ppp)) {
+                self.controller.handle_input(event);
+            }
+
+            // Set world space cursor position
+            let viewport_size = self.renderer.size();
+            if let Some(mouse_world) = i.pointer.latest_pos()
+                .filter(|pos| viewport_rect.contains(*pos))
+                .map(|pos| {
+                    let local = (pos - viewport_rect.min) * ppp; // egui::Vec2, points -> local origin
+                    self.controller.screen_to_world(Vec2::from(local), viewport_size)
+                })
+            {
+                self.controller.set_cursor_pos(mouse_world);
+            }
+        });
+    }
+
+    /// Forward input events on the editor image, i.e. click and drag, to the controller
+    pub(super) fn process_editor_input(&mut self, ui: &Ui, response: Response) {
+        for event in self.handle_editor_input(ui, response) {
+            self.controller.handle_input(event);
+        }
+    }
+
     // Convert egui inputs into something our controller can use.
     pub fn handle_app_input<'a>(&mut self, i: &'a mut InputState, (viewport_rect, ppp): (Rect, f32)) -> Box<dyn Iterator<Item = Input> + 'a> {
         // Get movement constants

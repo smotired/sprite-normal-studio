@@ -1,8 +1,10 @@
-use eframe::egui::{ Response, Ui, Widget, Image, TextureId, load::SizedTexture, Sense };
+use eframe::egui::{ CentralPanel, Frame, Response, Ui, Widget, Image, TextureId, load::SizedTexture, Sense };
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu::FilterMode;
 use rendering::Renderer;
 use controller::Controller;
+
+use crate::app::StudioApp;
 
 /// Widget for the main editor window
 pub struct Editor<'a> {
@@ -35,5 +37,19 @@ impl Widget for Editor<'_> {
 
         // Display the texture image in as much space as possible
         ui.add(Image::new(SizedTexture::new(self.viewport_texture_id, points)).sense(Sense::click_and_drag()))
+    }
+}
+impl StudioApp {
+    /// Render the main editor in the remaining central space. Must be shown after all side panels.
+    /// Returns the response for the editor image itself.
+    pub(super) fn show_editor(&mut self, ui: &mut Ui) -> Response {
+        CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
+            ui.add(Editor::new(
+                &mut self.renderer,
+                &self.render_state,
+                self.viewport_texture_id,
+                &mut self.controller,
+            ))
+        }).inner
     }
 }
