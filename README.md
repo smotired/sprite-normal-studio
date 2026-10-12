@@ -183,7 +183,9 @@ This section will be added to as I add keybinds (and remember).
 > `Shift + Z` - Set the selected zones' normal vectors to straight out.  
 > `Ctrl + K` - Separate the selected zones or points from neighbors.  
 > `Ctrl + B` - Toggle the selected point between linear and continuous.  
-> `Ctrl + M` - Merge the selected points into one point.
+> `Ctrl + M` - Merge the selected points into one point.  
+> `I` - Toggle if branching zones inherit the normal of the zone they branch from in the pen tool.  
+> `C` - Toggle if the pen tool stays active after finishing a zone.
 
 ### Rendering
 

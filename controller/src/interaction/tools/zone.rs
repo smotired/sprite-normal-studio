@@ -2,7 +2,7 @@ use studio_math::Vec2;
 
 use crate::InputModifiers;
 
-use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
+use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, SpecialAction, utils};
 use super::result::{ToolResult, DefaultResults};
 
 /// The Zone tool allows mananging entire zones at once.
@@ -227,6 +227,21 @@ impl EditorTool for EditorToolZone {
             return self.stale();
         }
         self.ok()
+    }
+
+    fn handle_special_action(&mut self, mut state: ControllerStateInput, action: SpecialAction) -> ToolResult {
+        if self.selected_zones.is_empty() { return self.ok(); }
+        match action {
+            SpecialAction::NormalSet(normal, _) => {
+                state.objects.set_zone_normals(&self.selected_zones, normal)?;
+                self.stale()
+            },
+            SpecialAction::SelectionSeparated => {
+                state.objects.separate_points(&self.selected_points_reference)?;
+                self.ok()
+            },
+            _ => self.ok(),
+        }
     }
 }
 
@@ -979,5 +994,31 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
         assert_eq!(tool.deselect(state(&objects)), &[0, 1, 2, 3]);
+    }
+
+    /// Setting the normal sets it for the selected zones
+    #[test]
+    fn special_normal_set() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+        let mut tool = EditorToolZone::select(&[0, 1, 2, 3], state(&objects));
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::NormalSet(studio_math::Vec3::UP, false)).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_zone_info(0).unwrap().normal(), studio_math::Vec3::UP);
+        assert_eq!(objects.get_zone_info(1).unwrap().normal(), studio_math::Vec3::FORWARD);
+    }
+
+    /// Separating splits the selected zones' points from their siblings in other zones
+    #[test]
+    fn special_separate() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (_, branch_id) = objects.create_branching_zone(1).unwrap();
+        let mut tool = EditorToolZone::select(&[branch_id], state(&objects));
+
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionSeparated).unwrap();
+        assert!(objects.get_siblings(1).is_empty());
     }
 }

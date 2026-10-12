@@ -6,7 +6,7 @@ mod result;
 pub use zone::EditorToolZone;
 pub use pen::EditorToolPen;
 pub use point::EditorToolPoint;
-use result::{ToolResult, EditorToolActionResult};
+use result::{ToolResult, EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
 use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectSnapshot, InputModifiers};
@@ -38,6 +38,65 @@ pub struct ControllerStateInput {
 }
 
 pub type SelectionType<'a> = &'a [u16]; // slice of vector of selected points
+
+/// Actions from the UI that the selected tool handles in its own way. Tools ignore the ones they don't support.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum SpecialAction {
+    /// Set a normal vector. The bool is true if this continues a drag, so a success doesn't hide an error from earlier in the drag.
+    /// Zone: sets the normal of the selected zones. Pen: sets the normal for new zones, and the zone being drawn.
+    NormalSet(Vec3, bool),
+
+    /// Zone, Point: separate the selected points from their unselected siblings.
+    SelectionSeparated,
+
+    /// Point: set the handle mode of the selected point.
+    PointModeSet(ControlPointMode),
+
+    /// Point: toggle the handle mode of the selected point between linear and continuous.
+    PointModeToggled,
+
+    /// Point: replace the selected point with its next sibling.
+    CycleSibling,
+
+    /// Point: insert a point halfway along the selected path, and select it.
+    PathSplit,
+
+    /// Point: merge the selected points into one group of siblings, and select them.
+    PointsMerged,
+
+    /// Pen: toggle if branching zones start with the normal of the zone they branch from.
+    ToggleInherit,
+
+    /// Pen: toggle if the pen stays active after finishing a zone.
+    ToggleStayActive,
+}
+
+impl SpecialAction {
+    /// Returns true if this continues a drag, so a success shouldn't hide an error from earlier in the drag.
+    pub fn continuing_drag(&self) -> bool {
+        matches!(self, Self::NormalSet(_, true))
+    }
+}
+
+/// Questions the UI can ask the selected tool about its own state. Tools answer None for the ones they don't support.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum SpecialQuery {
+    /// Pen: the normal for new zones.
+    Normal,
+
+    /// Pen: if branching zones start with the normal of the zone they branch from.
+    InheritNormal,
+
+    /// Pen: if the pen stays active after finishing a zone.
+    StayActive,
+}
+
+/// Answers to special queries
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum SpecialValue {
+    Normal(Vec3),
+    Flag(bool),
+}
 
 /// Allows boxed editor tools to be cloned, so their state can be snapshotted.
 /// Automatically implemented for every tool that implements Clone.
@@ -97,6 +156,12 @@ pub trait EditorTool: EditorToolClone {
 
     /// Handle deleting something
     fn handle_delete(&mut self, state: ControllerStateInput) -> ToolResult;
+
+    /// Handle an action from the UI that only some tools support. Ignored by default.
+    fn handle_special_action(&mut self, _state: ControllerStateInput, _action: SpecialAction) -> ToolResult { self.ok() }
+
+    /// Answer a question from the UI about this tool's state. Unanswered by default.
+    fn handle_special_query(&self, _query: SpecialQuery) -> Option<SpecialValue> { None }
 }
 
 impl Controller {
@@ -133,27 +198,14 @@ impl Controller {
         }
     }
 
-    /// Run an action on the objects that isn't part of a tool, with the same rollback and error handling as tool actions.
-    pub(crate) fn run_object_action(&mut self, continuing_drag: bool, normals_stale: bool, action: impl FnOnce(&mut ObjectBuffers) -> anyhow::Result<()>) {
-        self.run_tool(continuing_drag, |tool, mut state| {
-            action(&mut state.objects)?;
-            Ok(EditorToolActionResult::new(tool.kind(), normals_stale))
-        });
+    /// Run an action from the UI that the selected tool handles in its own way, with the same rollback and error handling as other tool actions.
+    pub(crate) fn run_special_action(&mut self, action: SpecialAction) {
+        self.run_tool(action.continuing_drag(), |tool, state| tool.handle_special_action(state, action));
     }
 
-    /// Run an action on the objects that isn't part of a tool and replaces the selection, in the point tool.
-    /// The action gets the current selection and returns the new one. Has the same rollback and error handling as tool actions.
-    pub(crate) fn run_selection_action(&mut self, normals_stale: bool, action: impl FnOnce(&mut ObjectBuffers, &[u16]) -> anyhow::Result<Vec<u16>>) {
-        let selection = Vec::from(self.tool.selection());
-        let mut new_selection = None;
-        self.run_tool(false, |tool, mut state| {
-            new_selection = Some(action(&mut state.objects, &selection)?);
-            Ok(EditorToolActionResult::new(tool.kind(), normals_stale))
-        });
-
-        if let Some(selection) = new_selection {
-            self.tool = EditorToolPoint::select(&selection, self.create_state());
-        }
+    /// Ask the selected tool about its state, if it supports the question
+    pub fn tool_query(&self, query: SpecialQuery) -> Option<SpecialValue> {
+        self.tool.handle_special_query(query)
     }
 
     /// Get the IDs of the selected points
@@ -373,5 +425,17 @@ mod tests {
 
         run_tool_action(&mut tool, state(&objects), &mut error, false, ok_action);
         assert!(error.is_none());
+    }
+
+    /// Tools ignore special actions and queries they don't support
+    #[test]
+    fn special_unsupported_is_ignored() {
+        let objects = ObjectBuffers::headless();
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::ToggleInherit).unwrap();
+        assert!(!result.normals_stale);
+        assert_eq!(result.new_tool, EditorToolKind::Zone);
+        assert_eq!(tool.handle_special_query(SpecialQuery::Normal), None);
     }
 }

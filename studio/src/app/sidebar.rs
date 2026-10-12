@@ -1,7 +1,8 @@
+mod controls;
+mod utils;
 mod zone;
 mod point;
 mod pen;
-mod utils;
 
 use controller::{Controller, EditorToolKind};
 use eframe::egui;

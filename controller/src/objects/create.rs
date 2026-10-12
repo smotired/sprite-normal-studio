@@ -11,7 +11,7 @@ impl ObjectBuffers {
             anyhow::bail!("No room to create another zone!");
         }
 
-        self.zones.borrow_mut().items.push(Zone::new(self.point_count(), Vec3::random_on_hemisphere()));
+        self.zones.borrow_mut().items.push(Zone::new(self.point_count(), Vec3::FORWARD));
         Ok(zone_id)
     }
 
@@ -243,6 +243,7 @@ mod tests {
         assert_eq!(objects.create_zone().unwrap(), 1);
         assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 2));
         assert_eq!(objects.get_zone_info(1).unwrap().range(), (2, 0));
+        assert_eq!(objects.get_zone_info(1).unwrap().normal(), Vec3::FORWARD);
     }
 
     /// Created points are linear, solo, and added to the end of the zone

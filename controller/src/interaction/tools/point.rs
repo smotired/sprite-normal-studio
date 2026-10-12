@@ -1,7 +1,8 @@
 use studio_math::Vec2;
 
 use crate::InputModifiers;
-use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, utils};
+use crate::objects::ControlPointMode;
+use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, SpecialAction, utils};
 use super::result::{ToolResult, DefaultResults};
 
 /// The Point tool allows managing individual points within a zone.
@@ -233,6 +234,63 @@ impl EditorTool for EditorToolPoint {
             return self.stale();
         }
         self.ok()
+    }
+
+    fn handle_special_action(&mut self, mut state: ControllerStateInput, action: SpecialAction) -> ToolResult {
+        if self.selected_points.is_empty() { return self.ok(); }
+        match action {
+            SpecialAction::SelectionSeparated => {
+                self.stop_dragging();
+                state.objects.separate_points(&self.selected_points)?;
+                self.ok()
+            },
+
+            SpecialAction::PointModeSet(mode) => {
+                let Some(point_id) = self.single_selected_point() else { return self.ok(); };
+                self.stop_dragging();
+                state.objects.set_point_mode(point_id, mode)?;
+                self.stale()
+            },
+
+            SpecialAction::PointModeToggled => {
+                let Some(point_id) = self.single_selected_point() else { return self.ok(); };
+                self.stop_dragging();
+                // Points whose handles sync to different points don't have a mode, so setting it will show why it can't change
+                let mode = match state.objects.get_point_mode(point_id)? {
+                    Some(ControlPointMode::Linear) => ControlPointMode::Continuous,
+                    _ => ControlPointMode::Linear,
+                };
+                state.objects.set_point_mode(point_id, mode)?;
+                self.stale()
+            },
+
+            SpecialAction::CycleSibling => {
+                let Some(point_id) = self.single_selected_point() else { return self.ok(); };
+                self.stop_dragging();
+                self.selected_points = vec![state.objects.get_sibling(point_id)?];
+                self.ok()
+            },
+
+            SpecialAction::PathSplit => {
+                // Only a selected path can be split, i.e. two groups of siblings next to each other in a zone
+                let groups = state.objects.sibling_groups(&self.selected_points);
+                if groups.len() != 2 { return self.ok(); }
+                let Some((zone_id, start_id)) = state.objects.path_between(&groups[0], &groups[1])? else { return self.ok(); };
+
+                // Only select the inserted point, not the ones inserted into sibling paths
+                self.stop_dragging();
+                self.selected_points = vec![state.objects.insert_point(zone_id, start_id, 0.5)?[0]];
+                self.stale()
+            },
+
+            SpecialAction::PointsMerged => {
+                self.stop_dragging();
+                self.selected_points = state.objects.merge_points(&self.selected_points)?;
+                self.stale()
+            },
+
+            _ => self.ok(),
+        }
     }
 }
 
@@ -1052,5 +1110,82 @@ mod tests {
         tool.handle_dragging_to(state(&objects), Vec2::new(3.0, 23.0), Default::default()).unwrap();
         assert_eq!(positions(&objects).iter().filter(|&&position| position == Vec2::new(3.0, 23.0)).count(), 2);
         assert!(positions(&objects).iter().all(|&position| position != Vec2::new(0.0, 20.0)));
+    }
+
+    /// Cycling replaces the selected point with its next sibling
+    #[test]
+    fn special_cycle_sibling() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (_, branch_id) = objects.create_branching_zone(1).unwrap();
+        let mut tool = EditorToolPoint::select(&[1], state(&objects));
+
+        tool.handle_special_action(state(&objects), SpecialAction::CycleSibling).unwrap();
+        assert_eq!(tool.selection(), &[branch_id]);
+    }
+
+    /// Splitting a selected path inserts a point halfway along it and selects only that point
+    #[test]
+    fn special_split_selects_new_point() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::select(&[1, 2], state(&objects));
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::PathSplit).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.point_count(), 5);
+        assert_eq!(tool.selection(), &[2]);
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 5.0));
+    }
+
+    /// Merging selects the merged points
+    #[test]
+    fn special_merge_selects_merged() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+        let mut tool = EditorToolPoint::select(&[1, 4], state(&objects));
+
+        tool.handle_special_action(state(&objects), SpecialAction::PointsMerged).unwrap();
+        assert_eq!(sorted(tool.selection()), vec![1, 4]);
+        assert_eq!(objects.get_siblings(1), vec![4]);
+    }
+
+    /// The handle mode of a single selected point can be set
+    #[test]
+    fn special_mode_set() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::select(&[1], state(&objects));
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::PointModeSet(ControlPointMode::Broken)).unwrap();
+        assert!(result.normals_stale);
+        assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Broken);
+    }
+
+    /// Toggling switches a single selected point between linear and continuous
+    #[test]
+    fn special_mode_toggled() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::select(&[1], state(&objects));
+
+        tool.handle_special_action(state(&objects), SpecialAction::PointModeToggled).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Continuous);
+        tool.handle_special_action(state(&objects), SpecialAction::PointModeToggled).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Linear);
+    }
+
+    /// Mode changes and cycling only apply when exactly one point is selected
+    #[test]
+    fn special_requires_single_point() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::select(&[1, 3], state(&objects));
+
+        tool.handle_special_action(state(&objects), SpecialAction::PointModeSet(ControlPointMode::Broken)).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::CycleSibling).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Linear);
+        assert_eq!(tool.selection(), &[1, 3]);
     }
 }
