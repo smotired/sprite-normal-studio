@@ -7,16 +7,15 @@ mod create;
 mod branching;
 mod modify;
 mod merge;
-
-use std::{cell::RefCell, rc::Rc};
+mod diff;
 
 use wgpu::{Buffer, Device};
 
 use zone::Zone;
 pub use point::ControlPoint;
 pub use point::ControlPointMode;
-use buffers::VecWithBuffer;
-pub use buffers::ObjectSnapshot;
+use buffers::{VecWithBuffer, ObjectList};
+pub use diff::ObjectDiff;
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
@@ -28,15 +27,15 @@ pub type BufferStates = ((Buffer, usize), (Buffer, usize), (Buffer, usize));
 #[derive(Clone)]
 pub struct ObjectBuffers {
     /// List of zone paths
-    zones: Rc<RefCell<VecWithBuffer<Zone>>>,
+    zones: ObjectList<Zone>,
 
     /// List of control points
-    points: Rc<RefCell<VecWithBuffer<ControlPoint>>>,
+    points: ObjectList<ControlPoint>,
 
     /// IDs of control points' siblings. These don't actually affect
     /// the point at all during rendering and it's better for alignment if we don't
     /// pass them to the GPU.
-    point_siblings: Rc<RefCell<VecWithBuffer<u16>>>,
+    point_siblings: ObjectList<u16>,
 }
 
 impl ObjectBuffers {
@@ -48,9 +47,9 @@ impl ObjectBuffers {
         siblings_buffer.items.resize(65536, 0);
 
         Self {
-            zones: Rc::new(RefCell::new(VecWithBuffer::new(device, "Zones Buffer"))),
-            points: Rc::new(RefCell::new(VecWithBuffer::new(device, "Control Points Buffer"))),
-            point_siblings: Rc::new(RefCell::new(siblings_buffer)),
+            zones: ObjectList::new(VecWithBuffer::new(device, "Zones Buffer")),
+            points: ObjectList::new(VecWithBuffer::new(device, "Control Points Buffer")),
+            point_siblings: ObjectList::new(siblings_buffer),
         }
     }
 
@@ -61,9 +60,9 @@ impl ObjectBuffers {
         siblings_buffer.items.resize(65536, 0);
 
         Self {
-            zones: Rc::new(RefCell::new(VecWithBuffer::headless("Zones Buffer"))),
-            points: Rc::new(RefCell::new(VecWithBuffer::headless("Control Points Buffer"))),
-            point_siblings: Rc::new(RefCell::new(siblings_buffer)),
+            zones: ObjectList::new(VecWithBuffer::headless("Zones Buffer")),
+            points: ObjectList::new(VecWithBuffer::headless("Control Points Buffer")),
+            point_siblings: ObjectList::new(siblings_buffer),
         }
     }
 
