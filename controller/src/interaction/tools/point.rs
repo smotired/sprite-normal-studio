@@ -137,7 +137,9 @@ impl EditorTool for EditorToolPoint {
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         // If we are dragging the handle of a single point, adjust that
         if let Some(point_id) = self.single_selected_point() && let Some(right) = self.handle {
-            let handle = Some(pos - state.objects.get_point_info(point_id).unwrap().position());
+            let point = state.objects.get_point_info(point_id).unwrap();
+            let current = if right { point.right_handle() } else { point.left_handle() } - point.position();
+            let handle = Some(utils::enforce_handle_length(pos - point.position(), current));
             let (lh, rh) = if right { (None, handle) } else { (handle, None) };
             state.objects.update_point(point_id, None, None, lh, rh)?;
             return self.stale();
@@ -587,9 +589,6 @@ mod tests {
         add_branching_squares(&mut objects);
         let shared = shared_point(&objects);
 
-        // Branching points start with handles on top of the point, which would be clicked instead, so move them away
-        objects.update_point(shared[0], None, Some(ControlPointMode::Broken), Some(Vec2::new(-15.0, 0.0)), Some(Vec2::new(0.0, 15.0))).unwrap();
-        objects.update_point(shared[1], None, None, Some(Vec2::new(-15.0, 0.0)), None).unwrap();
         let mut tool = EditorToolPoint::init();
 
         tool.handle_click(state(&objects), Vec2::new(20.0, 20.0), Default::default()).unwrap();
@@ -745,6 +744,26 @@ mod tests {
 
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.handle, None);
+    }
+
+    /// Dragging a handle onto its point keeps it at the minimum length, pointing the way it was before
+    #[test]
+    fn drag_handle_minimum_length() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(-20.0, 0.0)), Some(Vec2::new(0.0, 30.0))).unwrap();
+        let mut tool = EditorToolPoint::select(&[1], state(&objects));
+
+        // Dragged close to the point, the handle keeps its new direction
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 30.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(11.0, 0.0), Default::default()).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().right_handle(), Vec2::new(12.0, 0.0));
+
+        // Dragged exactly onto the point, the handle keeps its previous direction
+        tool.handle_dragging_to(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.right_handle(), Vec2::new(12.0, 0.0));
+        assert_eq!(point.left_handle(), Vec2::new(-10.0, 0.0));
     }
 
     /// Dragging with nothing selected does nothing

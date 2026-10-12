@@ -80,9 +80,12 @@ impl EditorTool for EditorToolPen {
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
         // Assume we are dragging the handle of the currently selected point
         if let Some(point_id) = self.latest_point {
-            let point_pos = state.objects.get_point_info(point_id).unwrap().position();
+            let point = state.objects.get_point_info(point_id).unwrap();
+            let point_pos = point.position();
             let (first_point_id, _) = state.objects.get_zone_info(self.creating_zone.unwrap()).unwrap().range();
             let handle = if !self.dragging_reversed { pos - point_pos } else { point_pos - pos };
+            let current = if self.handle.unwrap() { point.right_handle() } else { point.left_handle() } - point_pos;
+            let handle = utils::enforce_handle_length(handle, current);
             let (lh, rh) = if point_id == first_point_id {
                 if self.handle.unwrap() { (None, Some(handle)) } else { (Some(handle), None) }
             } else {
@@ -387,6 +390,20 @@ mod tests {
         let point = objects.get_point_info(1).unwrap();
         assert_eq!(point.right_handle(), Vec2::new(60.0, 5.0));
         assert_eq!(point.left_handle(), Vec2::new(40.0, -5.0));
+    }
+
+    /// Dragging a handle shorter than the minimum length pushes it out to the minimum
+    #[test]
+    fn drag_handle_minimum_length() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(50.0, 0.5), Default::default()).unwrap();
+
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.right_handle(), Vec2::new(50.0, 2.0));
+        assert_eq!(point.left_handle(), Vec2::new(50.0, -2.0));
     }
 
     /// Dragging off of the first point closes the path, and releasing finishes it
