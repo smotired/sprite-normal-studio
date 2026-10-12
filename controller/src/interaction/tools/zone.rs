@@ -105,10 +105,12 @@ impl EditorTool for EditorToolZone {
             if !selected && let Some(clicked_point_id) = clicked_zone_info.1 {
                 for &zone_id in &self.selected_zones {
                     if let Some(sibling_id) = state.objects.sibling_in_zone(clicked_point_id, zone_id) { // can prolly make a helper for this
-                        if clicked_zone_info.2.is_none() {
+                        // If we clicked a point rather than a path, its sibling being here is enough
+                        let Some(clicked_end_id) = clicked_zone_info.2 else {
                             selected = true;
                             break;
-                        } else if let Some(end_id) = state.objects.sibling_in_zone(clicked_zone_info.2.unwrap(), zone_id) {
+                        };
+                        if let Some(end_id) = state.objects.sibling_in_zone(clicked_end_id, zone_id) {
                             let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
                             let expected_next_id = start + (sibling_id - start + 1) % count;
                             if expected_next_id == end_id {
@@ -257,12 +259,12 @@ impl EditorToolZone {
     /// Returns the ID of the zone that was clicked, and the ID of the clicked point or its path start/end
     fn zone_from_pos(&self, state: &ControllerStateInput, pos: Vec2) -> (Option<u16>, Option<u16>, Option<u16>) {
         // Check the point
-        if let Some((zone_id, point_id)) = utils::get_clicked_control_point(&state, None, pos) {
+        if let Some((zone_id, point_id)) = utils::get_clicked_control_point(state, None, pos) {
             (Some(zone_id), Some(point_id), None)
         }
 
         // Check the curve
-        else if let Some((zone_id, start_id, _, _)) = utils::get_clicked_zone_path(&state, pos) {
+        else if let Some((zone_id, start_id, _, _)) = utils::get_clicked_zone_path(state, pos) {
             let (start, count) = state.objects.get_zone_info(zone_id).unwrap().range();
             (Some(zone_id), Some(start_id), Some(start + (start_id - start + 1) % count))
         }
@@ -277,7 +279,7 @@ impl EditorToolZone {
     /// and using the state of the current selection, return a new selection.
     /// Also return delta from the lowest ID selected point to the click position, in case this is a drag start.
     fn get_updated_selection(&self, state: &ControllerStateInput, pos: Vec2, dragging: bool, modifiers: InputModifiers) -> (Vec<u16>, Option<Vec2>) {
-        let (zone_id, point_id, neighbor_id) = self.zone_from_pos(&state, pos);
+        let (zone_id, point_id, neighbor_id) = self.zone_from_pos(state, pos);
 
         // If a zone is clicked, determine point/path/etc
         if let Some(zone_id) = zone_id {
@@ -328,7 +330,7 @@ impl EditorToolZone {
 
             // Otherwise, add/remove/toggle all connected zones
             else {
-                let all_connected = get_connected_zones(zone_id, &state);
+                let all_connected = get_connected_zones(zone_id, state);
                 utils::combine_selection(&self.selected_zones[..], &all_connected[..], modifiers, true)
             };
 
@@ -430,8 +432,8 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     fn click_selects_all_connected() {
         let assert_eq_contents = |a: &[u16], b: &[u16]| {
             assert_eq!(
-                a.into_iter().map(|&item| item).collect::<std::collections::HashSet<u16>>(),
-                b.into_iter().map(|&item| item).collect::<std::collections::HashSet<u16>>(),
+                a.iter().copied().collect::<std::collections::HashSet<u16>>(),
+                b.iter().copied().collect::<std::collections::HashSet<u16>>(),
             );
         };
 
@@ -794,8 +796,8 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         let check_selection = |actual: &[u16], expected: &[u16]| 
         assert_eq!(
-            actual.into_iter().map(|&i| i).collect::<std::collections::HashSet<u16>>(),
-            expected.into_iter().map(|&i| i).collect::<std::collections::HashSet<u16>>(),
+            actual.iter().copied().collect::<std::collections::HashSet<u16>>(),
+            expected.iter().copied().collect::<std::collections::HashSet<u16>>(),
         );
 
         // Selection box should be empty when not dragging
