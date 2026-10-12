@@ -82,14 +82,14 @@ Basically, other software is to Photoshop what this is to Illustrator.
 *10/12/26 - present*
 
 ```
-[ ] Undo/redo with history. Use a stack like Unity's Undo class. Look for an
+[x] Undo/redo with history. Use a stack like Unity's Undo class. Look for an
     external crate first.
 [ ] Copy and paste selected zones.
 [ ] Rotate/scale selection
 [ ] Holding shift/alt/etc while rotate/scale to snap/keep ratio/etc. All the things.
-[ ] Saving workspace files (with path to sprite and normal map, all shapes,
+[x] Saving workspace files (with path to sprite and normal map, all shapes,
     zones, and lights, but not camera)
-[ ] Loading workspace files
+[x] Loading workspace files
 [ ] Exporting normal map (Ctrl+E exports to path with confirmation if it
     would overwrite. Ctrl+Shift+E opens dialog.)
 [ ] Having multiple workspace files open
@@ -159,6 +159,12 @@ Will add steps to this section as I think of them.
 ## Keybinds Reference
 
 This section will be added to as I add keybinds (and remember).
+
+### Workspace files
+
+> `Ctrl + O` - Open a workspace file.  
+> `Ctrl + S` - Save the workspace file.  
+> `Ctrl + Shift + S` - Save the workspace to a new file.  
 
 ### Select tools
 

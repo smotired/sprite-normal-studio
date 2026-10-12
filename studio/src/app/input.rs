@@ -3,6 +3,7 @@ use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect,
 use studio_math::Vec2;
 
 use crate::app::StudioApp;
+use crate::app::workspace::WorkspaceCommand;
 
 trait IntoInputModifiers {
     fn convert(self) -> InputModifiers;
@@ -15,9 +16,13 @@ impl IntoInputModifiers for Modifiers {
 }
 
 impl StudioApp {
-    /// Forward app-level input events to the controller and update the world space cursor position
-    pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) {
+    /// Forward app-level input events to the controller and update the world space cursor position.
+    /// Returns the workspace command whose shortcut was pressed, if any.
+    pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) -> Option<WorkspaceCommand> {
         ui.input_mut(|i| {
+            // Workspace shortcuts are consumed first, so their keys don't also do something else
+            let command = WorkspaceCommand::ALL.into_iter().find(|command| i.consume_shortcut(&command.shortcut()));
+
             for event in self.handle_app_input(i, viewport_rect) {
                 self.controller.handle_action(event);
             }
@@ -33,7 +38,9 @@ impl StudioApp {
             {
                 self.controller.set_cursor_pos(mouse_world);
             }
-        });
+
+            command
+        })
     }
 
     /// Forward input events on the editor image, i.e. click and drag, to the controller
@@ -104,7 +111,7 @@ impl StudioApp {
                             } else { Action::None }
                         },
                         Key::S => {
-                            if pressed {
+                            if pressed && !modifiers.command {
                                 Action::CameraMove(Axis::Vertical, movement(modifiers.shift))
                             } else { Action::None }
                         },
@@ -232,7 +239,7 @@ impl StudioApp {
 
                         // Toggling the overlay
                         Key::O => {
-                            if pressed && !repeat {
+                            if pressed && !repeat && !modifiers.command {
                                 Action::OverlayToggled
                             } else { Action::None }
                         },

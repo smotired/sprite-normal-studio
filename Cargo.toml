@@ -21,3 +21,6 @@ bytemuck = { version = "1.25.2", features = ["derive"] }
 
 # Used by studio and controller
 anyhow = "1.0.104"
+
+# Used by studio_math, controller, and studio for workspace files
+serde = { version = "1.0.229", features = ["derive"] }

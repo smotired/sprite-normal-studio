@@ -1,6 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use eframe::egui::{self, Image, Response, TextureId, Ui, Widget};
 use eframe::egui_wgpu::{RenderState, wgpu};
+
+/// Color of a flat normal map, pointing straight out
+pub const FLAT_NORMAL_COLOR: [u8; 4] = [128, 128, 255, 255];
 
 /// Defines a selection of a sprite or normal map file and its associated texture on the GPU.
 pub struct SpriteFileSelection {
@@ -14,6 +17,12 @@ pub struct SpriteFileSelection {
 impl SpriteFileSelection {
     /// Clone the saved texture
     pub fn texture(&self) -> &wgpu::Texture { &self.texture }
+
+    /// The selected file, if any
+    pub fn path(&self) -> Option<&Path> { self.path.as_deref() }
+
+    /// The size of the selected image
+    pub fn size(&self) -> (u32, u32) { self.size }
 
     /// Create a new SpriteFileSelection with nothing selected.
     /// label: The label for the texture itself
@@ -55,7 +64,7 @@ impl SpriteFileSelection {
 
     /// Attempt to select a file and put it into the texture.
     /// On failure, return an Err and leave the selection unmodified.
-    fn try_select(&mut self, path: PathBuf, rs: &RenderState) -> anyhow::Result<(u32, u32)> {
+    pub fn try_select(&mut self, path: PathBuf, rs: &RenderState) -> anyhow::Result<(u32, u32)> {
         // Try to open the image file or return the error
         let image = image::open(&path)?.to_rgba8();
 

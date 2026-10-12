@@ -834,7 +834,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         // Start dragging from above and between zones 2 and 3, downward and to the right over zone 3
         tool.handle_drag_start(state(&objects), Vec2::new(35.0, -7.0), Default::default()).unwrap();
         assert_eq!(tool.selection_box(), Some((Vec2::new(35.0, -7.0), Vec2::new(35.0, -7.0))));
-        assert_eq!(tool.selection(), &[]);
+        assert_eq!(tool.selection(), &[] as &[u16]);
 
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(45.0, 17.0), Default::default()).unwrap();
         assert!(result.normals_stale.is_none());

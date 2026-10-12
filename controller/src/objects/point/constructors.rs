@@ -1,8 +1,44 @@
 use studio_math::Vec2;
 
 use super::{ControlPoint, ControlPointMode, ControlPointHandleSyncMode, PointsList, SiblingsList};
+use crate::objects::save::{SavedPoint, SavedSync};
 
 impl ControlPoint {
+    /// Create a control point from how it was saved to a file. A handle with no saved sync target syncs to the point itself.
+    pub fn from_saved(id: u16, zone_id: u16, saved: &SavedPoint) -> Self {
+        let left_sync = saved.left_sync.unwrap_or(SavedSync { point: id, flipped: false });
+        let right_sync = saved.right_sync.unwrap_or(SavedSync { point: id, flipped: false });
+        Self {
+            position: saved.position,
+            left_handle: saved.left_handle,
+            right_handle: saved.right_handle,
+            mode: u8::from(saved.mode),
+            flags: ControlPointHandleSyncMode::create_flags((
+                ControlPointHandleSyncMode::from(left_sync.flipped),
+                ControlPointHandleSyncMode::from(right_sync.flipped),
+            )),
+            zone_id,
+            left_sync_id: left_sync.point,
+            right_sync_id: right_sync.point,
+        }
+    }
+
+    /// Get how this control point is saved to a file, using `file_id` to convert point IDs to the ones in the file.
+    pub fn saved(&self, id: u16, file_id: impl Fn(u16) -> u16) -> SavedPoint {
+        let (left_mode, right_mode) = self.sync_modes();
+        let saved_sync = |sync_id: u16, mode: ControlPointHandleSyncMode| {
+            (sync_id != id || mode.is_flipped()).then(|| SavedSync { point: file_id(sync_id), flipped: mode.is_flipped() })
+        };
+        SavedPoint {
+            position: self.position,
+            left_handle: self.left_handle,
+            right_handle: self.right_handle,
+            mode: self.mode(),
+            left_sync: saved_sync(self.left_sync_id, left_mode),
+            right_sync: saved_sync(self.right_sync_id, right_mode),
+        }
+    }
+
     /// Create a new control point node with no siblings
     pub fn new_solo(id: u16, zone_id: u16, position: Vec2) -> Self {
         Self {

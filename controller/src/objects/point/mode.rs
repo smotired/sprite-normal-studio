@@ -3,7 +3,8 @@
 /// and 2nd bit = "the control points are at the node itself"
 /// in the assignment and viewport shaders we only care about that second bit though
 #[repr(C)]
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ControlPointMode {
     /// Creates a continuous curve. The handles and control point are all on a line.
     Continuous = 0,

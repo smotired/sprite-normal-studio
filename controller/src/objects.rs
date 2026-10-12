@@ -9,6 +9,7 @@ mod modify;
 mod merge;
 mod bounds;
 mod diff;
+mod save;
 
 use wgpu::{Buffer, Device};
 
@@ -18,6 +19,7 @@ pub use point::ControlPointMode;
 use buffers::{VecWithBuffer, ObjectList};
 pub use diff::ObjectDiff;
 pub use bounds::{Bounds, merge_bounds};
+pub use save::{SavedObjects, LoadedObjects};
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;

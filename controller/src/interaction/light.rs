@@ -16,8 +16,16 @@ impl Light {
 
     pub fn distance(&self, pos: Vec2) -> f32 { self.position.distance(pos) }
 
+    /// Set every property of the light at once. Height is kept at 100 or above, as when adjusting it.
+    pub fn set(&mut self, position: Vec2, height: f32, color: (u8, u8, u8)) {
+        self.position = position;
+        self.height = height.max(100.0);
+        self.color = color;
+    }
+
     pub fn position(&self) -> Vec2 { self.position }
     pub fn height(&self) -> f32 { self.height }
+    pub fn color(&self) -> (u8, u8, u8) { self.color }
     pub fn packed_color(&self) -> u32 { (self.color.0 as u32) | (self.color.1 as u32) << 8 | (self.color.2 as u32) << 16 }
 }
 
@@ -62,6 +70,16 @@ mod tests {
         light.adjust_height(-150.0);
         assert_eq!(light.height(), 150.0);
         light.adjust_height(-1000.0);
+        assert_eq!(light.height(), 100.0);
+    }
+
+    /// Setting the light replaces everything, but still keeps the height at 100 or above
+    #[test]
+    fn set() {
+        let mut light = Light::default();
+        light.set(Vec2::new(1.0, 2.0), 150.0, (1, 2, 3));
+        assert_eq!((light.position(), light.height(), light.color()), (Vec2::new(1.0, 2.0), 150.0, (1, 2, 3)));
+        light.set(Vec2::ZERO, 10.0, (0, 0, 0));
         assert_eq!(light.height(), 100.0);
     }
 
