@@ -7,6 +7,17 @@ use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, uti
 use super::result::{ToolResult, DefaultResults, EditorToolActionResult};
 
 /// The Pen tool allows creating a new zone by dragging out a bezier path.
+///
+/// Clicking or dragging on an existing point starts a zone branching off of it, and while branching,
+/// clicking or dragging on a point or path connected to it joins back to it.
+/// Clicking a path when not creating a zone inserts a point into it, and dragging on it starts a branch from the inserted point.
+///
+/// Modifier keys:
+/// SHIFT: when adding a new point, snap it to the grid. Doesn't apply when branching from or joining to existing points or paths.
+/// SHIFT: when dragging a handle, snap it to horizontal, vertical, or diagonal, whichever is closest
+/// CTRL: when dragging a handle, snap its end to the grid instead
+/// ALT: when releasing a dragged point, make it broken. It still acts continuous while dragging, so it gets a handle on both sides.
+///      Doesn't apply to points synced with the points we branched from or joined to.
 #[derive(Default)]
 pub struct EditorToolPen {
     /// The zone that is being created.
@@ -68,22 +79,28 @@ impl EditorTool for EditorToolPen {
 
     fn selection(&self) -> SelectionType<'_> { &self.zone_points[..] }
 
-    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
-        self.handle_create_point(state, pos, false)
+    fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
+        self.handle_create_point(state, pos, false, modifiers)
     }
 
-    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
+    fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         self.dragging_reversed = false;
-        self.handle_create_point(state, pos, true)
+        self.handle_create_point(state, pos, true, modifiers)
     }
 
-    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, _modifiers: InputModifiers) -> ToolResult {
+    fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         // Assume we are dragging the handle of the currently selected point
         if let Some(point_id) = self.latest_point {
             let point = state.objects.get_point_info(point_id).unwrap();
             let point_pos = point.position();
             let (first_point_id, _) = state.objects.get_zone_info(self.creating_zone.unwrap()).unwrap().range();
             let handle = if !self.dragging_reversed { pos - point_pos } else { point_pos - pos };
+
+            // Ctrl snaps the end of the handle to the grid, otherwise shift snaps its direction
+            let snap_modifiers = if modifiers.ctrl { InputModifiers::ctrl() } else if modifiers.shift { InputModifiers::shift() } else { InputModifiers::none() };
+            let handle_end = point_pos + handle;
+            let handle = utils::snap_drag_target(handle_end, point_pos, point_pos, handle_end, snap_modifiers) - point_pos;
+
             let current = if self.handle.unwrap() { point.right_handle() } else { point.left_handle() } - point_pos;
             let handle = utils::enforce_handle_length(handle, current);
             let (lh, rh) = if point_id == first_point_id {
@@ -96,7 +113,16 @@ impl EditorTool for EditorToolPen {
         self.ok()
     }
 
-    fn handle_drag_released(&mut self, state: ControllerStateInput, _modifiers: InputModifiers) -> ToolResult {
+    fn handle_drag_released(&mut self, mut state: ControllerStateInput, modifiers: InputModifiers) -> ToolResult {
+        // Alt: the point acted continuous while dragging, but should be broken from now on.
+        // Only applies to points that don't sync to other points, so it doesn't spread to the points we branched from or joined to.
+        if modifiers.alt && self.handle.is_some() && let Some(point_id) = self.latest_point {
+            let point = state.objects.get_point_info(point_id).unwrap();
+            if point.mode() == ControlPointMode::Continuous && !point.self_syncs_in(point_id, false) && !point.self_syncs_in(point_id, true) {
+                state.objects.update_point(point_id, None, Some(ControlPointMode::Broken), None, None)?;
+            }
+        }
+
         self.dragging_reversed = false;
         self.handle = None;
 
@@ -156,8 +182,42 @@ impl EditorToolPen {
         Ok(EditorToolActionResult::new(EditorToolKind::Point, true))
     }
 
+    /// Join the zone we are creating to a point connected to the point we branched off of.
+    /// If not dragging this completes the path, otherwise we start dragging the joined point's free handle.
+    fn join_branch(&mut self, mut state: ControllerStateInput, zone_id: u16, source_id: u16, point_id: u16, dragging: bool) -> ToolResult {
+        let created_ids = state.objects.complete_branching_zone(source_id, zone_id, point_id)?;
+        // If nothing was created, we have joined our original point.
+        let point_id = if created_ids.is_empty() {
+            state.objects.get_zone_info(zone_id).unwrap().range().0
+        } else { created_ids[0] };
+
+        self.latest_point = Some(point_id);
+        self.zone_points.push(point_id);
+
+        // If not dragging just select the point.
+        if !dragging {
+            return self.path_complete();
+        }
+
+        // Otherwise, determine which handle to drag
+        else {
+            let right = {
+                let point = state.objects.get_point_info(point_id).unwrap();
+                point.self_syncs_in(point_id, false)
+            };
+
+            self.handle = Some(right);
+            self.joined_source = true;
+            self.dragging_reversed = true;
+        }
+        self.ok()
+    }
+
     /// Helper method to handle creating a point. Used by both handle_click and handle_drag_start.
-    fn handle_create_point(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, dragging: bool) -> ToolResult {
+    fn handle_create_point(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, dragging: bool, modifiers: InputModifiers) -> ToolResult {
+        // Shift snaps newly added points to the grid
+        let new_point_pos = if modifiers.shift { utils::snap_to_grid(pos) } else { pos };
+
         // If we have a zone selected, we are already creating one, so add a linear node
         if let Some(zone_id) = self.creating_zone {
 
@@ -202,39 +262,32 @@ impl EditorToolPen {
 
                 // Otherwise, join the path if a path can be made to our original point via sibling points
                 else if let Some(source_id) = self.branch_point_id {
-                    let created_ids = state.objects.complete_branching_zone(source_id, zone_id, point_id)?;
-                    // If nothing was created, we have joined our original point.
-                    let point_id = if created_ids.is_empty() {
-                        state.objects.get_zone_info(zone_id).unwrap().range().0
-                    } else { created_ids[0] };
-
-                    self.latest_point = Some(point_id);
-                    self.zone_points.push(point_id);
-
-                    // If not dragging just select the point.
-                    if !dragging {
-                        return self.path_complete();
-                    }
-
-                    // Otherwise, determine which handle to drag
-                    else {
-                        let right = {
-                            let point = state.objects.get_point_info(point_id).unwrap();
-                            point.self_syncs_in(point_id, false)
-                        };
-
-                        self.handle = Some(right);
-                        self.joined_source = true;
-                        self.dragging_reversed = true;
-                    }
+                    return self.join_branch(state, zone_id, source_id, point_id, dragging);
                 }
             }
 
-            // TODO: Try inserting into an existing path and then joining it. Shouldn't be too hard, just need to update the three selected things here to push them all back one
+            // If we are branching and clicked another zone's path, insert a point into it and join to that
+            else if let Some(source_id) = self.branch_point_id
+                && let Some((path_zone_id, start_id, _, t)) = utils::get_clicked_zone_path(&state, pos)
+                && path_zone_id != zone_id {
+                // Check first, so we don't insert a point we can't join to
+                if !state.objects.check_points_connected(source_id, start_id)? {
+                    anyhow::bail!("Cannot join control points in disconnected zones! Make the paths close together and use the merge tool.");
+                }
+                let inserted_ids = state.objects.insert_point(path_zone_id, start_id, t)?;
+
+                // Inserting pushes back the IDs of every point after the inserted ones, including the ones we're keeping track of
+                self.latest_point = self.latest_point.map(|point_id| shift_id_after_insert(point_id, &inserted_ids));
+                for point_id in &mut self.zone_points { *point_id = shift_id_after_insert(*point_id, &inserted_ids); }
+                let source_id = shift_id_after_insert(source_id, &inserted_ids);
+                self.branch_point_id = Some(source_id);
+
+                return self.join_branch(state, zone_id, source_id, inserted_ids[0], dragging);
+            }
 
             // Otherwise just add a new point to the selected zone
             else {
-                let point_id = state.objects.create_point(zone_id, pos)?;
+                let point_id = state.objects.create_point(zone_id, new_point_pos)?;
                 self.latest_point = Some(point_id);
                 self.zone_points.push(point_id);
 
@@ -258,23 +311,35 @@ impl EditorToolPen {
                 if dragging { self.handle = Some(true); }
             }
 
-            // If we clicked a path, add a vertex to that zone, select it, and move to Point tool
+            // If we clicked a path, add a vertex to that zone
             else if let Some((zone_id, start_id, _, t)) = utils::get_clicked_zone_path(&state, pos) {
                 // Add the point, which should also fix its handles
-                let point_id = state.objects.insert_point(zone_id, start_id, t)?[0];
+                let inserted_id = state.objects.insert_point(zone_id, start_id, t)?[0];
 
-                // Select and return
-                self.creating_zone = Some(zone_id);
-                self.latest_point = Some(point_id);
-                self.zone_points.push(point_id);
-                return self.path_joined();
+                // If dragging, start a path branching off of the inserted point
+                if dragging {
+                    let (zone_id, point_id) = state.objects.create_branching_zone(inserted_id)?;
+                    self.creating_zone = Some(zone_id);
+                    self.latest_point = Some(point_id);
+                    self.zone_points.push(point_id);
+                    self.branch_point_id = Some(inserted_id);
+                    self.handle = Some(true);
+                }
+
+                // Otherwise select it and move to the Point tool
+                else {
+                    self.creating_zone = Some(zone_id);
+                    self.latest_point = Some(inserted_id);
+                    self.zone_points.push(inserted_id);
+                    return self.path_joined();
+                }
             }
 
             // Otherwise start creating a new path.
             else {
                 let zone_id = state.objects.create_zone()?;
                 self.creating_zone = Some(zone_id);
-                let point_id = state.objects.create_point(zone_id, pos)?;
+                let point_id = state.objects.create_point(zone_id, new_point_pos)?;
                 self.latest_point = Some(point_id);
                 self.zone_points.push(point_id);
 
@@ -287,12 +352,22 @@ impl EditorToolPen {
         self.ok()
     }
 }
+/// Get the new ID of a point after other points were inserted, since inserting a point pushes back every point after it.
+/// `inserted_ids` are the IDs of the inserted points, after inserting.
+fn shift_id_after_insert(mut point_id: u16, inserted_ids: &[u16]) -> u16 {
+    let mut inserted_ids = inserted_ids.to_vec();
+    inserted_ids.sort();
+    for inserted_id in inserted_ids {
+        if inserted_id <= point_id { point_id += 1; }
+    }
+    point_id
+}
 
 
 #[cfg(test)]
 mod tests {
-    use crate::ObjectBuffers;
-    use crate::objects::test_utils::add_square;
+    use crate::{ObjectBuffers, InputModifiers as IM};
+    use crate::objects::test_utils::{add_square, add_zone};
 
     use super::*;
     use super::super::test_utils::state;
@@ -530,5 +605,206 @@ mod tests {
         assert!(result.normals_stale);
         assert_eq!(objects.zone_count(), 2);
         assert_eq!(objects.get_zone_info(1).unwrap().range().1, 3);
+    }
+
+    /// Shift snaps new points to the grid, but not points joined to or branched off of existing ones
+    #[test]
+    fn shift_click_snaps_to_grid() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(10.4, 20.6), IM::shift()).unwrap();
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(10.0, 21.0));
+        tool.handle_drag_start(state(&objects), Vec2::new(50.6, 0.2), IM::shift()).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(51.0, 0.0));
+
+        // Branching off of a point that isn't on the grid starts exactly on that point
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(0.0, 0.0), (100.3, 0.0), (100.0, 100.0)]);
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(100.0, 0.0), IM::shift()).unwrap();
+        assert_eq!(objects.object_counts(), (2, 4));
+        assert_eq!(objects.get_sibling(1).unwrap(), 3);
+        assert_eq!(objects.get_point_info(3).unwrap().position(), Vec2::new(100.3, 0.0));
+    }
+
+    /// Shift snaps a dragged handle to horizontal, vertical, or diagonal
+    #[test]
+    fn drag_handle_shift_snaps_direction() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
+
+        tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 3.0), IM::shift()).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.right_handle(), Vec2::new(60.0, 0.0));
+        assert_eq!(point.left_handle(), Vec2::new(40.0, 0.0));
+
+        // Diagonal: moved (+4, -6), which is closer to the diagonal than the vertical
+        tool.handle_dragging_to(state(&objects), Vec2::new(54.0, -6.0), IM::shift()).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.right_handle(), Vec2::new(55.0, -5.0));
+        assert_eq!(point.left_handle(), Vec2::new(45.0, 5.0));
+    }
+
+    /// Ctrl snaps the end of a dragged handle to the grid, and takes priority over shift
+    #[test]
+    fn drag_handle_ctrl_snaps_to_grid() {
+        let objects = ObjectBuffers::headless();
+        let mut tool = EditorToolPen::init();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
+
+        tool.handle_dragging_to(state(&objects), Vec2::new(60.4, 3.6), IM::ctrl()).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.right_handle(), Vec2::new(60.0, 4.0));
+        assert_eq!(point.left_handle(), Vec2::new(40.0, -4.0));
+
+        tool.handle_dragging_to(state(&objects), Vec2::new(60.4, 3.6), IM::ctrl_shift()).unwrap();
+        assert_eq!(objects.get_point_info(1).unwrap().right_handle(), Vec2::new(60.0, 4.0));
+    }
+
+    /// Releasing a drag with alt makes the point broken, keeping the handles it got from acting continuous
+    #[test]
+    fn alt_release_breaks_point() {
+        for (modifiers, mode) in [(IM::alt(), ControlPointMode::Broken), (IM::none(), ControlPointMode::Continuous)] {
+            let objects = ObjectBuffers::headless();
+            let mut tool = EditorToolPen::init();
+            tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
+            tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
+            tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 5.0), Default::default()).unwrap();
+            tool.handle_drag_released(state(&objects), modifiers).unwrap();
+
+            let point = objects.get_point_info(1).unwrap();
+            assert_eq!(point.mode(), mode);
+            assert_eq!(point.right_handle(), Vec2::new(60.0, 5.0));
+            assert_eq!(point.left_handle(), Vec2::new(40.0, -5.0));
+        }
+    }
+
+    /// Releasing a drag with alt doesn't change points synced to the zone we branched off of
+    #[test]
+    fn alt_release_skips_branch_points() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_drag_start(state(&objects), Vec2::new(100.0, 0.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(120.0, 10.0), Default::default()).unwrap();
+        tool.handle_drag_released(state(&objects), IM::alt()).unwrap();
+
+        assert_eq!(objects.get_point_info(4).unwrap().mode(), ControlPointMode::Broken);
+        assert_eq!(objects.get_point_info(4).unwrap().right_handle(), Vec2::new(120.0, 10.0));
+        let parent = objects.get_point_info(1).unwrap();
+        assert_eq!(parent.mode(), ControlPointMode::Linear);
+        assert_eq!(parent.left_handle(), parent.position());
+        assert_eq!(parent.right_handle(), parent.position());
+    }
+
+    /// Dragging on a path inserts a point into it and starts a zone branching off of that point
+    #[test]
+    fn drag_path_starts_branch() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let mut tool = EditorToolPen::init();
+
+        let result = tool.handle_drag_start(state(&objects), Vec2::new(50.0, 1.0), Default::default()).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Pen);
+        assert_eq!(objects.object_counts(), (2, 6));
+        assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(50.0, 0.0));
+        assert_eq!(objects.get_sibling(1).unwrap(), 5);
+        assert_eq!(objects.get_point_info(5).unwrap().zone_id(), 1);
+        assert_eq!(tool.selection(), &[5]);
+
+        // The new point's handle is dragged
+        tool.handle_dragging_to(state(&objects), Vec2::new(50.0, -20.0), Default::default()).unwrap();
+        assert_eq!(objects.get_point_info(5).unwrap().right_handle(), Vec2::new(50.0, -20.0));
+        let result = tool.handle_drag_released(state(&objects), Default::default()).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Pen);
+
+        // Joining back to the square works, so we're tracking the right source point
+        tool.handle_click(state(&objects), Vec2::new(150.0, -50.0), Default::default()).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(100.0, 0.0), Default::default()).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Zone);
+        assert_eq!(objects.zone_count(), 2);
+        assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 5));
+    }
+
+    /// Clicking another zone's path while branching inserts a point into it and joins to that point
+    #[test]
+    fn click_path_joins_branch() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_click(state(&objects), Vec2::new(100.0, 0.0), Default::default()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(150.0, -50.0), Default::default()).unwrap();
+        let result = tool.handle_click(state(&objects), Vec2::new(101.0, 50.0), Default::default()).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Zone);
+        assert!(result.normals_stale);
+        assert_eq!(objects.zone_count(), 2);
+
+        // The square got a point on its right edge, and the IDs of the branching zone moved back to make room
+        assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 5));
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(100.0, 50.0));
+        let (start, count) = objects.get_zone_info(1).unwrap().range();
+        assert_eq!(start, 5);
+        assert_eq!(count, 3);
+
+        // The branching zone starts at the original corner, and ends at the inserted point
+        assert_eq!(objects.sibling_in_zone(1, 1).map(|id| objects.get_point_info(id).unwrap().position()), Some(Vec2::new(100.0, 0.0)));
+        assert_eq!(objects.sibling_in_zone(2, 1).map(|id| objects.get_point_info(id).unwrap().position()), Some(Vec2::new(100.0, 50.0)));
+        assert!((start..start + count).any(|id| objects.get_point_info(id).unwrap().position() == Vec2::new(150.0, -50.0)));
+    }
+
+    /// Dragging another zone's path while branching inserts a point, joins to it, and drags its free handle
+    #[test]
+    fn drag_path_joins_branch() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_click(state(&objects), Vec2::new(100.0, 0.0), Default::default()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(150.0, -50.0), Default::default()).unwrap();
+        let result = tool.handle_drag_start(state(&objects), Vec2::new(101.0, 50.0), Default::default()).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Pen);
+        assert_eq!(objects.get_zone_info(0).unwrap().range(), (0, 5));
+        let join_id = objects.sibling_in_zone(2, 1).unwrap();
+
+        // The handle is dragged reversed, so it points away from the mouse
+        tool.handle_dragging_to(state(&objects), Vec2::new(120.0, 60.0), Default::default()).unwrap();
+        let point = objects.get_point_info(join_id).unwrap();
+        assert!(point.left_handle() == Vec2::new(80.0, 40.0) || point.right_handle() == Vec2::new(80.0, 40.0));
+
+        let result = tool.handle_drag_released(state(&objects), Default::default()).unwrap();
+        assert_eq!(result.new_tool, EditorToolKind::Zone);
+        assert_eq!(objects.zone_count(), 2);
+    }
+
+    /// Clicking a path that isn't connected to the zone we branched off of is an error, and doesn't change the path
+    #[test]
+    fn click_disconnected_path_errors() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        add_zone(&mut objects, &[(200.0, 0.0), (300.0, 0.0), (300.0, 100.0), (200.0, 100.0)]);
+        let mut tool = EditorToolPen::init();
+
+        tool.handle_click(state(&objects), Vec2::new(100.0, 0.0), Default::default()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(150.0, -50.0), Default::default()).unwrap();
+        assert!(tool.handle_click(state(&objects), Vec2::new(250.0, 1.0), Default::default()).is_err());
+        assert_eq!(objects.get_zone_info(1).unwrap().range(), (4, 4));
+        assert_eq!(objects.point_count(), 10);
+
+        // Same as clicking a disconnected point
+        assert!(tool.handle_click(state(&objects), Vec2::new(200.0, 0.0), Default::default()).is_err());
+    }
+
+    /// Point IDs are pushed back by every point inserted at or before them
+    #[test]
+    fn shift_ids_after_insert() {
+        assert_eq!(shift_id_after_insert(3, &[5]), 3);
+        assert_eq!(shift_id_after_insert(3, &[3]), 4);
+        assert_eq!(shift_id_after_insert(3, &[9, 1]), 4);
+        assert_eq!(shift_id_after_insert(3, &[4, 2]), 5); // 3 -> 4 after inserting 2, then 4 -> 5 after inserting 4
     }
 }
