@@ -51,10 +51,15 @@ pub fn snap_drag_target(mut target: Vec2, start: Vec2, origin: Vec2, pos: Vec2, 
 
     // Ctrl: snap to the grid
     if modifiers.ctrl {
-        let grid = GRID_SIZE as f32;
-        target = Vec2::new((target.x / grid).round() * grid, (target.y / grid).round() * grid);
+        target = snap_to_grid(target);
     }
     target
+}
+
+/// Round a position to the nearest point on the grid (see GRID_SIZE)
+pub fn snap_to_grid(pos: Vec2) -> Vec2 {
+    let grid = GRID_SIZE as f32;
+    Vec2::new((pos.x / grid).round() * grid, (pos.y / grid).round() * grid)
 }
 
 /// Combine a unit of IDs with the current selection, based on modifier keys.
