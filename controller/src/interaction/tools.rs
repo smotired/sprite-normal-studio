@@ -173,6 +173,12 @@ impl Controller {
         // Unless we have sub modes in which case cycle those instead of this stuff.
         if tool == self.tool.kind() { return; }
 
+        // Deselecting a tool that is creating a path deletes it, and it may have been assigned if its normal was set.
+        // The path being created is always the last zone.
+        if self.tool.creating_path().is_some() && let Some(zone_id) = self.objects.zone_count().checked_sub(1) {
+            self.mark_normals_stale(self.objects.zone_bounds(zone_id).ok().flatten());
+        }
+
         // Drop the old tool
         let selection = Vec::from(self.tool.deselect(self.create_state())); // cloning should be okay
 
@@ -194,7 +200,7 @@ impl Controller {
         let state = self.create_state();
         // The change will go on the undo stack once there is one
         if let Some((EditorToolActionResult { new_tool, normals_stale }, _change)) = run_tool_action(&mut self.tool, state, &mut self.tool_error, continuing_drag, action) {
-            self.normals_stale |= normals_stale;
+            self.mark_normals_stale(normals_stale);
             self.select_tool(new_tool);
         }
     }
@@ -334,7 +340,7 @@ mod tests {
 
     /// A successful action that doesn't change anything
     fn ok_action(_tool: &mut dyn EditorTool, _state: ControllerStateInput) -> ToolResult {
-        Ok(EditorToolActionResult::new(EditorToolKind::Zone, false))
+        Ok(EditorToolActionResult::new(EditorToolKind::Zone, None))
     }
 
     /// A failing action that doesn't change anything
@@ -419,7 +425,7 @@ mod tests {
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
 
         let result = tool.handle_special_action(state(&objects), SpecialAction::ToggleInherit).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(result.new_tool, EditorToolKind::Zone);
         assert_eq!(tool.handle_special_query(SpecialQuery::Normal), None);
     }

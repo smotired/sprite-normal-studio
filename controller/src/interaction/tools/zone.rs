@@ -1,6 +1,7 @@
 use studio_math::Vec2;
 
 use crate::InputModifiers;
+use crate::objects::merge_bounds;
 
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, SpecialAction, utils};
 use super::result::{ToolResult, DefaultResults};
@@ -156,8 +157,7 @@ impl EditorTool for EditorToolZone {
             }
 
             // Move the first point to the position across all the selected zones.
-            state.objects.move_zones(&self.selected_zones[..], target)?;
-            return self.stale();
+            return self.move_selected_zones(&mut state, target);
         }
         // Or if we are dragging a selection box, tentatively select the zones in the box
         else if let Some(selection_origin) = self.selection_origin {
@@ -187,8 +187,7 @@ impl EditorTool for EditorToolZone {
         // If dragging zones, put them back where they started
         if let (Some(reference_delta), Some(origin)) = (self.reference_delta.take(), self.drag_origin.take()) {
             if !self.selected_zones.is_empty() {
-                state.objects.move_zones(&self.selected_zones[..], origin - reference_delta)?;
-                return self.stale();
+                return self.move_selected_zones(&mut state, origin - reference_delta);
             }
         }
         // If dragging a selection box, just abandon the box and keep the previous selection
@@ -214,6 +213,9 @@ impl EditorTool for EditorToolZone {
         // Or Delete selected zones
         else if !self.selected_zones.is_empty() {
             self.selected_zones.sort();
+
+            // Deleting a zone changes the IDs of every zone after it, so they all need to be reassigned
+            let bounds = state.objects.bounds_from_zone(self.selected_zones[0])?;
             let mut offset = 0;
             #[allow(clippy::explicit_counter_loop)] // offset counts deletions, not iterations
             for zone_id in &self.selected_zones[..] {
@@ -224,7 +226,7 @@ impl EditorTool for EditorToolZone {
             self.set_selection(Vec::new(), &state)?;
             self.reference_delta = None;
 
-            return self.stale();
+            return self.stale_in(bounds);
         }
         self.ok()
     }
@@ -234,7 +236,7 @@ impl EditorTool for EditorToolZone {
         match action {
             SpecialAction::NormalSet(normal, _) => {
                 state.objects.set_zone_normals(&self.selected_zones, normal)?;
-                self.stale()
+                self.stale_in(state.objects.zones_bounds(&self.selected_zones)?)
             },
             SpecialAction::SelectionSeparated => {
                 state.objects.separate_points(&self.selected_points_reference)?;
@@ -246,6 +248,15 @@ impl EditorTool for EditorToolZone {
 }
 
 impl EditorToolZone {
+    /// Move the first point of the selected zones to a position, marking normals stale where the zones were and where they are now.
+    /// Siblings move along with the zones, so their zones are included.
+    fn move_selected_zones(&self, state: &mut ControllerStateInput, first_point_position: Vec2) -> ToolResult {
+        let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
+        state.objects.move_zones(&self.selected_zones[..], first_point_position)?;
+        let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
+        self.stale_in(merge_bounds(before, after))
+    }
+
     fn set_selection(&mut self, selected_zones: Vec<u16>, state: &ControllerStateInput) -> anyhow::Result<()> {
         self.selected_zones = selected_zones;
         self.selected_points_reference = points_from_zone_selection(&self.selected_zones[..], state)?;
@@ -434,7 +445,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         let result = tool.handle_click(state(&objects), Vec2::new(10.5, 0.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(tool.selection(), &[0, 1, 2, 3]);
 
         tool.handle_click(state(&objects), Vec2::new(90.0, 1.0), Default::default()).unwrap(); // path
@@ -473,7 +484,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         let result = tool.handle_click(state(&objects), Vec2::new(10.5, 0.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq_contents(tool.selection(), &[0, 1, 2, 3, 4, 5, 6, 7]);
 
         tool.handle_click(state(&objects), Vec2::new(90.0, 1.0), Default::default()).unwrap(); // path
@@ -500,7 +511,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         // Ctrl-click on a single zone and ensure only that zone is selected
         let result = tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), IM::ctrl()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(tool.selection(), &[0, 1, 2, 3]);
 
         // Ctrl+click on the other zone and ensure only it is selected
@@ -541,7 +552,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         let result = tool.handle_click(state(&objects), Vec2::new(10.5, 0.0), IM::shift()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_selected_zones(&tool, &[0]);
 
         tool.handle_click(state(&objects), Vec2::new(90.0, 1.0), IM::shift()).unwrap(); // path
@@ -599,7 +610,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         // Start by selecting only zone 0
         let result = tool.handle_click(state(&objects), Vec2::new(10.5, 0.0), IM::ctrl()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_selected_zones(&tool, &[0]);
 
         // Ctrl+Shift to select a zone on the other graph
@@ -678,7 +689,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         assert_eq!(tool.selection(), &first[..]);
     }
 
-    /// Dragging a zone moves it by where it was grabbed, and marks the normals stale
+    /// Dragging a zone moves it by where it was grabbed, and marks the normals stale where it was and where it is now
     #[test]
     fn drag_moves_zone() {
         let mut objects = ObjectBuffers::headless();
@@ -687,7 +698,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(15.0, 12.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert_eq!(result.normals_stale, Some((Vec2::ZERO, Vec2::new(15.0, 12.0))));
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 2.0));
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
 
@@ -695,7 +706,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 4);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
     }
 
@@ -708,7 +719,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0), Default::default()).unwrap();
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0), Default::default()).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
     }
 
@@ -726,7 +737,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         // Drag the second zone
         tool.handle_drag_start(state(&objects), Vec2::new(140.0, 100.0), Default::default()).unwrap();
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(145.0, 102.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(0.0, 0.0));
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(45.0, 2.0));
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
@@ -735,7 +746,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 3);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
     }
 
@@ -754,7 +765,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         // Drag the second zone, without holding shift
         tool.handle_drag_start(state(&objects), Vec2::new(140.0, 100.0), Default::default()).unwrap();
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(145.0, 102.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 2.0));
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(45.0, 2.0));
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
@@ -763,7 +774,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 7);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(objects.get_point_info(6).unwrap().position(), Vec2::new(145.0, 102.0));
     }
 
@@ -780,7 +791,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(15.0, 12.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
 
         // These points are two sets of siblings. Moving one propagates to the other, so the whole group should only be moved once.
         assert_eq!(objects.get_point_info(3).unwrap().position(), Vec2::new(5.0, 12.0));
@@ -792,7 +803,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection().len(), 8);
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(100.0, 100.0), Default::default()).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 12.0));
     }
 
@@ -826,7 +837,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         assert_eq!(tool.selection(), &[]);
 
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(45.0, 17.0), Default::default()).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         check_selection(tool.selection(), &[7, 8, 9, 10, 11, 12]); // should include the connected zone 4 even though no points overlap
         assert_eq!(tool.selection_box(), Some((Vec2::new(35.0, -7.0), Vec2::new(45.0, 17.0))));
 
@@ -929,7 +940,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(15.0, 22.0));
 
         let result = tool.handle_cancel(state(&objects)).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
         assert_eq!(tool.selection().len(), 4);
@@ -978,11 +989,13 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
         let mut tool = EditorToolZone::init();
 
-        assert!(!tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale.is_none());
         assert_eq!(objects.zone_count(), 2);
 
+        // Every zone after the deleted one changes ID, so they are all stale
         tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
-        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        let stale = tool.handle_delete(state(&objects)).unwrap().normals_stale;
+        assert_eq!(stale, Some((Vec2::ZERO, Vec2::new(50.0, 10.0))));
         assert_eq!(objects.object_counts(), (1, 3));
         assert!(tool.selection().is_empty());
     }
@@ -1005,7 +1018,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         let mut tool = EditorToolZone::select(&[0, 1, 2, 3], state(&objects));
 
         let result = tool.handle_special_action(state(&objects), SpecialAction::NormalSet(studio_math::Vec3::UP, false)).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_zone_info(0).unwrap().normal(), studio_math::Vec3::UP);
         assert_eq!(objects.get_zone_info(1).unwrap().normal(), studio_math::Vec3::FORWARD);
     }

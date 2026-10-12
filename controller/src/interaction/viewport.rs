@@ -1,4 +1,5 @@
 use studio_math::Vec2;
+use studio_math::bounds::bounds_correct;
 use wgpu::{Device, util::DeviceExt};
 
 use crate::{interaction::{camera::Camera, light::Light, overlay::OverlayState, tools::EditorTool}};
@@ -54,12 +55,7 @@ impl ViewportDataUniform {
         // Calculate selection box
         let (selection_box_start, selection_box_end) = {
             if let Some((start, end)) = tool.selection_box() {
-                // Correct box positions
-                let start_x = start.x.min(end.x);
-                let start_y = start.y.min(end.y);
-                let end_x = start.x.max(end.x);
-                let end_y = start.y.max(end.y);
-                (Vec2::new(start_x, start_y), Vec2::new(end_x, end_y))
+                bounds_correct(start, end)
             } else { (Vec2::ZERO, Vec2::ZERO) }
         };
 

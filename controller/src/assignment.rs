@@ -3,7 +3,7 @@ mod uniform;
 use studio_math::Vec2;
 use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture};
 
-use crate::{BufferStates, Controller};
+use crate::{Bounds, BufferStates, Controller};
 pub use uniform::ZoneAssignerUniform;
 
 /// The ZoneAssigner is in charge of assigning pixels to the zones they fall into.
@@ -93,11 +93,9 @@ impl ZoneAssigner {
         }
     }
 
-    /// Reassign textures to zones.
+    /// Reassign textures to zones within the stale region, which should be corrected and clamped to the texture.
     /// Should be run whenever the zones change.
-    /// TODO: Give it a bounding box, and only update assignments within that bounding box.
-    ///       The bounding box should be the bounding box of the zone's old path and its new path
-    pub fn assign_zones(&mut self, device: &Device, queue: &Queue, object_buffers: BufferStates, object_counts: (usize, usize)) {
+    pub fn assign_zones(&mut self, device: &Device, queue: &Queue, object_buffers: BufferStates, object_counts: (usize, usize), stale: Bounds) {
         // Skip if we haven't set up the texture bind group yet
         let Some(output_bind_group) = &self.output_bind_group else { return };
 
@@ -121,7 +119,7 @@ impl ZoneAssigner {
         }
 
         // Write uniforms
-        let uniform = ZoneAssignerUniform::new(object_counts);
+        let uniform = ZoneAssignerUniform::new(object_counts, stale);
         queue.write_buffer(&self.uniform_buffer, 0, uniform.bytes());
 
         // Submit the command
@@ -130,6 +128,9 @@ impl ZoneAssigner {
 
     /// Return a clone of the working normal map.
     pub fn output(&self) -> &Texture { &self.output }
+
+    /// Current size of the spritesheet, which is also the size of the output.
+    pub fn size(&self) -> Vec2 { self.size }
 }
 
 /// Create a new texture for the output when needed

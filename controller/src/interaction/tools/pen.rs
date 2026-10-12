@@ -162,7 +162,7 @@ impl EditorTool for EditorToolPen {
             if point_count > 1 {
                 // Finalize path if this is the first point or we are joining to another path
                 if point_id == start_point || self.joined_source {
-                    return self.path_complete();
+                    return self.path_complete(&state);
                 }
             }
         }
@@ -171,19 +171,25 @@ impl EditorTool for EditorToolPen {
 
     fn handle_cancel(&mut self, mut state: ControllerStateInput) -> ToolResult {
         // If we are creating a zone, delete the whole zone.
+        // It may have been assigned if its normal was set, so normals are stale where it was.
+        // It is the last zone, so deleting it doesn't change any other zone IDs.
         if let Some(zone_id) = self.creating_zone {
+            let bounds = state.objects.zone_bounds(zone_id)?;
             state.objects.delete_zone(zone_id)?;
             self.creating_zone = None;
             self.latest_point = None;
             self.handle = None;
             self.branch_point_id = None;
             self.zone_points.clear();
+            return self.stale_in(bounds);
         }
         self.ok()
     }
 
     fn handle_delete(&mut self, mut state: ControllerStateInput) -> ToolResult {
-        if self.creating_zone.is_some() {
+        // Like cancelling, the zone may have been assigned if its normal was set, so normals are stale where it was.
+        if let Some(zone_id) = self.creating_zone {
+            let bounds = state.objects.zone_bounds(zone_id)?;
             if state.objects.delete_point_in_wip_path(self.latest_point.unwrap())? {
                 // The path is now empty, the whole zone was deleted.
                 self.creating_zone = None;
@@ -195,6 +201,7 @@ impl EditorTool for EditorToolPen {
                 self.latest_point = self.zone_points.last().copied();
             }
             self.handle = None;
+            return self.stale_in(bounds);
         }
         self.ok()
     }
@@ -226,7 +233,9 @@ impl EditorTool for EditorToolPen {
 impl EditorToolPen {
     /// Return a result for when the path is complete and we should move to another zone.
     /// If the pen stays active, get ready to create another zone instead.
-    fn path_complete(&mut self) -> ToolResult {
+    /// Normals are stale around the finished zone and the zones it branched from or joined to.
+    fn path_complete(&mut self, state: &ControllerStateInput) -> ToolResult {
+        let bounds = state.objects.bounds_around_points(&self.zone_points)?;
         self.creating_zone = None; // finished, so deselecting must not delete it
         if self.stay_active {
             self.latest_point = None;
@@ -235,9 +244,9 @@ impl EditorToolPen {
             self.branch_point_id = None;
             self.joined_source = false;
             self.dragging_reversed = false;
-            return Ok(EditorToolActionResult::new(EditorToolKind::Pen, true));
+            return Ok(EditorToolActionResult::new(EditorToolKind::Pen, bounds));
         }
-        Ok(EditorToolActionResult::new(EditorToolKind::Zone, true))
+        Ok(EditorToolActionResult::new(EditorToolKind::Zone, bounds))
     }
 
     /// Set the normal for new zones, and for the zone being drawn if there is one.
@@ -245,7 +254,7 @@ impl EditorToolPen {
         self.normal = normal;
         if let Some(zone_id) = self.creating_zone {
             state.objects.set_zone_normals(&[zone_id], normal)?;
-            return self.stale();
+            return self.stale_in(state.objects.zone_bounds(zone_id)?);
         }
         self.ok()
     }
@@ -263,9 +272,11 @@ impl EditorToolPen {
         state.objects.set_zone_normals(&[zone_id], normal)
     }
     /// Return a result for when the path is joined to another path, and we should select it
-    fn path_joined(&mut self) -> ToolResult {
+    /// Normals are stale around the joined zone and the zones it is connected to.
+    fn path_joined(&mut self, state: &ControllerStateInput) -> ToolResult {
+        let bounds = state.objects.bounds_around_points(&self.zone_points)?;
         self.creating_zone = None; // finished, so deselecting must not delete it
-        Ok(EditorToolActionResult::new(EditorToolKind::Point, true))
+        Ok(EditorToolActionResult::new(EditorToolKind::Point, bounds))
     }
 
     /// Join the zone we are creating to a point connected to the point we branched off of.
@@ -282,7 +293,7 @@ impl EditorToolPen {
 
         // If not dragging just select the point.
         if !dragging {
-            return self.path_complete();
+            return self.path_complete(&state);
         }
 
         // Otherwise, determine which handle to drag
@@ -332,7 +343,7 @@ impl EditorToolPen {
                             }
 
                             // Go to the Point tool. Should keep the zone and point selected.
-                            return self.path_complete();
+                            return self.path_complete(&state);
                         }
 
                         else {
@@ -419,7 +430,7 @@ impl EditorToolPen {
                     self.creating_zone = Some(zone_id);
                     self.latest_point = Some(inserted_id);
                     self.zone_points.push(inserted_id);
-                    return self.path_joined();
+                    return self.path_joined(&state);
                 }
             }
 
@@ -505,7 +516,7 @@ mod tests {
 
         let result = tool.handle_click(state(&objects), Vec2::new(1.0, 1.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(result.normals_stale);
+        assert_eq!(result.normals_stale, Some((Vec2::ZERO, Vec2::new(50.0, 50.0))));
         assert_eq!(objects.object_counts(), (1, 3));
 
         // Deselecting should not delete the finished zone
@@ -583,7 +594,7 @@ mod tests {
 
         let result = tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
     }
 
     /// Releasing a drag on the first point of a path with a single point doesn't finish it
@@ -609,6 +620,9 @@ mod tests {
         assert_eq!(objects.object_counts(), (0, 0));
         assert_eq!(tool.creating_path(), None);
         assert!(tool.selection().is_empty());
+
+        // The path may have been assigned if its normal was set, so normals are stale where it was
+        assert_eq!(result.normals_stale, Some((Vec2::ZERO, Vec2::new(50.0, 50.0))));
     }
 
     /// Deselecting throws away an unfinished path
@@ -658,7 +672,7 @@ mod tests {
 
         let result = tool.handle_click(state(&objects), Vec2::new(50.0, 1.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Point);
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.point_count(), 5);
         assert_eq!(tool.selection(), &[1]);
 
@@ -691,7 +705,7 @@ mod tests {
         tool.handle_click(state(&objects), Vec2::new(-100.0, 50.0), Default::default()).unwrap();
         let result = tool.handle_click(state(&objects), Vec2::new(0.0, 100.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.zone_count(), 2);
         assert_eq!(objects.get_zone_info(1).unwrap().range().1, 3);
     }
@@ -830,7 +844,7 @@ mod tests {
         tool.handle_click(state(&objects), Vec2::new(150.0, -50.0), Default::default()).unwrap();
         let result = tool.handle_click(state(&objects), Vec2::new(101.0, 50.0), Default::default()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.zone_count(), 2);
 
         // The square got a point on its right edge, and the IDs of the branching zone moved back to make room
@@ -948,7 +962,7 @@ mod tests {
         tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
 
         let result = tool.handle_special_action(state(&objects), SpecialAction::NormalSet(Vec3::LEFT, false)).unwrap();
-        assert!(result.normals_stale);
+        assert_eq!(result.normals_stale, Some((Vec2::new(10.0, 0.0), Vec2::new(10.0, 0.0))));
         assert_eq!(tool.normal, Vec3::LEFT);
         assert_eq!(objects.get_zone_info(1).unwrap().normal(), Vec3::LEFT);
         assert_eq!(objects.get_zone_info(0).unwrap().normal(), Vec3::UP);
@@ -997,7 +1011,7 @@ mod tests {
         tool.handle_click(state(&objects), Vec2::new(150.0, 100.0), Default::default()).unwrap();
 
         let result = tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), IM::alt()).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_zone_info(1).unwrap().normal(), Vec3::UP);
         assert_eq!(objects.object_counts(), (2, 6));
     }
