@@ -73,6 +73,18 @@ impl Vec2 {
     /// Linear interpolation between two vectors according to a value between 0 and 1
     pub fn lerp(lhs: Self, rhs: Self, t: f32) -> Vec2 { lhs + t.clamp(0.0, 1.0) * (rhs - lhs) }
 
+    /// Component-wise minimum of two vectors
+    pub fn min(self, rhs: Self) -> Self { Self { x: self.x.min(rhs.x), y: self.y.min(rhs.y) } }
+
+    /// Component-wise maximum of two vectors
+    pub fn max(self, rhs: Self) -> Self { Self { x: self.x.max(rhs.x), y: self.y.max(rhs.y) } }
+
+    /// Round both components down
+    pub fn floor(self) -> Self { Self { x: self.x.floor(), y: self.y.floor() } }
+
+    /// Round both components up
+    pub fn ceil(self) -> Self { Self { x: self.x.ceil(), y: self.y.ceil() } }
+
     /// Convert to bytes for writing into a buffer
     pub fn bytes(&self) -> &[u8] { bytemuck::bytes_of(self) }
 }

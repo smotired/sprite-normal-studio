@@ -1,7 +1,7 @@
 use studio_math::Vec2;
 
 use crate::InputModifiers;
-use crate::objects::ControlPointMode;
+use crate::objects::{ControlPointMode, merge_bounds};
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, SpecialAction, utils};
 use super::result::{ToolResult, DefaultResults};
 
@@ -142,8 +142,9 @@ impl EditorTool for EditorToolPoint {
             let current = if right { point.right_handle() } else { point.left_handle() } - point.position();
             let handle = Some(utils::enforce_handle_length(pos - point.position(), current));
             let (lh, rh) = if right { (None, handle) } else { (handle, None) };
+            let before = state.objects.bounds_around_points(&[point_id])?;
             state.objects.update_point(point_id, None, None, lh, rh)?;
-            return self.stale();
+            return self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&[point_id])?));
         }
 
         // Or if we are dragging points, move them all together. Moving points also moves their siblings, but each one is only moved once.
@@ -151,9 +152,10 @@ impl EditorTool for EditorToolPoint {
             if self.selected_points.is_empty() { return self.ok(); }
             let target = utils::snap_drag_target(anchor + (pos - origin), anchor, origin, pos, modifiers);
             let offset = target - anchor;
+            let before = state.objects.bounds_around_points(&self.selected_points)?;
             state.objects.move_points(&self.selected_points[..], offset - self.drag_offset)?;
             self.drag_offset = offset;
-            return self.stale();
+            return self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&self.selected_points)?));
         }
 
         // Or if we are dragging a selection box, tentatively select the points in the box
@@ -180,8 +182,9 @@ impl EditorTool for EditorToolPoint {
         // If dragging a handle, put it back where it started
         if self.handle.take().is_some() {
             if let Some(point_id) = self.single_selected_point() && let Some((lh, rh)) = self.handle_start.take() {
+                let before = state.objects.bounds_around_points(&[point_id])?;
                 state.objects.update_point(point_id, None, None, Some(lh), Some(rh))?;
-                return self.stale();
+                return self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&[point_id])?));
             }
         }
         // If dragging points, put them back where they started
@@ -189,8 +192,9 @@ impl EditorTool for EditorToolPoint {
             let offset = self.drag_offset;
             self.stop_dragging();
             if !self.selected_points.is_empty() {
+                let before = state.objects.bounds_around_points(&self.selected_points)?;
                 state.objects.move_points(&self.selected_points[..], -offset)?;
-                return self.stale();
+                return self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&self.selected_points)?));
             }
         }
         // If dragging a selection box, just abandon the box and keep the previous selection
@@ -215,6 +219,13 @@ impl EditorTool for EditorToolPoint {
             point_ids.sort();
             point_ids.dedup();
 
+            // Deleting a point can delete its whole zone, which changes the IDs of every zone after it, so they all need to be reassigned
+            let mut first_zone_id = u16::MAX;
+            for &point_id in &point_ids {
+                first_zone_id = first_zone_id.min(state.objects.get_point_info(point_id)?.zone_id());
+            }
+            let bounds = state.objects.bounds_from_zone(first_zone_id)?;
+
             // Delete from the highest ID down, so that deleting a point never changes the IDs of the points still to be deleted.
             // Deleting a point can delete its whole zone, so skip any remaining points that were deleted along with it.
             let mut deleted_zone_range = None;
@@ -231,7 +242,7 @@ impl EditorTool for EditorToolPoint {
             }
 
             self.stop_dragging();
-            return self.stale();
+            return self.stale_in(bounds);
         }
         self.ok()
     }
@@ -248,8 +259,9 @@ impl EditorTool for EditorToolPoint {
             SpecialAction::PointModeSet(mode) => {
                 let Some(point_id) = self.single_selected_point() else { return self.ok(); };
                 self.stop_dragging();
+                let before = state.objects.bounds_around_points(&[point_id])?;
                 state.objects.set_point_mode(point_id, mode)?;
-                self.stale()
+                self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&[point_id])?))
             },
 
             SpecialAction::PointModeToggled => {
@@ -260,8 +272,9 @@ impl EditorTool for EditorToolPoint {
                     Some(ControlPointMode::Linear) => ControlPointMode::Continuous,
                     _ => ControlPointMode::Linear,
                 };
+                let before = state.objects.bounds_around_points(&[point_id])?;
                 state.objects.set_point_mode(point_id, mode)?;
-                self.stale()
+                self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&[point_id])?))
             },
 
             SpecialAction::CycleSibling => {
@@ -279,14 +292,17 @@ impl EditorTool for EditorToolPoint {
 
                 // Only select the inserted point, not the ones inserted into sibling paths
                 self.stop_dragging();
-                self.selected_points = vec![state.objects.insert_point(zone_id, start_id, 0.5)?[0]];
-                self.stale()
+                let before = state.objects.bounds_around_points(&self.selected_points)?;
+                let inserted = state.objects.insert_point(zone_id, start_id, 0.5)?;
+                self.selected_points = vec![inserted[0]];
+                self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&inserted)?))
             },
 
             SpecialAction::PointsMerged => {
                 self.stop_dragging();
+                let before = state.objects.bounds_around_points(&self.selected_points)?;
                 self.selected_points = state.objects.merge_points(&self.selected_points)?;
-                self.stale()
+                self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&self.selected_points)?))
             },
 
             _ => self.ok(),
@@ -672,18 +688,18 @@ mod tests {
         let mut tool = EditorToolPoint::init();
 
         let result = tool.handle_drag_start(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(tool.selection(), &[1]);
 
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(14.0, 3.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(14.0, 3.0));
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::ZERO);
 
         // Releasing keeps the point selected but stops the drag
         tool.handle_drag_released(state(&objects), Default::default()).unwrap();
         assert_eq!(tool.selection(), &[1]);
-        assert!(!tool.handle_dragging_to(state(&objects), Vec2::new(50.0, 50.0), Default::default()).unwrap().normals_stale);
+        assert!(tool.handle_dragging_to(state(&objects), Vec2::new(50.0, 50.0), Default::default()).unwrap().normals_stale.is_none());
         assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(14.0, 3.0));
     }
 
@@ -735,9 +751,10 @@ mod tests {
         let shared = shared_point(&objects);
         let mut tool = EditorToolPoint::init();
 
-        // Drag the shared point and both its instances
+        // Drag the shared point and both its instances. Both zones are stale, where they were and where they are now.
         tool.handle_drag_start(state(&objects), Vec2::new(20.0, 20.0), Default::default()).unwrap();
-        tool.handle_dragging_to(state(&objects), Vec2::new(23.0, 21.0), Default::default()).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(23.0, 21.0), Default::default()).unwrap();
+        assert_eq!(result.normals_stale, Some((Vec2::ZERO, Vec2::new(23.0, 40.0))));
         tool.handle_dragging_to(state(&objects), Vec2::new(25.0, 22.0), Default::default()).unwrap();
         for &point_id in &shared {
             assert_eq!(objects.get_point_info(point_id).unwrap().position(), Vec2::new(25.0, 22.0));
@@ -795,7 +812,7 @@ mod tests {
         tool.handle_drag_start(state(&objects), Vec2::new(10.0, 30.0), Default::default()).unwrap();
         assert_eq!(tool.handle, Some(true));
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(25.0, 10.0), Default::default()).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
 
         let point = objects.get_point_info(1).unwrap();
         assert_eq!(point.position(), Vec2::new(10.0, 0.0));
@@ -833,7 +850,7 @@ mod tests {
         let mut tool = EditorToolPoint::init();
 
         tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0), Default::default()).unwrap();
-        assert!(!tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0), Default::default()).unwrap().normals_stale);
+        assert!(tool.handle_dragging_to(state(&objects), Vec2::new(60.0, 60.0), Default::default()).unwrap().normals_stale.is_none());
     }
 
     /// Shift constrains dragging to an axis or diagonal, and ctrl snaps the grabbed point to the grid
@@ -877,7 +894,7 @@ mod tests {
         assert!(tool.selection().is_empty());
 
         let result = tool.handle_dragging_to(state(&objects), Vec2::new(5.0, 5.0), Default::default()).unwrap();
-        assert!(!result.normals_stale);
+        assert!(result.normals_stale.is_none());
         assert_eq!(tool.selection(), &[0]);
 
         // Boxing shared points selects every instance
@@ -949,7 +966,7 @@ mod tests {
         tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), IM::ctrl()).unwrap();
         assert_eq!(tool.selection().len(), 4);
 
-        assert!(!tool.handle_cancel(state(&objects)).unwrap().normals_stale);
+        assert!(tool.handle_cancel(state(&objects)).unwrap().normals_stale.is_none());
         assert!(tool.selection().is_empty());
     }
 
@@ -965,7 +982,7 @@ mod tests {
         assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(25.0, 32.0));
 
         let result = tool.handle_cancel(state(&objects)).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(10.0, 0.0));
         assert_eq!(tool.selection(), &[1]);
 
@@ -991,7 +1008,7 @@ mod tests {
         tool.handle_dragging_to(state(&objects), Vec2::new(25.0, 10.0), Default::default()).unwrap();
         assert_eq!(objects.get_point_info(1).unwrap().right_handle(), Vec2::new(25.0, 10.0));
 
-        assert!(tool.handle_cancel(state(&objects)).unwrap().normals_stale);
+        assert!(tool.handle_cancel(state(&objects)).unwrap().normals_stale.is_some());
         let point = objects.get_point_info(1).unwrap();
         assert_eq!(point.right_handle(), Vec2::new(10.0, 30.0));
         assert_eq!(point.left_handle(), Vec2::new(5.0, 0.0));
@@ -1008,7 +1025,7 @@ mod tests {
         objects.insert_point(0, 0, 0.5).unwrap();
         let mut tool = EditorToolPoint::select(&[1, 2], state(&objects));
 
-        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale.is_some());
         assert_eq!(objects.point_count(), 3);
         assert!(tool.selection().is_empty());
         assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(10.0, 10.0));
@@ -1020,7 +1037,7 @@ mod tests {
         let mut objects = ObjectBuffers::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
-        assert!(!tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale.is_none());
         assert_eq!(objects.point_count(), 4);
     }
 
@@ -1036,7 +1053,7 @@ mod tests {
         let mut objects = ObjectBuffers::headless();
         add_delete_layout(&mut objects);
         let mut tool = EditorToolPoint::select(selection, state(&objects));
-        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale.is_some());
         assert!(tool.selection().is_empty());
         objects
     }
@@ -1099,7 +1116,7 @@ mod tests {
 
         tool.handle_click(state(&objects), Vec2::new(20.0, 20.0), IM::shift()).unwrap();
         assert_eq!(tool.selection().len(), 2);
-        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale);
+        assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale.is_some());
         assert_eq!(objects.object_counts(), (2, 6));
         assert!(positions(&objects).iter().all(|&position| position != Vec2::new(20.0, 20.0)));
 
@@ -1132,7 +1149,7 @@ mod tests {
         let mut tool = EditorToolPoint::select(&[1, 2], state(&objects));
 
         let result = tool.handle_special_action(state(&objects), SpecialAction::PathSplit).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.point_count(), 5);
         assert_eq!(tool.selection(), &[2]);
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 5.0));
@@ -1159,7 +1176,7 @@ mod tests {
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
 
         let result = tool.handle_special_action(state(&objects), SpecialAction::PointModeSet(ControlPointMode::Broken)).unwrap();
-        assert!(result.normals_stale);
+        assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Broken);
     }
 

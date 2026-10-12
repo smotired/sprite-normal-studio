@@ -7,6 +7,7 @@ mod create;
 mod branching;
 mod modify;
 mod merge;
+mod bounds;
 mod diff;
 
 use wgpu::{Buffer, Device};
@@ -16,6 +17,7 @@ pub use point::ControlPoint;
 pub use point::ControlPointMode;
 use buffers::{VecWithBuffer, ObjectList};
 pub use diff::ObjectDiff;
+pub use bounds::{Bounds, merge_bounds};
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;

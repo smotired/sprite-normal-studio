@@ -1,7 +1,10 @@
+mod uniform;
+
 use studio_math::Vec2;
 use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture};
 
-use crate::{BufferStates, Controller};
+use crate::{Bounds, BufferStates, Controller};
+pub use uniform::GeneratorUniform;
 
 /// The Generator is in charge of generating the normal map from the
 /// input texture, spritesheet (for size), zones, and shapes.
@@ -11,6 +14,9 @@ pub struct Generator {
 
     /// The output texture for our normal map.
     output: Texture,
+
+    /// Uniform buffer for this pipeline
+    uniform_buffer: Buffer,
 
     /// Binds our normal map shader to the WGPU device
     bind_group: Option<BindGroup>,
@@ -49,7 +55,10 @@ impl Generator {
         let size = Vec2::new(16.0, 16.0);
         let output = create_output(device, size);
 
-        Self { pipeline, output, bind_group: None, objects_bind_group, size, object_buffer_sizes }
+        // Create the uniform buffer
+        let uniform_buffer = GeneratorUniform::buffer(device);
+
+        Self { pipeline, output, uniform_buffer, bind_group: None, objects_bind_group, size, object_buffer_sizes }
     }
 
     /// Should be called whenever normal map or assignment textures are regenerated
@@ -75,6 +84,7 @@ impl Generator {
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&normal_view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&assign_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&output_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: self.uniform_buffer.as_entire_binding() },
             ],
         }));
 
@@ -87,10 +97,10 @@ impl Generator {
         }
     }
 
-    /// Recompute working normal map.
+    /// Recompute working normal map within the stale region, which should be corrected and clamped to the texture.
     /// Should be run whenever the input textures, shapes, or zones change.
     /// Does not need to run every frame or when camera or light is changed.
-    pub fn generate_normals(&mut self, device: &Device, queue: &Queue, object_buffers: BufferStates) {
+    pub fn generate_normals(&mut self, device: &Device, queue: &Queue, object_buffers: BufferStates, stale: Bounds) {
         // Skip if we haven't set up the input textures yet
         let Some(bind_group) = &self.bind_group else { return };
 
@@ -112,6 +122,10 @@ impl Generator {
             pass.set_bind_group(1, &self.objects_bind_group, &[]);
             pass.dispatch_workgroups((self.size.x as u32).div_ceil(16), (self.size.y as u32).div_ceil(16), 1);
         }
+
+        // Write uniforms
+        let uniform = GeneratorUniform::new(stale);
+        queue.write_buffer(&self.uniform_buffer, 0, uniform.bytes());
 
         // Submit the command
         queue.submit([encoder.finish()]);

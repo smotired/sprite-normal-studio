@@ -1,4 +1,5 @@
 use studio_math::Vec2;
+use studio_math::bounds::bounds_correct;
 
 use super::{ObjectBuffers, ControlPoint};
 
@@ -160,13 +161,7 @@ impl ObjectBuffers {
 
     pub fn get_points_in_rect(&self, min: Vec2, max: Vec2) -> anyhow::Result<Vec<u16>> {
         // Correct the rectangle
-        let (min, max) = {
-            let x_min = min.x.min(max.x);
-            let x_max = min.x.max(max.x);
-            let y_min = min.y.min(max.y);
-            let y_max = min.y.max(max.y);
-            (Vec2::new(x_min, y_min), Vec2::new(x_max, y_max))
-        };
+        let (min, max) = bounds_correct(min, max);
 
         // Find all points within the rectangle
         let mut points = vec![];

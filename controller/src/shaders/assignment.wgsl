@@ -52,6 +52,12 @@ struct Params {
 
     // Total amount of points
     point_count: u32,
+
+    // Top left corner of the region to reassign
+    stale_min: vec2<f32>,
+
+    // Bottom right corner of the region to reassign
+    stale_max: vec2<f32>,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 
@@ -311,20 +317,19 @@ fn check_pixel_coverage(
     pxl: vec2<u32>,
     zone: Zone,
 ) -> f32 {
-    // Check a 2x2 grid of points
-    // TODO: Performance willing, expand to a 4x4. Maybe make that a setting in the future.
+    // Check a 4x4 grid of points, each in the middle of its sixteenth of the pixel
     var inside = 0u;
-    let offset = 0.25;
-    for (var i = 0u; i < 2u; i += 1u) {
-        for (var j = 0u; j < 2u; j += 1u) {
-            let pos = vec2<f32>(pxl) + vec2<f32>(f32(i), f32(j)) * 0.5 + offset;
+    let offset = 0.125;
+    for (var i = 0u; i < 4u; i += 1u) {
+        for (var j = 0u; j < 4u; j += 1u) {
+            let pos = vec2<f32>(pxl) + vec2<f32>(f32(i), f32(j)) * 0.25 + offset;
             if (check_point_in_zone(pos, zone)) {
                 inside += 1u;
             }
         }
     }
 
-    return f32(inside) / 4.0;
+    return f32(inside) / 16.0;
 }
 
 // Evaluate a zone and add to the output if it's better
@@ -370,6 +375,12 @@ fn main(
 ) {
     let size = textureDimensions(output);
     if (id.x >= size.x || id.y >= size.y) {
+        return;
+    }
+
+    // Only reassign pixels in the stale region
+    let pxl = vec2<f32>(id.xy);
+    if (any(pxl < params.stale_min) || any(pxl >= params.stale_max)) {
         return;
     }
 

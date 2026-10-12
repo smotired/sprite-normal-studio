@@ -10,11 +10,11 @@
 /***********************************/
 
 struct Params {
-    // Total amount of zones
-    zone_count: u32,
+    // Top left corner of the region to regenerate
+    stale_min: vec2<f32>,
 
-    // Total amount of points
-    point_count: u32,
+    // Bottom right corner of the region to regenerate
+    stale_max: vec2<f32>,
 }
 @group(0) @binding(3) var<uniform> params: Params;
 
@@ -94,6 +94,12 @@ fn main(
     // Output texture should be the size of the assignment texture, which should be the size of the spritesheet
     let size = textureDimensions(assign);
     if (id.x >= size.x || id.y >= size.y) {
+        return;
+    }
+
+    // Only regenerate pixels in the stale region
+    let pxl = vec2<f32>(id.xy);
+    if (any(pxl < params.stale_min) || any(pxl >= params.stale_max)) {
         return;
     }
 
