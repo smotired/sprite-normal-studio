@@ -51,7 +51,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 
 ### Phase III - Zone Management
-*9/30/26 - present*
+*9/30/26 - 10/12/26*
 
 ```
 [x] Create a Zone struct
@@ -70,11 +70,11 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Selection options panel which allows you to set base normal for a zone,
     which will be applied before all shapes. Shapes will not influence past this
     base layer
-[ ] Changing vertex mode in tool panel, and changing coupling with siblings.
+[x] Changing vertex mode in tool panel, and changing coupling with siblings.
     Changing out of linear mode should retain handle states if set, and if either
     is at 0, should infer a new handle. Either flipping other, or pointing into path.
     Even though that would change the path.
-[ ] Joining selected vertices as siblings in tool panel (moves to avg. pos).
+[x] Joining selected vertices as siblings in tool panel (moves to avg. pos).
 [x] Window preview mode for working normal map
 ```
 
@@ -181,7 +181,9 @@ This section will be added to as I add keybinds (and remember).
 > `Escape` - Cancel zone path or shape creation.  
 > `Delete` - Delete selected zone path/vertex or shape.  
 > `Shift + Z` - Set the selected zones' normal vectors to straight out.  
-> `Ctrl + K` - Separate the selected zones from neighbors.
+> `Ctrl + K` - Separate the selected zones or points from neighbors.  
+> `Ctrl + B` - Toggle the selected point between linear and continuous.  
+> `Ctrl + M` - Merge the selected points into one point.
 
 ### Rendering
 

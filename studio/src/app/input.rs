@@ -161,7 +161,21 @@ impl StudioApp {
                             } else { Action::None }
                         },
 
-                        // Separate the selected zones from their neighbors
+                        // Toggle the selected point between linear and continuous
+                        Key::B => {
+                            if pressed && !repeat && modifiers.ctrl {
+                                Action::PointModeToggled
+                            } else { Action::None }
+                        },
+
+                        // Merge the selected points
+                        Key::M => {
+                            if pressed && !repeat && modifiers.ctrl {
+                                Action::PointsMerged
+                            } else { Action::None }
+                        },
+
+                        // Separate the selected zones or points from their siblings
                         Key::K => {
                             if pressed && !repeat && modifiers.ctrl {
                                 Action::SelectionSeparated

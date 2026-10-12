@@ -6,6 +6,7 @@ mod query;
 mod create;
 mod branching;
 mod modify;
+mod merge;
 
 use std::{cell::RefCell, rc::Rc};
 
