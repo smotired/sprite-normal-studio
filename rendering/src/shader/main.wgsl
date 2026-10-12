@@ -21,7 +21,7 @@ fn main(
 
     // Get the world-space pixel coordinates from camera info
     let screen_offset = vec2<f32>(id.xy) - vec2<f32>(half);
-    let pos = screen_offset * params.inv_scale + params.camera_pos;
+    let pos = screen_offset / params.pixels_per_point * params.inv_scale + params.camera_pos;
 
     // Get information about the light
     let light_distance_2d = length(params.light_pos.xy - pos.xy);

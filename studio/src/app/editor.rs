@@ -27,7 +27,7 @@ impl Widget for Editor<'_> {
         let px = studio_math::Vec2::new((points.x * ppp).max(16.0), (points.y * ppp).max(16.0));
 
         // Render directly to the EGUI texture
-        let view = self.renderer.render(&self.render_state.device, &self.render_state.queue, self.controller, px);
+        let view = self.renderer.render(&self.render_state.device, &self.render_state.queue, self.controller, px, ppp);
         self.render_state.renderer.write().update_egui_texture_from_wgpu_texture(
             &self.render_state.device,
             view,
