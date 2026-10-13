@@ -154,6 +154,9 @@ impl StudioApp {
         let result = self.save_workspace(&path).with_context(|| format!("Could not save {}", path.display()));
         let saved = result.is_ok();
         show_result(result);
+        if saved {
+            self.controller.set_feedback(format!("Saved {}", file_name(&path)));
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
         saved
     }
@@ -171,8 +174,11 @@ impl StudioApp {
         };
 
         match self.export_to(&path) {
-            Ok(()) => if let Some(project) = &mut self.project {
-                project.export_path = Some(path);
+            Ok(()) => {
+                self.controller.set_feedback(format!("Exported {}", file_name(&path)));
+                if let Some(project) = &mut self.project {
+                    project.export_path = Some(path);
+                }
             },
             Err(e) => show_message(rfd::MessageLevel::Error, "Error", &format!("Could not export {}: {e:#}", path.display())),
         }
@@ -434,6 +440,11 @@ fn to_relative(path: &Path, base: &Path) -> String {
             .join("/"),
         _ => path.to_string_lossy().into_owned(),
     }
+}
+
+/// The name of a file, for showing to the user
+fn file_name(path: &Path) -> String {
+    path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().into_owned()
 }
 
 /// Show a message box for the result of opening or saving a workspace file, if there is anything to show

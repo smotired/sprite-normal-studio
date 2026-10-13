@@ -3,6 +3,7 @@ mod interaction;
 mod objects;
 mod assignment;
 mod save;
+mod status;
 
 use studio_math::Vec2;
 use studio_math::bounds::{bounds_clamp, bounds_correct};
@@ -18,6 +19,7 @@ pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorChange, SpecialAction, SpecialQuery, SpecialValue};
 pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects};
 pub use crate::save::SavedScene;
+pub use crate::status::Status;
 use crate::objects::merge_bounds;
 
 /// The Controller manages our actual working pipeline.
@@ -52,8 +54,8 @@ pub struct Controller {
     /// Selection buffer which gets contents from the selected tool
     selection_buffer: Buffer,
 
-    /// The error from the latest tool action, if it failed
-    tool_error: Option<String>,
+    /// What the status bar shows: the result of the latest tool action, or feedback from the app
+    status: Status,
 
     /// The changes that can be undone and redone
     history: History,
@@ -83,7 +85,7 @@ impl Controller {
             cursor_pos: Default::default(),
             tool: EditorToolZone::init(),
             selection_buffer,
-            tool_error: None,
+            status: Status::Ok,
             history: History::default(),
         }
     }
