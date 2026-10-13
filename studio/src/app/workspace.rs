@@ -1,7 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::Context;
-use controller::{LoadedObjects, SavedLight, SavedScene};
+use controller::{LoadedObjects, SavedScene};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
@@ -27,9 +27,15 @@ pub(super) const EXTENSION: &str = "sns";
 /// Base title of the window
 const APP_TITLE: &str = "Sprite Normal Studio";
 
+/// Buttons of the unsaved changes warning
+const SAVE: &str = "Save";
+const DONT_SAVE: &str = "Don't Save";
+const CANCEL: &str = "Cancel";
+
 /// A workspace file: the input files, plus the objects and light. Not the camera or the view.
-#[derive(Serialize, Deserialize)]
-struct WorkspaceFile {
+/// Comparable, so a project has unsaved changes when saving it would write a different file.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub(super) struct WorkspaceFile {
     format: String,
     version: u32,
 
@@ -81,45 +87,118 @@ impl StudioApp {
         if !command.works_without_project() && self.project.is_none() { return; }
         if self.new_project_dialog.is_some() || self.relink_dialog.is_some() { return; }
 
-        let result = match command {
+        match command {
             WorkspaceCommand::New => {
-                self.new_project_dialog = Some(Default::default());
-                return;
+                if self.confirm_discard(ctx) {
+                    self.new_project_dialog = Some(Default::default());
+                }
             },
             WorkspaceCommand::Close => {
-                self.set_project(ctx, None);
-                return;
+                if self.confirm_discard(ctx) {
+                    self.set_project(ctx, None);
+                }
             },
-            WorkspaceCommand::Open => match self.workspace_file_dialog().pick_file() {
-                Some(path) => self.open_workspace(ctx, &path).with_context(|| format!("Could not open {}", path.display())),
-                None => return,
+            WorkspaceCommand::Open => {
+                if self.confirm_discard(ctx)
+                    && let Some(path) = self.workspace_file_dialog().pick_file()
+                {
+                    let result = self.open_workspace(ctx, &path).with_context(|| format!("Could not open {}", path.display()));
+                    show_result(result);
+                }
             },
-            WorkspaceCommand::Save if self.project.as_ref().is_some_and(|project| project.saved) => {
-                let path = self.project.as_ref().unwrap().path.clone();
-                self.save_workspace(&path).with_context(|| format!("Could not save {}", path.display()))
-            },
-            WorkspaceCommand::Save | WorkspaceCommand::SaveAs => match self.save_as_dialog().save_file() {
-                Some(path) => self.save_workspace(&path).with_context(|| format!("Could not save {}", path.display())),
-                None => return,
-            },
-        };
-
-        show_result(result);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+            WorkspaceCommand::Save => { self.save(ctx, false); },
+            WorkspaceCommand::SaveAs => { self.save(ctx, true); },
+        }
     }
 
     /// Open a workspace file from the recent files list, showing a dialog for anything that went wrong
     pub(super) fn open_recent(&mut self, ctx: &egui::Context, path: &Path) {
+        if !self.confirm_discard(ctx) { return; }
         let result = self.open_workspace(ctx, path).with_context(|| format!("Could not open {}", path.display()));
         show_result(result);
     }
 
-    /// Title for the window, with the name of the workspace file if there is one
-    pub(super) fn window_title(&self) -> String {
-        match self.project.as_ref().and_then(|project| project.path.file_name()) {
-            Some(name) => format!("{} - {APP_TITLE}", name.to_string_lossy()),
-            None => APP_TITLE.to_owned(),
+    /// Save the open project, asking where if it has never been saved or `save_as` is set.
+    /// Shows a dialog for anything that went wrong. Returns true if the file was written.
+    fn save(&mut self, ctx: &egui::Context, save_as: bool) -> bool {
+        let Some(project) = &self.project else { return false; };
+        let path = if project.saved && !save_as {
+            project.path.clone()
+        } else {
+            match self.save_as_dialog().save_file() {
+                Some(path) => path,
+                None => return false,
+            }
+        };
+
+        let result = self.save_workspace(&path).with_context(|| format!("Could not save {}", path.display()));
+        let saved = result.is_ok();
+        show_result(result);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+        saved
+    }
+
+    /// Check it's OK to leave the open project. If it has unsaved changes, ask whether to save them first.
+    /// Returns false if the user cancelled, or chose to save and it wasn't saved.
+    pub(super) fn confirm_discard(&mut self, ctx: &egui::Context) -> bool {
+        if !self.has_unsaved_changes() { return true; }
+        let name = self.project.as_ref()
+            .and_then(|project| project.path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        let choice = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Unsaved Changes")
+            .set_description(format!("Save changes to {name} before closing it?"))
+            .set_buttons(rfd::MessageButtons::YesNoCancelCustom(SAVE.to_owned(), DONT_SAVE.to_owned(), CANCEL.to_owned()))
+            .show();
+
+        // Platforms report custom buttons by their label, or as the standard button in the same place
+        match choice {
+            rfd::MessageDialogResult::Yes => self.save(ctx, false),
+            rfd::MessageDialogResult::Custom(label) if label == SAVE => self.save(ctx, false),
+            rfd::MessageDialogResult::No => true,
+            rfd::MessageDialogResult::Custom(label) if label == DONT_SAVE => true,
+            _ => false,
         }
+    }
+
+    /// If the open project has changes that aren't in its workspace file
+    pub(super) fn has_unsaved_changes(&self) -> bool {
+        let Some(project) = &self.project else { return false; };
+        self.workspace_file(&project.path).is_some_and(|file| file != project.clean)
+    }
+
+    /// Recheck if the open project has unsaved changes, and update the window title if that changed
+    pub(super) fn update_dirty(&mut self, ctx: &egui::Context) {
+        let dirty = self.has_unsaved_changes();
+        if let Some(project) = &mut self.project
+            && project.dirty != dirty
+        {
+            project.dirty = dirty;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+        }
+    }
+
+    /// Treat the open project as having no unsaved changes, as if it was just saved to its path
+    pub(super) fn mark_clean(&mut self) {
+        let Some(path) = self.project.as_ref().map(|project| project.path.clone()) else { return; };
+        let file = self.workspace_file(&path);
+        if let Some(project) = &mut self.project
+            && let Some(file) = file
+        {
+            project.clean = file;
+            project.dirty = false;
+        }
+    }
+
+    /// Title for the window, with the name of the workspace file if there is one, and * if it has unsaved changes
+    pub(super) fn window_title(&self) -> String {
+        let Some(project) = &self.project else { return APP_TITLE.to_owned(); };
+        let name = project.path.file_name().unwrap_or_default().to_string_lossy();
+        let dirty = if project.dirty { "*" } else { "" };
+        format!("{name}{dirty} - {APP_TITLE}")
     }
 
     /// File dialog for workspace files, starting in the current workspace's folder, or the most recent one's
@@ -145,19 +224,15 @@ impl StudioApp {
         }
     }
 
+    /// The workspace file the open project would be saved as at a path, if there is a project
+    fn workspace_file(&self, path: &Path) -> Option<WorkspaceFile> {
+        let project = self.project.as_ref()?;
+        Some(build_workspace_file(&project.sprite, &project.normal, self.controller.save_scene(), path))
+    }
+
     /// Save the workspace to a file and make it the current workspace file
     fn save_workspace(&mut self, path: &Path) -> anyhow::Result<Option<String>> {
-        let Some(project) = &mut self.project else { anyhow::bail!("There is no open project to save."); };
-        let base = path.parent().unwrap_or(Path::new(""));
-
-        let file = WorkspaceFile {
-            format: FORMAT.to_owned(),
-            version: VERSION,
-            spritesheet: to_relative(project.sprite.path(), base),
-            normal_map: to_relative(project.normal.path(), base),
-            sprite_size: project.sprite.size(),
-            scene: self.controller.save_scene(),
-        };
+        let Some(file) = self.workspace_file(path) else { anyhow::bail!("There is no open project to save."); };
         let json = serde_json::to_string_pretty(&file)?;
 
         // Write to a temporary file first, so a failed write can't leave a broken workspace file behind
@@ -166,8 +241,12 @@ impl StudioApp {
         std::fs::write(&temp_path, json).context("Could not write the file")?;
         std::fs::rename(&temp_path, path).context("Could not replace the file")?;
 
-        project.path = path.to_owned();
-        project.saved = true;
+        if let Some(project) = &mut self.project {
+            project.path = path.to_owned();
+            project.saved = true;
+            project.clean = file;
+            project.dirty = false;
+        }
         self.recent.mark_used(path);
         Ok(None)
     }
@@ -182,11 +261,10 @@ impl StudioApp {
 
         let pending = PendingOpen {
             path: path.to_owned(),
-            light: file.scene.light,
             objects,
-            sprite_size: file.sprite_size,
             sprite_path: resolve(&file.spritesheet, base),
             normal_path: resolve(&file.normal_map, base),
+            file,
         };
 
         // Load the images, which are the last things that can fail
@@ -205,29 +283,46 @@ impl StudioApp {
     /// Returns a warning if the spritesheet's size changed since it was saved.
     pub(super) fn finish_open(&mut self, ctx: &egui::Context, pending: PendingOpen, sprite: SpriteFileSelection, normal: SpriteFileSelection) -> Option<String> {
         let size = sprite.size();
-        self.set_project(ctx, Some(Project { sprite, normal, path: pending.path.clone(), saved: true }));
-        self.controller.load_scene(pending.light, pending.objects);
+        let saved_size = pending.file.sprite_size;
+        let light = pending.file.scene.light;
+
+        // The file as it was read is what's on disk, so images picked somewhere else count as unsaved changes
+        self.set_project(ctx, Some(Project { sprite, normal, path: pending.path.clone(), saved: true, clean: pending.file, dirty: false }));
+        self.controller.load_scene(light, pending.objects);
         self.recent.mark_used(&pending.path);
 
-        (size != pending.sprite_size).then(|| format!(
+        (size != saved_size).then(|| format!(
             "The spritesheet is {}x{}, but was {}x{} when the workspace was saved. Zones may not line up with it.",
-            size.0, size.1, pending.sprite_size.0, pending.sprite_size.1,
+            size.0, size.1, saved_size.0, saved_size.1,
         ))
     }
 }
 
 /// A workspace file that has been read, but whose images haven't all been loaded yet
 pub(super) struct PendingOpen {
-    /// The workspace file
+    /// Path of the workspace file
     pub(super) path: PathBuf,
-    light: SavedLight,
+    /// The workspace file as it was read
+    file: WorkspaceFile,
+    /// The objects in it, already checked
     objects: LoadedObjects,
-    /// Size of the spritesheet when saved
-    sprite_size: (u32, u32),
 
     /// Where the workspace file says the images are
     pub(super) sprite_path: PathBuf,
     pub(super) normal_path: PathBuf,
+}
+
+/// Build the workspace file for a project's images and scene, as it would be saved at a path
+pub(super) fn build_workspace_file(sprite: &SpriteFileSelection, normal: &SpriteFileSelection, scene: SavedScene, path: &Path) -> WorkspaceFile {
+    let base = path.parent().unwrap_or(Path::new(""));
+    WorkspaceFile {
+        format: FORMAT.to_owned(),
+        version: VERSION,
+        spritesheet: to_relative(sprite.path(), base),
+        normal_map: to_relative(normal.path(), base),
+        sprite_size: sprite.size(),
+        scene,
+    }
 }
 
 /// Parse a workspace file, checking it is one this build can read
@@ -361,6 +456,24 @@ mod tests {
         assert_eq!(file.spritesheet, "hero.png");
         assert_eq!(file.sprite_size, (64, 32));
         assert!(file.scene.objects.validate().is_ok());
+    }
+
+    /// A file that is read and written back out is equal to itself when read again, so opening a file doesn't count as a change.
+    /// Uses values that aren't exact in binary, to check floats survive the round trip.
+    #[test]
+    fn round_trip_equal() {
+        let json = serde_json::json!({
+            "format": FORMAT,
+            "version": VERSION,
+            "spritesheet": "art/hero.png",
+            "normal_map": "art/hero_normal.png",
+            "sprite_size": [64, 32],
+            "light": { "position": { "x": 0.1, "y": 33.333333 }, "height": 123.456, "color": [10, 20, 30] },
+            "zones": [],
+        }).to_string();
+        let file = read_workspace(&json).unwrap();
+        let again = read_workspace(&serde_json::to_string_pretty(&file).unwrap()).unwrap();
+        assert_eq!(file, again);
     }
 
     /// Newer versions and other formats are rejected
