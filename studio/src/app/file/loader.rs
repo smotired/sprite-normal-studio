@@ -5,10 +5,10 @@ use eframe::egui_wgpu::{RenderState, wgpu};
 /// Color of a flat normal map, pointing straight out
 pub const FLAT_NORMAL_COLOR: [u8; 4] = [128, 128, 255, 255];
 
-/// Defines a selection of a sprite or normal map file and its associated texture on the GPU.
+/// Defines a selected sprite or normal map file and its associated texture on the GPU.
 pub struct SpriteFileSelection {
     label: String,
-    path: Option<PathBuf>,
+    path: PathBuf,
     texture: wgpu::Texture,
     texture_id: TextureId,
     size: (u32, u32),
@@ -18,48 +18,59 @@ impl SpriteFileSelection {
     /// Clone the saved texture
     pub fn texture(&self) -> &wgpu::Texture { &self.texture }
 
-    /// The selected file, if any
-    pub fn path(&self) -> Option<&Path> { self.path.as_deref() }
+    /// The selected file
+    pub fn path(&self) -> &Path { &self.path }
 
     /// The size of the selected image
     pub fn size(&self) -> (u32, u32) { self.size }
 
-    /// Create a new SpriteFileSelection with nothing selected.
+    /// Open an image file and load it into a new texture.
     /// label: The label for the texture itself
-    pub fn new(label: String, rs: &RenderState, path: Option<PathBuf>) -> Self {
-        let (width, height) = (200, 150); // default preview texture size
+    pub fn open(label: &str, path: PathBuf, rs: &RenderState) -> anyhow::Result<Self> {
+        let image = image::open(&path)?.to_rgba8();
+        Ok(Self::from_image(label, path, rs, &image))
+    }
 
-        // Create a blank texture
-        let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(&label),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING, // we just need to copy it into the device
-            view_formats: &[], // would love to put srgb here but unfortunately not supported everywhere
-        });
+    /// Open an image file and load it into a new texture.
+    /// If it can't be opened, the texture is the given size and filled with a color instead, and the path is kept so it can be saved to.
+    pub fn open_or_fill(label: &str, path: PathBuf, rs: &RenderState, size: (u32, u32), color: [u8; 4]) -> Self {
+        let image = open_or_fill_image(&path, size, color);
+        Self::from_image(label, path, rs, &image)
+    }
 
-        // Create a texture view and ID
+    /// Create a selection from an image that has already been loaded, registering a new texture ID for it
+    fn from_image(label: &str, path: PathBuf, rs: &RenderState, image: &image::RgbaImage) -> Self {
+        let texture = create_texture(rs, label, image);
         let view = texture.create_view(&Default::default());
         let texture_id = rs.renderer.write().register_native_texture(&rs.device, &view, wgpu::FilterMode::Nearest);
 
-        // Set up the object with the blank texture.
-        let mut selection = Self {
-            label,
-            path: None,
+        Self {
+            label: label.to_owned(),
+            path,
             texture,
             texture_id,
-            size: (width, height),
-        };
-
-        // Try to select the image, or just leave it as empty
-        if let Some(path) = path {
-            selection.select(path, rs);
+            size: image.dimensions(),
         }
+    }
 
-        selection
+    /// Replace the selected file and texture with an image that has already been loaded, keeping the same texture ID
+    fn set_image(&mut self, path: PathBuf, rs: &RenderState, image: &image::RgbaImage) {
+        let texture = create_texture(rs, &self.label, image);
+
+        // Update the texture ID
+        let view = texture.create_view(&Default::default());
+        rs.renderer.write().update_egui_texture_from_wgpu_texture(
+            &rs.device, &view, wgpu::FilterMode::Nearest, self.texture_id,
+        );
+
+        self.path = path;
+        self.size = image.dimensions();
+        self.texture = texture;
+    }
+
+    /// Unregister the texture from egui. The selection must not be displayed after this.
+    pub fn free(self, rs: &RenderState) {
+        rs.renderer.write().free_texture(&self.texture_id);
     }
 
     /// Attempt to select a file and put it into the texture.
@@ -69,52 +80,8 @@ impl SpriteFileSelection {
         let image = image::open(&path)?.to_rgba8();
 
         // No failures beyond this point
-        self.path = Some(path); // image exists so we can set path
-
-        // Get image dimensions 
-        self.size = image.dimensions();
-        let (width, height) = self.size;
-        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
-
-        // Create a new texture
-        let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(&self.label),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage:
-                wgpu::TextureUsages::COPY_DST |       // we need this to write to it below
-                wgpu::TextureUsages::TEXTURE_BINDING, // it is a texture
-            view_formats: &[],
-        });
-
-        // Write to the texture
-        rs.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &image,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * width), // RGBA8 = 4 bytes per pixel
-                rows_per_image: Some(height),
-            },
-            size,
-        );
-
-        // Update the texture ID
-        let view = texture.create_view(&Default::default());
-        rs.renderer.write().update_egui_texture_from_wgpu_texture(
-            &rs.device, &view, wgpu::FilterMode::Nearest, self.texture_id,
-        );
-
-        self.texture = texture;
-        Ok((width, height))
+        self.set_image(path, rs, &image);
+        Ok(self.size)
     }
 
     /// Attempt to select a file and load it into the texture.
@@ -128,99 +95,102 @@ impl SpriteFileSelection {
     /// Attempt to select a file and load it into the texture.
     /// If selection fails, creates an image with the same size as the reference, but filled with a color.
     pub fn select_or_fill(&mut self, path: PathBuf, rs: &RenderState, size: (u32, u32), color: [u8; 4]) {
-        if let Err(_err) = self.try_select(path.clone(), rs) {
-            let (width, height) = size;
-            self.size = (width, height);
-            self.path = Some(path); // Keep invalid path, we will save to it.
-            let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
-
-            // Create a new texture
-            let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(&self.label),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage:
-                    wgpu::TextureUsages::COPY_DST |       // we need this to write to it below
-                    wgpu::TextureUsages::TEXTURE_BINDING, // it is a texture
-                view_formats: &[],
-            });
-
-            // Create the data for the texture, which should all be the u32 color
-            let image = image::RgbaImage::from_pixel(width, height, image::Rgba(color));
-
-            // Write to the texture
-            rs.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &image,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * width), // RGBA8 = 4 bytes per pixel
-                    rows_per_image: Some(height),
-                },
-                size,
-            );
-
-            // Update the texture ID
-            let view = texture.create_view(&Default::default());
-            rs.renderer.write().update_egui_texture_from_wgpu_texture(
-                &rs.device, &view, wgpu::FilterMode::Nearest, self.texture_id,
-            );
-
-            self.texture = texture;
-        }
+        let image = open_or_fill_image(&path, size, color);
+        self.set_image(path, rs, &image); // Keep an invalid path, we will save to it.
     }
+}
+
+/// Open an image file, or create one of the given size filled with a color if it can't be opened
+fn open_or_fill_image(path: &Path, (width, height): (u32, u32), color: [u8; 4]) -> image::RgbaImage {
+    match image::open(path) {
+        Ok(image) => image.to_rgba8(),
+        Err(_) => image::RgbaImage::from_pixel(width, height, image::Rgba(color)),
+    }
+}
+
+/// Create a texture on the GPU and write an image to it
+fn create_texture(rs: &RenderState, label: &str, image: &image::RgbaImage) -> wgpu::Texture {
+    let (width, height) = image.dimensions();
+    let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+
+    // Create a new texture
+    let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage:
+            wgpu::TextureUsages::COPY_DST |       // we need this to write to it below
+            wgpu::TextureUsages::TEXTURE_BINDING, // it is a texture
+        view_formats: &[], // would love to put srgb here but unfortunately not supported everywhere
+    });
+
+    // Write to the texture
+    rs.queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        image,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * width), // RGBA8 = 4 bytes per pixel
+            rows_per_image: Some(height),
+        },
+        size,
+    );
+
+    texture
 }
 
 pub struct SpriteFileSelectionDisplay<'a> {
     value: &'a SpriteFileSelection,
+    max_height: f32,
 }
 
 impl<'a> SpriteFileSelectionDisplay<'a> {
     pub fn new(value: &'a SpriteFileSelection) -> Self {
-        Self { value }
+        Self { value, max_height: 200.0 }
+    }
+
+    /// Set the tallest the image is shown
+    pub fn max_height(mut self, max_height: f32) -> Self {
+        self.max_height = max_height;
+        self
     }
 }
 
 impl Widget for SpriteFileSelectionDisplay<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
-        // Add the image widget or default label
-        if let Some(path) = &self.value.path {
-            let path = path.as_path().file_name().unwrap().to_str().unwrap().to_string();
+        let name = self.value.path.file_name().unwrap_or_default().to_string_lossy().into_owned();
 
-            // Sprite should be no more than available x wide and no more than 300px tall
-            let dim = {
-                let mut width = ui.available_width();
-                let aspect_ratio = {
-                    let (tw, th) = self.value.size;
-                    let (tw, th) = (tw as f32, th as f32);
-                    tw / th
-                };
-                let mut height = width / aspect_ratio;
-    
-                if height > 200.0 {
-                    height = 200.0;
-                    width = height * aspect_ratio;
-                }
-
-                eframe::egui::vec2(width, height)
+        // Sprite should be no more than available x wide and no more than max_height tall
+        let dim = {
+            let mut width = ui.available_width();
+            let aspect_ratio = {
+                let (tw, th) = self.value.size;
+                let (tw, th) = (tw as f32, th as f32);
+                tw / th
             };
+            let mut height = width / aspect_ratio;
 
-            // Display the image
-            ui.vertical_centered(|ui| {
-                ui.add(Image::new(egui::load::SizedTexture::new(self.value.texture_id, dim)))
-            })
-            .inner
-            .on_hover_text_at_pointer(path)
-        } else {
-            ui.label(format!("No {} selected.", self.value.label))
-        }
+            if height > self.max_height {
+                height = self.max_height;
+                width = height * aspect_ratio;
+            }
+
+            eframe::egui::vec2(width, height)
+        };
+
+        // Display the image
+        ui.vertical_centered(|ui| {
+            ui.add(Image::new(egui::load::SizedTexture::new(self.value.texture_id, dim)))
+        })
+        .inner
+        .on_hover_text_at_pointer(name)
     }
 }

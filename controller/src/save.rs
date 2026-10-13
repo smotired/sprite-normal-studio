@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use studio_math::Vec2;
 
 use crate::Controller;
+use crate::interaction::history::History;
 use crate::interaction::tools::{EditorTool, EditorToolZone};
 use crate::objects::{LoadedObjects, SavedObjects};
 
@@ -39,11 +40,25 @@ impl Controller {
         let [r, g, b] = light.color;
         self.light.set(light.position, light.height, (r, g, b));
 
-        // Nothing is selected in the new objects, and old errors don't apply to them
+        // Nothing is selected in the new objects, old errors don't apply to them, and old changes can't be undone into them
         self.tool = EditorToolZone::init();
         self.tool_error = None;
+        self.history = History::default();
 
         // Regenerate the whole normal map
+        self.normals_stale = Some((Vec2::ZERO, self.assigner.size()));
+    }
+
+    /// Replace the objects and light with an empty scene for a new project.
+    /// Should be called before set_inputs, so the new light is centered on the new spritesheet.
+    pub fn new_scene(&mut self) {
+        let empty = SavedObjects::default().validate().expect("an empty scene is always valid");
+        self.objects.load(empty);
+        self.light = Default::default();
+
+        self.tool = EditorToolZone::init();
+        self.tool_error = None;
+        self.history = History::default();
         self.normals_stale = Some((Vec2::ZERO, self.assigner.size()));
     }
 }

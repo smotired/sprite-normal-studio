@@ -18,4 +18,4 @@ image = "0.25.10"
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = "1.0.151"
-pathdiff = "0.2.3"
+dirs = "7.0.0"

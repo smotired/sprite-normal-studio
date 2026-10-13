@@ -16,13 +16,15 @@ impl IntoInputModifiers for Modifiers {
 }
 
 impl StudioApp {
-    /// Forward app-level input events to the controller and update the world space cursor position.
-    /// Returns the workspace command whose shortcut was pressed, if any.
-    pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) -> Option<WorkspaceCommand> {
-        ui.input_mut(|i| {
-            // Workspace shortcuts are consumed first, so their keys don't also do something else
-            let command = WorkspaceCommand::ALL.into_iter().find(|command| i.consume_shortcut(&command.shortcut()));
+    /// Get the workspace command whose shortcut was pressed, if any.
+    /// Must be called before process_app_input, so the shortcut's keys are consumed and don't also do something else.
+    pub(super) fn process_workspace_shortcuts(&mut self, ui: &mut Ui) -> Option<WorkspaceCommand> {
+        ui.input_mut(|i| WorkspaceCommand::ALL.into_iter().find(|command| i.consume_shortcut(&command.shortcut())))
+    }
 
+    /// Forward app-level input events to the controller and update the world space cursor position.
+    pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) {
+        ui.input_mut(|i| {
             for event in self.handle_app_input(i, viewport_rect) {
                 self.controller.handle_action(event);
             }
@@ -38,8 +40,6 @@ impl StudioApp {
             {
                 self.controller.set_cursor_pos(mouse_world);
             }
-
-            command
         })
     }
 
