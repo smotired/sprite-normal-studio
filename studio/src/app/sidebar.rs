@@ -6,7 +6,6 @@ mod pen;
 
 use controller::{Controller, EditorToolKind};
 use eframe::egui;
-use std::path::{Path, PathBuf};
 
 use crate::app::{file, StudioApp};
 
@@ -66,19 +65,21 @@ impl StudioApp {
 
     /// Spritesheet and normal map file selectors
     fn show_file_selectors(&mut self, ui: &mut egui::Ui) {
+        let Some(project) = &mut self.project else { return; };
         let mut must_update_textures = false;
 
         // Spritesheet selector button
+        let normal = &mut project.normal;
         ui.add(
             file::SpriteFileSelect::new(
-                &mut self.sprite_path,
+                &mut project.sprite,
                 "Spritesheet",
                 &self.render_state,
             )
             .on_select(|path, size| {
                 // Also reselect the normal map file when selecting a new sprite
-                self.normal_path.select_or_fill(
-                    generate_normal_map_filename(path.as_path()),
+                normal.select_or_fill(
+                    file::generate_normal_map_filename(path.as_path()),
                     &self.render_state,
                     size,
                     file::loader::FLAT_NORMAL_COLOR,
@@ -91,7 +92,7 @@ impl StudioApp {
         // Normal map selector button
         ui.add(
             file::SpriteFileSelect::new(
-                &mut self.normal_path,
+                &mut project.normal,
                 "Normal Map",
                 &self.render_state,
             )
@@ -104,35 +105,5 @@ impl StudioApp {
         if must_update_textures {
             self.update_input_textures();
         }
-    }
-}
-
-
-/// Generate a normal map filename by appending _normal to the file name before the PNG
-fn generate_normal_map_filename(sprite_path: &Path) -> PathBuf {
-    let stem = sprite_path.file_stem().unwrap();
-    let new_filename = stem.to_str().unwrap().to_owned() + "_normal.png";
-
-    sprite_path.with_file_name(std::ffi::OsStr::new(&new_filename))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// _normal is added to the stem and the directory is kept
-    #[test]
-    fn normal_map_filename() {
-        assert_eq!(
-            generate_normal_map_filename(&PathBuf::from("art").join("hero.png")),
-            PathBuf::from("art").join("hero_normal.png"),
-        );
-        assert_eq!(generate_normal_map_filename(Path::new("hero.png")), PathBuf::from("hero_normal.png"));
-    }
-
-    /// Only the final extension is replaced
-    #[test]
-    fn normal_map_filename_with_dots() {
-        assert_eq!(generate_normal_map_filename(Path::new("hero.idle.png")), PathBuf::from("hero.idle_normal.png"));
     }
 }
