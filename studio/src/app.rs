@@ -31,6 +31,11 @@ struct Project {
     path: PathBuf,
     /// If the workspace file was opened from or saved to the path
     saved: bool,
+
+    /// What the workspace file holds, or would hold for a project that hasn't been saved yet, to detect unsaved changes
+    clean: workspace::WorkspaceFile,
+    /// If saving would change the workspace file, updated every frame
+    dirty: bool,
 }
 
 /// Defines application state
@@ -66,6 +71,9 @@ pub struct StudioApp {
 
     /// Sidebar sections for each editor tool
     tool_sidebars: sidebar::ToolSidebars,
+
+    /// If the window may close even though there are unsaved changes, because the user chose not to save them
+    allow_close: bool,
 }
 
 /// Default initializer for application state
@@ -89,6 +97,7 @@ impl StudioApp {
             viewport_texture_id,
             show_error_dialog: false,
             tool_sidebars: Default::default(),
+            allow_close: false,
         }
     }
 
@@ -119,6 +128,15 @@ impl eframe::App for StudioApp {
             selection.free(&self.render_state);
         }
 
+        // Ask before closing the window with unsaved changes. The close is cancelled, then sent again if it's OK.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.has_unsaved_changes() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if self.confirm_discard(&ctx) {
+                self.allow_close = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+
         // The menu bar spans the whole window, above everything else
         let menu_command = self.show_menu_bar(ui);
 
@@ -141,6 +159,9 @@ impl eframe::App for StudioApp {
 
         self.show_new_project_dialog(ui);
         self.show_relink_dialog(ui);
+
+        // Everything that can change the project this frame has run
+        self.update_dirty(&ctx);
     }
 }
 

@@ -3,7 +3,7 @@ use std::path::Path;
 use eframe::egui;
 
 use crate::app::file::{self, loader::{SpriteFileSelection, FLAT_NORMAL_COLOR}};
-use crate::app::workspace::{EXTENSION, NORMAL_LABEL, SPRITE_LABEL};
+use crate::app::workspace::{build_workspace_file, EXTENSION, NORMAL_LABEL, SPRITE_LABEL};
 use crate::app::{Project, StudioApp};
 
 /// Width of the dialog's contents
@@ -136,6 +136,10 @@ impl StudioApp {
         let path = folder.join(format!("{}.{EXTENSION}", dialog.name.trim()));
 
         self.controller.new_scene();
-        self.set_project(ctx, Some(Project { sprite, normal, path, saved: false }));
+        let clean = build_workspace_file(&sprite, &normal, self.controller.save_scene(), &path);
+        self.set_project(ctx, Some(Project { sprite, normal, path, saved: false, clean, dirty: false }));
+
+        // Setting the project recentered the light, so the empty project is only clean after that
+        self.mark_clean();
     }
 }
