@@ -28,7 +28,7 @@ fn main() -> eframe::Result {
             wgpu_setup: WgpuSetup::CreateNew(setup),
             ..Default::default()
         },
-        viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 540.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 720.0]),
         ..Default::default()
     };
 
