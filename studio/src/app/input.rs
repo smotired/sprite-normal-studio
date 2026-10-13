@@ -105,8 +105,11 @@ impl StudioApp {
                                 Action::CameraMove(Axis::Vertical, -movement(modifiers.shift))
                             } else { Action::None }
                         },
+                        // Select all with ctrl, otherwise camera movement
                         Key::A => {
-                            if pressed {
+                            if pressed && modifiers.ctrl {
+                                if repeat { Action::None } else { Action::SelectAll }
+                            } else if pressed {
                                 Action::CameraMove(Axis::Horizontal, -movement(modifiers.shift))
                             } else { Action::None }
                         },

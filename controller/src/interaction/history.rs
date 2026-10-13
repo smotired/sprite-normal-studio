@@ -63,6 +63,21 @@ impl History {
         self.redo.clear();
     }
 
+    /// If the open group of changes changed any objects, so closing it would add an entry
+    fn pending_has_changes(&self) -> bool {
+        self.pending.as_ref().is_some_and(|pending| pending.diffs.iter().any(|diff| !diff.is_empty()))
+    }
+
+    /// If there is anything to undo, including changes that haven't been closed into an entry yet
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty() || self.pending_has_changes()
+    }
+
+    /// If there is anything to redo. Changes that haven't been closed yet will clear the redo stack, so there is nothing to redo.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty() && !self.pending_has_changes()
+    }
+
     /// Undo the latest entry, restoring the objects and tool state from before it.
     /// Returns the region where normals might have changed, or None if there was nothing to undo.
     pub fn undo(&mut self, objects: &ObjectBuffers, tool: &mut Box<dyn EditorTool>) -> Option<Option<Bounds>> {
@@ -104,6 +119,12 @@ impl Controller {
             self.tool_error = None;
         }
     }
+
+    /// If there is anything to undo
+    pub fn can_undo(&self) -> bool { self.history.can_undo() }
+
+    /// If there is anything to redo
+    pub fn can_redo(&self) -> bool { self.history.can_redo() }
 }
 
 #[cfg(test)]
@@ -172,6 +193,26 @@ mod tests {
         drag(&mut history, &mut tool, &objects, &[Vec2::new(20.0, 20.0)]);
         assert!(history.redo(&objects, &mut tool).is_none());
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(20.0, 20.0));
+    }
+
+    /// Undo and redo are only available when there is something to undo or redo
+    #[test]
+    fn can_undo_redo() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
+        let mut history = History::default();
+        assert!(!history.can_undo() && !history.can_redo());
+
+        // A click only changes the selection, so there is still nothing to undo
+        run(&mut history, &mut tool, &objects, DragStep::None, |tool, state| tool.handle_click(state, Vec2::ZERO, InputModifiers::none()));
+        assert!(!history.can_undo());
+
+        drag(&mut history, &mut tool, &objects, &[Vec2::new(15.0, 12.0)]);
+        assert!(history.can_undo() && !history.can_redo());
+
+        history.undo(&objects, &mut tool).unwrap();
+        assert!(!history.can_undo() && history.can_redo());
     }
 
     /// Actions that only change the selection aren't recorded

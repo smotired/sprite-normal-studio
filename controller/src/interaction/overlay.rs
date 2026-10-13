@@ -58,6 +58,10 @@ impl OverlayState {
 
     pub fn overlay_on(&self) -> bool { self.overlay_on }
 
+    pub fn lighting_on(&self) -> bool { self.lighting_on }
+
+    pub fn normals_on(&self) -> bool { self.normals_on }
+
     pub fn toggle_overlay(&mut self) -> bool {
         if self.overlay_on {
             self.dragging_light = false;

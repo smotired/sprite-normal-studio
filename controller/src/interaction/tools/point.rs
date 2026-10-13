@@ -247,6 +247,12 @@ impl EditorTool for EditorToolPoint {
         self.ok()
     }
 
+    fn handle_select_all(&mut self, state: ControllerStateInput) -> ToolResult {
+        self.stop_dragging();
+        self.selected_points = (0..state.objects.point_count()).collect();
+        self.ok()
+    }
+
     fn handle_special_action(&mut self, mut state: ControllerStateInput, action: SpecialAction) -> ToolResult {
         if self.selected_points.is_empty() { return self.ok(); }
         match action {
@@ -1204,5 +1210,21 @@ mod tests {
         tool.handle_special_action(state(&objects), SpecialAction::CycleSibling).unwrap();
         assert_eq!(objects.get_point_info(1).unwrap().mode(), ControlPointMode::Linear);
         assert_eq!(tool.selection(), &[1, 3]);
+    }
+
+    /// Selecting all selects every point, whether or not anything was selected before
+    #[test]
+    fn select_all() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+
+        let mut tool = EditorToolPoint::init();
+        tool.handle_select_all(state(&objects)).unwrap();
+        assert_eq!(sorted(tool.selection()), (0..7).collect::<Vec<u16>>());
+
+        let mut tool = EditorToolPoint::select(&[2], state(&objects));
+        tool.handle_select_all(state(&objects)).unwrap();
+        assert_eq!(sorted(tool.selection()), (0..7).collect::<Vec<u16>>());
     }
 }

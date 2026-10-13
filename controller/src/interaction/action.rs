@@ -68,6 +68,9 @@ pub enum Action {
     /// Delete key is pressed
     Delete,
 
+    /// Select everything the selected tool can select
+    SelectAll,
+
     /// Undo the latest action or drag
     Undo,
 
@@ -93,6 +96,15 @@ impl Controller {
     pub fn set_cursor_pos(&mut self, pos: Vec2) {
         self.cursor_pos = pos;
     }
+
+    /// If the sprite is lit by the light
+    pub fn lighting_on(&self) -> bool { self.overlay_state.lighting_on() }
+
+    /// If the sprite is shaded with the normal map
+    pub fn normals_on(&self) -> bool { self.overlay_state.normals_on() }
+
+    /// If the overlay is shown
+    pub fn overlay_on(&self) -> bool { self.overlay_state.overlay_on() }
 
     // Handle different actions from the UI
     pub fn handle_action(&mut self, action: Action) {
@@ -168,6 +180,10 @@ impl Controller {
 
             Action::Delete => {
                 self.run_tool(DragStep::None, |tool, state| tool.handle_delete(state));
+            },
+
+            Action::SelectAll => {
+                self.run_tool(DragStep::None, |tool, state| tool.handle_select_all(state));
             },
 
             Action::Undo => {

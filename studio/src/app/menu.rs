@@ -1,54 +1,201 @@
-use eframe::egui;
+use std::path::PathBuf;
+
+use controller::{Action, EditorToolKind, SpecialAction};
+use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
+use studio_math::Vec3;
 
 use crate::app::{recent, StudioApp};
 use crate::app::workspace::WorkspaceCommand;
 
+// Shortcuts shown in the menus. The keys themselves are handled in input.rs.
+const SELECT_ALL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::A);
+const DESELECT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Escape);
+const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Z);
+const REDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Y);
+const ZOOM_IN: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Equals);
+const ZOOM_OUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Minus);
+const RECENTER: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Home);
+const LIGHTING: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::L);
+const NORMAL_MAP: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::L);
+const OVERLAY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::O);
+const RESET_NORMAL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::Z);
+const MERGE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::M);
+const DETACH: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::K);
+
+/// Something clicked in the menu bar, which is run after the menu is shown since the menu borrows the app
+enum MenuAction {
+    Command(WorkspaceCommand),
+    OpenRecent(PathBuf),
+    LoadSpritesheet,
+    LoadNormalMap,
+    Controller(Action),
+}
+
 impl StudioApp {
     /// Render the menu bar across the top of the window. Must be shown before every other panel so it spans the whole window.
-    /// Returns the workspace command that was clicked, if any.
+    /// Returns the workspace command that was clicked, if any. Everything else clicked is run here.
     pub(super) fn show_menu_bar(&mut self, ui: &mut egui::Ui) -> Option<WorkspaceCommand> {
-        let mut command = None;
-        let mut open_recent = None;
+        let mut clicked = None;
         let has_project = self.project.is_some();
         egui::Panel::top("menu").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    command_button(ui, "New…", WorkspaceCommand::New, has_project, &mut command);
-                    command_button(ui, "Open…", WorkspaceCommand::Open, has_project, &mut command);
-
-                    // Recently opened or saved files, opened directly
-                    let recent = &self.recent.paths()[..self.recent.paths().len().min(recent::MENU_LIMIT)];
-                    ui.add_enabled_ui(!recent.is_empty(), |ui| {
-                        ui.menu_button("Recent Files", |ui| {
-                            for path in recent {
-                                let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
-                                if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
-                                    open_recent = Some(path.clone());
-                                }
-                            }
-                        });
-                    });
-
-                    command_button(ui, "Save", WorkspaceCommand::Save, has_project, &mut command);
-                    command_button(ui, "Save As…", WorkspaceCommand::SaveAs, has_project, &mut command);
-                    command_button(ui, "Close", WorkspaceCommand::Close, has_project, &mut command);
+                ui.menu_button("File", |ui| self.file_menu(ui, &mut clicked));
+                ui.add_enabled_ui(has_project, |ui| {
+                    ui.menu_button("Edit", |ui| self.edit_menu(ui, &mut clicked));
+                    ui.menu_button("View", |ui| self.view_menu(ui, &mut clicked));
+                    ui.menu_button("Path", |ui| self.path_menu(ui, &mut clicked));
                 });
             });
         });
 
-        // Open after the menu is shown, since the menu borrows the list
-        if let Some(path) = open_recent {
-            self.open_recent(&ui.ctx().clone(), &path);
+        match clicked? {
+            MenuAction::Command(command) => return Some(command),
+            MenuAction::OpenRecent(path) => self.open_recent(&ui.ctx().clone(), &path),
+            MenuAction::LoadSpritesheet => self.load_spritesheet(),
+            MenuAction::LoadNormalMap => self.load_normal_map(),
+            MenuAction::Controller(action) => self.controller.handle_action(action),
         }
-        command
+        None
+    }
+
+    /// File menu: the workspace file, and the images it uses
+    fn file_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
+        let has_project = self.project.is_some();
+        command_button(ui, "New…", WorkspaceCommand::New, has_project, clicked);
+        command_button(ui, "Open…", WorkspaceCommand::Open, has_project, clicked);
+
+        // Recently opened or saved files, opened directly
+        let recent = &self.recent.paths()[..self.recent.paths().len().min(recent::MENU_LIMIT)];
+        ui.add_enabled_ui(!recent.is_empty(), |ui| {
+            ui.menu_button("Recent Files", |ui| {
+                for path in recent {
+                    let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy();
+                    if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                        *clicked = Some(MenuAction::OpenRecent(path.clone()));
+                    }
+                }
+            });
+        });
+
+        command_button(ui, "Close", WorkspaceCommand::Close, has_project, clicked);
+        ui.separator();
+        command_button(ui, "Save", WorkspaceCommand::Save, has_project, clicked);
+        command_button(ui, "Save As…", WorkspaceCommand::SaveAs, has_project, clicked);
+        ui.separator();
+        if menu_item(ui, "Load Spritesheet…", None, has_project, None) {
+            *clicked = Some(MenuAction::LoadSpritesheet);
+        }
+        if menu_item(ui, "Load Base Normal Map…", None, has_project, None) {
+            *clicked = Some(MenuAction::LoadNormalMap);
+        }
+    }
+
+    /// Edit menu: the selection, and undo history
+    fn edit_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
+        let controller = &self.controller;
+        let selecting_tool = matches!(controller.selected_tool(), EditorToolKind::Zone | EditorToolKind::Point);
+
+        let items = [
+            ("Select All", SELECT_ALL, selecting_tool && controller.has_objects(), Action::SelectAll),
+            // With nothing being dragged while the menu is open, cancelling just clears the selection
+            ("Deselect", DESELECT, selecting_tool && !controller.selected_points().is_empty(), Action::Cancel),
+        ];
+        controller_items(ui, items, clicked);
+        ui.separator();
+        controller_items(ui, [
+            ("Undo", UNDO, controller.can_undo(), Action::Undo),
+            ("Redo", REDO, controller.can_redo(), Action::Redo),
+        ], clicked);
+    }
+
+    /// View menu: the camera, and what is drawn. Every item leaves room for a checkmark so the shortcuts line up.
+    fn view_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
+        let controller = &self.controller;
+        for (label, shortcut, action) in [
+            ("Zoom In", ZOOM_IN, Action::CameraScale(1, None)),
+            ("Zoom Out", ZOOM_OUT, Action::CameraScale(-1, None)),
+            ("Recenter Camera", RECENTER, Action::Recenter),
+        ] {
+            if menu_item(ui, label, Some(shortcut), true, Some(false)) {
+                *clicked = Some(MenuAction::Controller(action));
+            }
+        }
+        ui.separator();
+
+        for (label, shortcut, checked, action) in [
+            ("Lighting", LIGHTING, controller.lighting_on(), Action::LightingToggled(Some(true))),
+            ("Normal Map", NORMAL_MAP, controller.normals_on(), Action::LightingToggled(Some(false))),
+        ] {
+            if menu_item(ui, label, Some(shortcut), true, Some(checked)) {
+                *clicked = Some(MenuAction::Controller(action));
+            }
+        }
+        ui.separator();
+
+        let overlay_on = controller.overlay_on();
+        if menu_item(ui, "Overlay", Some(OVERLAY), true, Some(overlay_on)) {
+            *clicked = Some(MenuAction::Controller(Action::OverlayToggled));
+        }
+        // Toggles for parts of the overlay go here, disabled while the whole overlay is off:
+        // ui.add_enabled_ui(overlay_on, |ui| { ... });
+    }
+
+    /// Path menu: changes to the selected zones or points. Each item is only enabled if it would do something.
+    fn path_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
+        let controller = &self.controller;
+        let tool = controller.selected_tool();
+        let zones_selected = tool == EditorToolKind::Zone && !controller.selected_points().is_empty();
+        let in_point_tool = tool == EditorToolKind::Point;
+
+        let items = [
+            // The pen sets the normal for new zones
+            ("Reset Normal", Some(RESET_NORMAL), zones_selected || tool == EditorToolKind::Pen, SpecialAction::NormalSet(Vec3::FORWARD, false)),
+            ("Merge", Some(MERGE), in_point_tool && controller.can_merge_selection(), SpecialAction::PointsMerged),
+            ("Detach", Some(DETACH), (tool == EditorToolKind::Zone || in_point_tool) && controller.can_separate_selection(), SpecialAction::SelectionSeparated),
+            ("Split", None, in_point_tool && controller.selected_path().is_some(), SpecialAction::PathSplit),
+        ];
+        for (label, shortcut, enabled, action) in items {
+            if menu_item(ui, label, shortcut, enabled, None) {
+                *clicked = Some(MenuAction::Controller(Action::Special(action)));
+            }
+        }
+    }
+}
+
+/// Menu buttons that run controller actions
+fn controller_items<const N: usize>(ui: &mut egui::Ui, items: [(&str, KeyboardShortcut, bool, Action); N], clicked: &mut Option<MenuAction>) {
+    for (label, shortcut, enabled, action) in items {
+        if menu_item(ui, label, Some(shortcut), enabled, None) {
+            *clicked = Some(MenuAction::Controller(action));
+        }
     }
 }
 
 /// A menu button for a workspace command, showing its shortcut. Disabled if it needs a project and there isn't one.
-fn command_button(ui: &mut egui::Ui, label: &str, item: WorkspaceCommand, has_project: bool, command: &mut Option<WorkspaceCommand>) {
-    let shortcut = ui.ctx().format_shortcut(&item.shortcut());
-    let enabled = has_project || item.works_without_project();
-    if ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(shortcut)).clicked() {
-        *command = Some(item);
+fn command_button(ui: &mut egui::Ui, label: &str, item: WorkspaceCommand, has_project: bool, clicked: &mut Option<MenuAction>) {
+    if menu_item(ui, label, Some(item.shortcut()), has_project || item.works_without_project(), None) {
+        *clicked = Some(MenuAction::Command(item));
     }
+}
+
+/// A menu button with its shortcut on the right. Returns true if clicked.
+/// With `check`, a checkmark column is kept at the far right edge, showing ✔ when it is Some(true).
+fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: Option<KeyboardShortcut>, enabled: bool, check: Option<bool>) -> bool {
+    let shortcut = shortcut.map(|shortcut| ui.ctx().format_shortcut(&shortcut)).unwrap_or_default();
+    let check_id = ui.next_auto_id().with("check");
+    let check_size = egui::Vec2::splat(ui.text_style_height(&egui::TextStyle::Button));
+
+    let button = egui::Button::new(label);
+    let button = match check {
+        Some(_) => button.shortcut_text((shortcut, egui::Atom::custom(check_id, check_size))),
+        None => button.shortcut_text(shortcut),
+    };
+    let response = ui.add_enabled_ui(enabled, |ui| button.atom_ui(ui)).inner;
+
+    if check == Some(true) && let Some(rect) = response.rect(check_id) {
+        let color = ui.style().interact(&response.response).text_color();
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "✔", font, color);
+    }
+    response.response.clicked()
 }
