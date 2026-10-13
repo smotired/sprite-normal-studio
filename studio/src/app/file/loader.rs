@@ -85,14 +85,6 @@ impl SpriteFileSelection {
     }
 
     /// Attempt to select a file and load it into the texture.
-    /// If selection fails, leave the selection unmodified.
-    pub fn select(&mut self, path: PathBuf, rs: &RenderState) -> (u32, u32) {
-        if let Ok(size) = self.try_select(path, rs) {
-            size
-        } else { self.size }
-    }
-
-    /// Attempt to select a file and load it into the texture.
     /// If selection fails, creates an image with the same size as the reference, but filled with a color.
     pub fn select_or_fill(&mut self, path: PathBuf, rs: &RenderState, size: (u32, u32), color: [u8; 4]) {
         let image = open_or_fill_image(&path, size, color);

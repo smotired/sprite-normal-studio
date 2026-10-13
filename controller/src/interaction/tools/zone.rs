@@ -231,6 +231,17 @@ impl EditorTool for EditorToolZone {
         self.ok()
     }
 
+    fn handle_select_all(&mut self, state: ControllerStateInput) -> ToolResult {
+        // Abandon any drag, then select every zone
+        self.tentative_selection = None;
+        self.reference_delta = None;
+        self.drag_origin = None;
+        self.selection_origin = None;
+        self.selection_box_end = None;
+        self.set_selection((0..state.objects.zone_count()).collect(), &state)?;
+        self.ok()
+    }
+
     fn handle_special_action(&mut self, mut state: ControllerStateInput, action: SpecialAction) -> ToolResult {
         if self.selected_zones.is_empty() { return self.ok(); }
         match action {
@@ -1033,5 +1044,22 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         tool.handle_special_action(state(&objects), SpecialAction::SelectionSeparated).unwrap();
         assert!(objects.get_siblings(1).is_empty());
+    }
+
+    /// Selecting all selects every zone, whether or not anything was selected before
+    #[test]
+    fn select_all() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+
+        let mut tool = EditorToolZone::init();
+        tool.handle_select_all(state(&objects)).unwrap();
+        assert_eq!(tool.selected_zones, vec![0, 1]);
+        assert_eq!(tool.selection().len(), 7);
+
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+        tool.handle_select_all(state(&objects)).unwrap();
+        assert_eq!(tool.selected_zones, vec![0, 1]);
     }
 }

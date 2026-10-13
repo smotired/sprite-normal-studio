@@ -7,7 +7,7 @@ mod pen;
 use controller::{Controller, EditorToolKind};
 use eframe::egui;
 
-use crate::app::{file, StudioApp};
+use crate::app::{file, workspace, StudioApp};
 
 /// A section of the sidebar with options for one editor tool.
 /// Each one keeps its own state, which is kept when switching between tools.
@@ -53,9 +53,6 @@ impl StudioApp {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         egui::Frame::new().inner_margin(margin).show(ui, |ui| {
-                            self.show_file_selectors(ui);
-                            ui.separator();
-
                             // Options for the selected tool
                             self.tool_sidebars.get(self.controller.selected_tool()).ui(ui, &mut self.controller);
                         });
@@ -63,47 +60,34 @@ impl StudioApp {
             });
     }
 
-    /// Spritesheet and normal map file selectors
-    fn show_file_selectors(&mut self, ui: &mut egui::Ui) {
+    /// Pick a new spritesheet for the open project. The base normal map is also reset to the one next to it,
+    /// or a flat one if there isn't one. Shows an error if the picked file can't be loaded.
+    pub(super) fn load_spritesheet(&mut self) {
         let Some(project) = &mut self.project else { return; };
-        let mut must_update_textures = false;
+        let Some(path) = file::pick_png(Some(project.sprite.path())) else { return; };
 
-        // Spritesheet selector button
-        let normal = &mut project.normal;
-        ui.add(
-            file::SpriteFileSelect::new(
-                &mut project.sprite,
-                "Spritesheet",
-                &self.render_state,
-            )
-            .on_select(|path, size| {
-                // Also reselect the normal map file when selecting a new sprite
-                normal.select_or_fill(
-                    file::generate_normal_map_filename(path.as_path()),
+        match project.sprite.try_select(path.clone(), &self.render_state) {
+            Ok(size) => {
+                project.normal.select_or_fill(
+                    file::generate_normal_map_filename(&path),
                     &self.render_state,
                     size,
                     file::loader::FLAT_NORMAL_COLOR,
                 );
+                self.update_input_textures();
+            },
+            Err(e) => workspace::show_message(rfd::MessageLevel::Error, "Error", &format!("Could not load {}: {e:#}", path.display())),
+        }
+    }
 
-                must_update_textures = true;
-            })
-        );
+    /// Pick a new base normal map for the open project. Shows an error if the picked file can't be loaded.
+    pub(super) fn load_normal_map(&mut self) {
+        let Some(project) = &mut self.project else { return; };
+        let Some(path) = file::pick_png(Some(project.normal.path())) else { return; };
 
-        // Normal map selector button
-        ui.add(
-            file::SpriteFileSelect::new(
-                &mut project.normal,
-                "Normal Map",
-                &self.render_state,
-            )
-            .on_select(|_path, _size| {
-                must_update_textures = true;
-            })
-        );
-
-        // Regenerate the normal map and viewport if selections changed
-        if must_update_textures {
-            self.update_input_textures();
+        match project.normal.try_select(path.clone(), &self.render_state) {
+            Ok(_) => self.update_input_textures(),
+            Err(e) => workspace::show_message(rfd::MessageLevel::Error, "Error", &format!("Could not load {}: {e:#}", path.display())),
         }
     }
 }

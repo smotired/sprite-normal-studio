@@ -159,6 +159,9 @@ pub trait EditorTool: EditorToolClone {
     /// Handle deleting something
     fn handle_delete(&mut self, state: ControllerStateInput) -> ToolResult;
 
+    /// Handle selecting everything. Ignored by default.
+    fn handle_select_all(&mut self, _state: ControllerStateInput) -> ToolResult { self.ok() }
+
     /// Handle an action from the UI that only some tools support. Ignored by default.
     fn handle_special_action(&mut self, _state: ControllerStateInput, _action: SpecialAction) -> ToolResult { self.ok() }
 
@@ -211,6 +214,9 @@ impl Controller {
 
     /// Get the IDs of the selected points
     pub fn selected_points(&self) -> &[u16] { self.tool.selection() }
+
+    /// Returns true if there are any zones
+    pub fn has_objects(&self) -> bool { self.objects.zone_count() > 0 }
 
     /// Get the handle mode of the point a point's handles sync to, or None if they sync to different points
     pub fn point_handle_mode(&self, point_id: u16) -> Option<ControlPointMode> {

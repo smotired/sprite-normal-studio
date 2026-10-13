@@ -372,7 +372,7 @@ fn resolve(path: &str, base: &Path) -> PathBuf {
 }
 
 /// Show a native message box
-fn show_message(level: rfd::MessageLevel, title: &str, text: &str) {
+pub(super) fn show_message(level: rfd::MessageLevel, title: &str, text: &str) {
     rfd::MessageDialog::new()
         .set_level(level)
         .set_title(title)
