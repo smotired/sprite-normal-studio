@@ -10,7 +10,7 @@ pub(super) use result::ToolResult;
 use result::{EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
-use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers};
+use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, Status};
 use super::history::{History, DragStep};
 
 /// Options for which tool we are using in the editor.
@@ -181,16 +181,13 @@ impl Controller {
         self.mark_normals_stale(normals_stale);
     }
 
-    /// The error from the latest tool action, if it failed
-    pub fn tool_error(&self) -> Option<&str> { self.tool_error.as_deref() }
-
     /// Run a tool action, restoring the objects and tool state if it fails, and recording its changes for undo.
     /// The step decides how errors are kept and how the changes are grouped with other actions in a drag.
     pub(crate) fn run_tool(&mut self, step: DragStep, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
         if step == DragStep::None { self.history.close(&self.objects, self.tool.as_ref()); }
 
         let state = self.create_state();
-        if let Some((EditorToolActionResult { new_tool, normals_stale }, change)) = run_tool_action(&mut self.tool, state, &mut self.tool_error, step == DragStep::Continue, action) {
+        if let Some((EditorToolActionResult { new_tool, normals_stale }, change)) = run_tool_action(&mut self.tool, state, &mut self.status, step == DragStep::Continue, action) {
             self.history.record(change, normals_stale);
             self.mark_normals_stale(normals_stale);
 
@@ -320,12 +317,12 @@ pub(super) fn switch_tool(
 }
 
 /// Run a tool action, restoring the objects and tool state if it fails.
-/// Errors always replace the previous error, and successes clear it unless we are continuing a drag.
+/// Errors always replace the status, and successes clear it unless we are continuing a drag.
 /// Returns the result of the action and the change it made if it succeeded.
 pub(super) fn run_tool_action(
     tool: &mut Box<dyn EditorTool>,
     state: ControllerStateInput,
-    error: &mut Option<String>,
+    status: &mut Status,
     continuing_drag: bool,
     action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult,
 ) -> Option<(EditorToolActionResult, EditorChange)> {
@@ -334,13 +331,13 @@ pub(super) fn run_tool_action(
     objects.begin_change();
     match action(tool.as_mut(), state) {
         Ok(result) => {
-            if !continuing_drag { *error = None; }
+            if !continuing_drag { *status = Status::Ok; }
             Some((result, EditorChange { objects: objects.finish_change(), tool: tool_before }))
         },
         Err(e) => {
             objects.rollback_change();
             *tool = tool_before;
-            *error = Some(format!("{e:#}"));
+            *status = Status::Error(format!("{e:#}"));
             None
         },
     }
@@ -390,9 +387,9 @@ mod tests {
         let mut objects = ObjectBuffers::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
-        let mut error = None;
+        let mut status = Status::Ok;
 
-        let result = run_tool_action(&mut tool, state(&objects), &mut error, false, |tool, mut state| {
+        let result = run_tool_action(&mut tool, state(&objects), &mut status, false, |tool, mut state| {
             tool.handle_click(test_utils::state(&state.objects), Vec2::ZERO, InputModifiers::none())?;
             assert!(!tool.selection().is_empty());
             state.objects.create_zone()?;
@@ -400,58 +397,66 @@ mod tests {
         });
 
         assert!(result.is_none());
-        assert_eq!(error.as_deref(), Some("Failed partway"));
+        assert_eq!(status, Status::Error("Failed partway".to_owned()));
         assert!(tool.selection().is_empty());
         assert_eq!(objects.object_counts(), (1, 4));
     }
 
-    /// A successful action keeps its changes and clears the error
+    /// A successful action keeps its changes and clears the status
     #[test]
     fn success_keeps_state() {
         let mut objects = ObjectBuffers::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
-        let mut error = Some("Old error".to_owned());
+        let mut status = Status::Error("Old error".to_owned());
 
-        let result = run_tool_action(&mut tool, state(&objects), &mut error, false, |tool, state| {
+        let result = run_tool_action(&mut tool, state(&objects), &mut status, false, |tool, state| {
             tool.handle_click(state, Vec2::ZERO, InputModifiers::none())
         });
 
         assert!(result.is_some());
-        assert!(error.is_none());
+        assert_eq!(status, Status::Ok);
         assert!(!tool.selection().is_empty());
     }
 
-    /// Continuing a drag only replaces the error if the action fails
+    /// Continuing a drag only replaces the status if the action fails
     #[test]
-    fn continuing_drag_keeps_error() {
+    fn continuing_drag_keeps_status() {
         let objects = ObjectBuffers::headless();
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
 
-        let mut error = Some("Old error".to_owned());
-        run_tool_action(&mut tool, state(&objects), &mut error, true, ok_action);
-        assert_eq!(error.as_deref(), Some("Old error"));
+        let mut status = Status::Error("Old error".to_owned());
+        run_tool_action(&mut tool, state(&objects), &mut status, true, ok_action);
+        assert_eq!(status, Status::Error("Old error".to_owned()));
 
-        run_tool_action(&mut tool, state(&objects), &mut error, true, err_action);
-        assert_eq!(error.as_deref(), Some("New error"));
+        run_tool_action(&mut tool, state(&objects), &mut status, true, err_action);
+        assert_eq!(status, Status::Error("New error".to_owned()));
 
-        let mut error = None;
-        run_tool_action(&mut tool, state(&objects), &mut error, true, ok_action);
-        assert!(error.is_none());
+        let mut status = Status::Feedback("Saved".to_owned());
+        run_tool_action(&mut tool, state(&objects), &mut status, true, ok_action);
+        assert_eq!(status, Status::Feedback("Saved".to_owned()));
+
+        let mut status = Status::Ok;
+        run_tool_action(&mut tool, state(&objects), &mut status, true, ok_action);
+        assert_eq!(status, Status::Ok);
     }
 
-    /// Actions other than continuing a drag always replace the error
+    /// Actions other than continuing a drag always replace the status, including feedback
     #[test]
-    fn other_actions_replace_error() {
+    fn other_actions_replace_status() {
         let objects = ObjectBuffers::headless();
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
 
-        let mut error = Some("Old error".to_owned());
-        run_tool_action(&mut tool, state(&objects), &mut error, false, err_action);
-        assert_eq!(error.as_deref(), Some("New error"));
+        let mut status = Status::Error("Old error".to_owned());
+        run_tool_action(&mut tool, state(&objects), &mut status, false, err_action);
+        assert_eq!(status, Status::Error("New error".to_owned()));
 
-        run_tool_action(&mut tool, state(&objects), &mut error, false, ok_action);
-        assert!(error.is_none());
+        run_tool_action(&mut tool, state(&objects), &mut status, false, ok_action);
+        assert_eq!(status, Status::Ok);
+
+        let mut status = Status::Feedback("Saved".to_owned());
+        run_tool_action(&mut tool, state(&objects), &mut status, false, ok_action);
+        assert_eq!(status, Status::Ok);
     }
 
     /// Tools ignore special actions and queries they don't support

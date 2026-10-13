@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use studio_math::Vec2;
 
-use crate::Controller;
+use crate::{Controller, Status};
 use crate::interaction::history::History;
 use crate::interaction::tools::{EditorTool, EditorToolZone};
 use crate::objects::{LoadedObjects, SavedObjects};
@@ -27,7 +27,7 @@ impl Controller {
 
         // Nothing is selected in the new objects, old errors don't apply to them, and old changes can't be undone into them
         self.tool = EditorToolZone::init();
-        self.tool_error = None;
+        self.status = Status::Ok;
         self.history = History::default();
 
         // Regenerate the whole normal map
@@ -42,7 +42,7 @@ impl Controller {
         self.light = Default::default();
 
         self.tool = EditorToolZone::init();
-        self.tool_error = None;
+        self.status = Status::Ok;
         self.history = History::default();
         self.normals_stale = Some((Vec2::ZERO, self.assigner.size()));
     }

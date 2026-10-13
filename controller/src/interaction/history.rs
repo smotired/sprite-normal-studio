@@ -1,4 +1,4 @@
-use crate::{Controller, ObjectBuffers, ObjectDiff, Bounds, EditorChange};
+use crate::{Controller, ObjectBuffers, ObjectDiff, Bounds, EditorChange, Status};
 use crate::objects::merge_bounds;
 use super::tools::EditorTool;
 
@@ -108,7 +108,7 @@ impl Controller {
     pub fn undo(&mut self) {
         if let Some(normals_stale) = self.history.undo(&self.objects, &mut self.tool) {
             self.mark_normals_stale(normals_stale);
-            self.tool_error = None;
+            self.status = Status::Ok;
         }
     }
 
@@ -116,7 +116,7 @@ impl Controller {
     pub fn redo(&mut self) {
         if let Some(normals_stale) = self.history.redo(&self.objects, &mut self.tool) {
             self.mark_normals_stale(normals_stale);
-            self.tool_error = None;
+            self.status = Status::Ok;
         }
     }
 
@@ -139,7 +139,7 @@ mod tests {
     /// Run a tool action and record it like the controller does
     fn run(history: &mut History, tool: &mut Box<dyn EditorTool>, objects: &ObjectBuffers, step: DragStep, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
         if step == DragStep::None { history.close(objects, tool.as_ref()); }
-        if let Some((result, change)) = run_tool_action(tool, state(objects), &mut None, step == DragStep::Continue, action) {
+        if let Some((result, change)) = run_tool_action(tool, state(objects), &mut Status::Ok, step == DragStep::Continue, action) {
             history.record(change, result.normals_stale);
             switch_tool(tool, history, result.new_tool, state(objects), state(objects));
         }

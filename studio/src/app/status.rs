@@ -1,57 +1,69 @@
+use controller::Status;
 use eframe::egui;
 
 use crate::app::StudioApp;
 
 impl StudioApp {
     /// Render the one-line status bar below the workspace. Must be shown after the side panels so it only spans the workspace.
-    /// Shows a checkmark if the last tool action succeeded, or its error if it failed. Clicking an error opens the full text.
+    /// Shows a checkmark, with feedback text if there is any, or the error from the latest tool action if it failed.
+    /// Clicking text opens the full text, in case it was truncated.
     pub(super) fn show_status_bar(&mut self, ui: &mut egui::Ui) -> egui::Response {
         let response = egui::Panel::bottom("status")
             .resizable(false)
             .show(ui, |ui| {
-                match self.controller.tool_error() {
-                    None => {
-                        ui.label(egui::RichText::new("✔").color(egui::Color32::GREEN));
-                    },
-                    Some(error) => {
-                        ui.add(
-                            egui::Label::new(egui::RichText::new(format!("⚠ {error}")).monospace().color(egui::Color32::YELLOW))
-                                .truncate()
-                                .selectable(false)
-                        );
-                    },
-                }
+                ui.horizontal(|ui| {
+                    match self.controller.status() {
+                        Status::Ok => {
+                            ui.label(egui::RichText::new("✔").color(egui::Color32::GREEN));
+                        },
+                        Status::Feedback(text) => {
+                            ui.label(egui::RichText::new("✔").color(egui::Color32::GREEN));
+                            ui.add(egui::Label::new(egui::RichText::new(text).weak()).truncate().selectable(false));
+                        },
+                        Status::Error(text) => {
+                            ui.add(
+                                egui::Label::new(egui::RichText::new(format!("⚠ {text}")).color(egui::Color32::YELLOW))
+                                    .truncate()
+                                    .selectable(false)
+                            );
+                        },
+                    }
+                });
             })
             .response;
 
-        // Open the full error text when the bar is clicked, in case it was truncated
-        if self.controller.tool_error().is_some() {
+        // Open the full text when the bar is clicked
+        if *self.controller.status() != Status::Ok {
             let response = response.interact(egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
             if response.clicked() {
-                self.show_error_dialog = true;
+                self.show_status_dialog = true;
             }
             return response;
         }
         response
     }
 
-    /// Render the dialog with the full text of the tool error, if it is open
-    pub(super) fn show_error_dialog(&mut self, ui: &mut egui::Ui) {
-        if !self.show_error_dialog { return; }
-        let Some(error) = self.controller.tool_error() else {
-            self.show_error_dialog = false;
-            return;
+    /// Render the dialog with the full status text, if it is open
+    pub(super) fn show_status_dialog(&mut self, ui: &mut egui::Ui) {
+        if !self.show_status_dialog { return; }
+        let (heading, text) = match self.controller.status() {
+            Status::Ok => {
+                self.show_status_dialog = false;
+                return;
+            },
+            Status::Feedback(text) => ("✔ Status", text),
+            Status::Error(text) => ("⚠ Error", text),
         };
 
-        let modal = egui::Modal::new(egui::Id::new("tool_error_dialog")).show(ui.ctx(), |ui| {
+        let modal = egui::Modal::new(egui::Id::new("status_dialog")).show(ui.ctx(), |ui| {
             ui.set_max_width(400.0);
-            ui.heading("⚠ Tool Error");
-            ui.add(egui::Label::new(egui::RichText::new(error).monospace()).wrap());
+            ui.heading(heading);
+            ui.add(egui::Label::new(text.as_str()).wrap());
             ui.button("OK").clicked()
         });
 
         if modal.inner || modal.should_close() {
-            self.show_error_dialog = false;
+            self.show_status_dialog = false;
         }
     }
 }

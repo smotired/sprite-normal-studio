@@ -95,6 +95,7 @@ impl StudioApp {
         let Some(normal) = project.normal.take() else { return; };
         self.retired_selections.push(normal);
         self.update_input_textures();
+        self.controller.set_feedback("Reset base normals to a flat normal map");
     }
 }
 

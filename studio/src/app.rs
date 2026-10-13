@@ -69,8 +69,8 @@ pub struct StudioApp {
     /// Renderer viewport texture ID
     viewport_texture_id: egui::TextureId,
 
-    /// If the dialog with the full tool error text is open
-    show_error_dialog: bool,
+    /// If the dialog with the full status text is open
+    show_status_dialog: bool,
 
     /// Sidebar sections for each editor tool
     tool_sidebars: sidebar::ToolSidebars,
@@ -98,7 +98,7 @@ impl StudioApp {
             renderer,
             render_state,
             viewport_texture_id,
-            show_error_dialog: false,
+            show_status_dialog: false,
             tool_sidebars: Default::default(),
             allow_close: false,
         }
@@ -127,7 +127,7 @@ impl StudioApp {
             self.retired_selections.push(old.sprite);
             self.retired_selections.extend(old.normal);
         }
-        self.show_error_dialog = false;
+        self.show_status_dialog = false;
         self.update_input_textures();
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
     }
@@ -156,7 +156,7 @@ impl eframe::App for StudioApp {
         let menu_command = self.show_menu_bar(ui);
 
         // Workspace shortcuts work everywhere, unless a dialog is open and should get the keys instead (i.e. escape to close it)
-        let modal_open = self.show_error_dialog || self.new_project_dialog.is_some() || self.relink_dialog.is_some();
+        let modal_open = self.show_status_dialog || self.new_project_dialog.is_some() || self.relink_dialog.is_some();
         let mut workspace_command = menu_command;
         if !modal_open {
             workspace_command = workspace_command.or(self.process_workspace_shortcuts(ui));
@@ -207,6 +207,6 @@ impl StudioApp {
         let response = self.show_editor(ui);
         self.process_editor_input(ui, response);
 
-        self.show_error_dialog(ui);
+        self.show_status_dialog(ui);
     }
 }
