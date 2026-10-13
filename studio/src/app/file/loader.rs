@@ -31,13 +31,6 @@ impl SpriteFileSelection {
         Ok(Self::from_image(label, path, rs, &image))
     }
 
-    /// Open an image file and load it into a new texture.
-    /// If it can't be opened, the texture is the given size and filled with a color instead, and the path is kept so it can be saved to.
-    pub fn open_or_fill(label: &str, path: PathBuf, rs: &RenderState, size: (u32, u32), color: [u8; 4]) -> Self {
-        let image = open_or_fill_image(&path, size, color);
-        Self::from_image(label, path, rs, &image)
-    }
-
     /// Create a selection from an image that has already been loaded, registering a new texture ID for it
     fn from_image(label: &str, path: PathBuf, rs: &RenderState, image: &image::RgbaImage) -> Self {
         let texture = create_texture(rs, label, image);
@@ -83,21 +76,12 @@ impl SpriteFileSelection {
         self.set_image(path, rs, &image);
         Ok(self.size)
     }
-
-    /// Attempt to select a file and load it into the texture.
-    /// If selection fails, creates an image with the same size as the reference, but filled with a color.
-    pub fn select_or_fill(&mut self, path: PathBuf, rs: &RenderState, size: (u32, u32), color: [u8; 4]) {
-        let image = open_or_fill_image(&path, size, color);
-        self.set_image(path, rs, &image); // Keep an invalid path, we will save to it.
-    }
 }
 
-/// Open an image file, or create one of the given size filled with a color if it can't be opened
-fn open_or_fill_image(path: &Path, (width, height): (u32, u32), color: [u8; 4]) -> image::RgbaImage {
-    match image::open(path) {
-        Ok(image) => image.to_rgba8(),
-        Err(_) => image::RgbaImage::from_pixel(width, height, image::Rgba(color)),
-    }
+/// Create a flat normal map texture of a size, for when there is no base normal map
+pub fn flat_normal_texture(rs: &RenderState, (width, height): (u32, u32)) -> wgpu::Texture {
+    let image = image::RgbaImage::from_pixel(width, height, image::Rgba(FLAT_NORMAL_COLOR));
+    create_texture(rs, "flat_normal_map", &image)
 }
 
 /// Create a texture on the GPU and write an image to it

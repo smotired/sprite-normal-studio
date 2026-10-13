@@ -2,7 +2,7 @@ use std::path::Path;
 
 use eframe::egui;
 
-use crate::app::file::{self, loader::{SpriteFileSelection, FLAT_NORMAL_COLOR}};
+use crate::app::file::{self, loader::SpriteFileSelection};
 use crate::app::workspace::{build_workspace_file, EXTENSION, NORMAL_LABEL, SPRITE_LABEL};
 use crate::app::{Project, StudioApp};
 
@@ -44,32 +44,31 @@ impl NewProjectDialog {
         });
         ui.add_space(8.0);
 
-        // Spritesheet, which also picks the normal map next to it
+        // Spritesheet, which also names the project if it has no name yet
         match file::pick_image(ui, "Spritesheet", true, &mut self.sprite, SPRITE_LABEL, rs, retired) {
             Ok(true) => {
                 let sprite = self.sprite.as_ref().unwrap();
                 if self.name.trim().is_empty() {
                     self.name = sprite.path().file_stem().unwrap_or_default().to_string_lossy().into_owned();
                 }
-                let normal = SpriteFileSelection::open_or_fill(
-                    NORMAL_LABEL, file::generate_normal_map_filename(sprite.path()), rs, sprite.size(), FLAT_NORMAL_COLOR,
-                );
-                retired.extend(self.normal.replace(normal));
                 self.error = None;
             },
             Ok(false) => {},
             Err(e) => self.error = Some(e),
         }
-        file::preview(ui, self.sprite.as_ref());
+        file::preview(ui, self.sprite.as_ref(), "None selected");
         ui.add_space(8.0);
 
-        // Base normal map, which needs a spritesheet first
-        match file::pick_image(ui, "Base Normal Map", self.sprite.is_some(), &mut self.normal, NORMAL_LABEL, rs, retired) {
+        // Base normal map, which is optional. Without one, the normal map starts flat.
+        match file::pick_image(ui, "Base Normal Map", true, &mut self.normal, NORMAL_LABEL, rs, retired) {
             Ok(true) => self.error = None,
             Ok(false) => {},
             Err(e) => self.error = Some(e),
         }
-        file::preview(ui, self.normal.as_ref());
+        file::preview(ui, self.normal.as_ref(), file::FLAT_NORMAL_TEXT);
+        if self.normal.is_some() && file::right_aligned_button(ui, "Use flat normal map").clicked() {
+            retired.extend(self.normal.take());
+        }
 
         if let Some(error) = &self.error {
             ui.add_space(8.0);
@@ -129,17 +128,18 @@ impl StudioApp {
             return;
         }
         let Some(dialog) = self.new_project_dialog.take() else { return; };
-        let (Some(sprite), Some(normal)) = (dialog.sprite, dialog.normal) else { return; };
+        let Some(sprite) = dialog.sprite else {
+            self.retired_selections.extend(dialog.normal);
+            return;
+        };
+        let normal = dialog.normal;
 
         // The workspace file goes next to the spritesheet by default
         let folder = sprite.path().parent().unwrap_or(Path::new(""));
         let path = folder.join(format!("{}.{EXTENSION}", dialog.name.trim()));
 
         self.controller.new_scene();
-        let clean = build_workspace_file(&sprite, &normal, self.controller.save_scene(), &path);
-        self.set_project(ctx, Some(Project { sprite, normal, path, saved: false, clean, dirty: false }));
-
-        // Setting the project recentered the light, so the empty project is only clean after that
-        self.mark_clean();
+        let clean = build_workspace_file(&sprite, normal.as_ref(), None, self.controller.save_scene(), &path);
+        self.set_project(ctx, Some(Project { sprite, normal, path, saved: false, export_path: None, clean, dirty: false }));
     }
 }

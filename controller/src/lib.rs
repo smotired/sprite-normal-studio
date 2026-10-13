@@ -17,7 +17,7 @@ use crate::interaction::history::History;
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorChange, SpecialAction, SpecialQuery, SpecialValue};
 pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects};
-pub use crate::save::{SavedScene, SavedLight};
+pub use crate::save::SavedScene;
 use crate::objects::merge_bounds;
 
 /// The Controller manages our actual working pipeline.
