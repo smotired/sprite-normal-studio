@@ -2,7 +2,7 @@ use std::path::Path;
 
 use eframe::egui;
 
-use crate::app::file::{self, loader::{SpriteFileSelection, FLAT_NORMAL_COLOR}};
+use crate::app::file::{self, loader::SpriteFileSelection};
 use crate::app::new_project::WIDTH;
 use crate::app::workspace::{show_result, PendingOpen, NORMAL_LABEL, SPRITE_LABEL};
 use crate::app::StudioApp;
@@ -12,7 +12,10 @@ use crate::app::StudioApp;
 pub(super) struct RelinkDialog {
     pending: PendingOpen,
     sprite: Option<SpriteFileSelection>,
+    /// The base normal map, or None for a flat one
     normal: Option<SpriteFileSelection>,
+    /// If the workspace file has a base normal map that couldn't be loaded, and nothing has replaced it yet
+    normal_missing: bool,
     error: Option<String>,
 }
 
@@ -26,7 +29,8 @@ enum DialogAction {
 impl RelinkDialog {
     /// Create the dialog for a workspace file, with whichever images did load
     pub(super) fn new(pending: PendingOpen, sprite: Option<SpriteFileSelection>, normal: Option<SpriteFileSelection>) -> Self {
-        Self { pending, sprite, normal, error: None }
+        let normal_missing = pending.normal_path.is_some() && normal.is_none();
+        Self { pending, sprite, normal, normal_missing, error: None }
     }
 
     /// Render the dialog's contents. Selections replaced by new picks are added to `retired`.
@@ -42,30 +46,22 @@ impl RelinkDialog {
         if self.sprite.is_none() {
             not_found(ui, &self.pending.sprite_path);
         }
-        file::preview(ui, self.sprite.as_ref());
+        file::preview(ui, self.sprite.as_ref(), "None selected");
         ui.add_space(8.0);
 
-        // Base normal map, which can also start flat at its saved path, if the spritesheet is loaded to give its size
+        // Base normal map. A missing one can be replaced, or dropped to start from a flat normal map instead.
         let result = file::pick_image(ui, "Base Normal Map", true, &mut self.normal, NORMAL_LABEL, rs, retired);
+        if result == Ok(true) { self.normal_missing = false; }
         self.handle_pick(result);
-        let missing = self.normal.is_none();
-        if missing {
-            not_found(ui, &self.pending.normal_path);
+        if self.normal_missing && let Some(normal_path) = &self.pending.normal_path {
+            not_found(ui, normal_path);
         }
-        file::preview(ui, self.normal.as_ref());
-        if missing {
-            // In a one-row horizontal so the right-to-left layout doesn't take the rest of the dialog's height
-            let flat = ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_enabled(self.sprite.is_some(), egui::Button::new("Create flat normal map"))
-                        .on_hover_text("Start with a flat normal map, which is saved to the original path")
-                        .on_disabled_hover_text("Pick the spritesheet first")
-                }).inner
-            }).inner;
-            if flat.clicked() && let Some(sprite) = &self.sprite {
-                self.normal = Some(SpriteFileSelection::open_or_fill(
-                    NORMAL_LABEL, self.pending.normal_path.clone(), rs, sprite.size(), FLAT_NORMAL_COLOR,
-                ));
+        file::preview(ui, self.normal.as_ref(), if self.normal_missing { "None selected" } else { file::FLAT_NORMAL_TEXT });
+        if self.normal_missing {
+            let flat = file::right_aligned_button(ui, "Create flat normal map")
+                .on_hover_text("Start from a flat normal map instead, with no base normal map file");
+            if flat.clicked() {
+                self.normal_missing = false;
             }
         }
 
@@ -78,7 +74,7 @@ impl RelinkDialog {
         ui.separator();
 
         // Buttons, on the right, added right to left so Open is last
-        let can_open = self.sprite.is_some() && self.normal.is_some();
+        let can_open = self.sprite.is_some() && !self.normal_missing;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let open = ui.add_enabled(can_open, egui::Button::new("Open"));
             let cancel = ui.button("Cancel");
@@ -121,8 +117,9 @@ impl StudioApp {
         match modal.inner {
             DialogAction::Open => {
                 let Some(dialog) = self.relink_dialog.take() else { return; };
-                if let (Some(sprite), Some(normal)) = (dialog.sprite, dialog.normal) {
-                    show_result(Ok(self.finish_open(ui.ctx(), dialog.pending, sprite, normal)));
+                match dialog.sprite {
+                    Some(sprite) => show_result(Ok(self.finish_open(ui.ctx(), dialog.pending, sprite, dialog.normal))),
+                    None => self.retired_selections.extend(dialog.normal),
                 }
             },
             DialogAction::Cancel => self.close_relink_dialog(),

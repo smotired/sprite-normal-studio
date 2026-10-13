@@ -5,7 +5,7 @@ use controller::{LoadedObjects, SavedScene};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
-use crate::app::{Project, StudioApp};
+use crate::app::{file, Project, StudioApp};
 use crate::app::file::loader::SpriteFileSelection;
 use crate::app::relink::RelinkDialog;
 
@@ -18,8 +18,14 @@ pub(super) const NORMAL_LABEL: &str = "normal_map";
 /// Identifies a workspace file
 const FORMAT: &str = "sprite-normal-studio";
 
-/// The newest workspace file version this build can read and the one it writes
-const VERSION: u32 = 1;
+/// The newest workspace file version this build can read and the one it writes.
+/// Bump it whenever what is saved changes, and keep older versions readable.
+///
+/// Changelog:
+/// - Version 1: Spritesheet and base normal map paths, spritesheet size, light, and objects.
+/// - Version 2: Removed the light. It is ignored when reading version 1 files.
+/// - Version 3: Made the base normal map path optional (null for a flat normal map), and added the export path.
+const VERSION: u32 = 3;
 
 /// Extension of workspace files
 pub(super) const EXTENSION: &str = "sns";
@@ -32,7 +38,8 @@ const SAVE: &str = "Save";
 const DONT_SAVE: &str = "Don't Save";
 const CANCEL: &str = "Cancel";
 
-/// A workspace file: the input files, plus the objects and light. Not the camera or the view.
+/// A workspace file: the input files, plus the objects. Not the light, the camera or the view.
+/// See VERSION for how the format has changed.
 /// Comparable, so a project has unsaved changes when saving it would write a different file.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct WorkspaceFile {
@@ -41,7 +48,14 @@ pub(super) struct WorkspaceFile {
 
     /// Paths are relative to the workspace file's folder where possible, with / separators
     spritesheet: String,
-    normal_map: String,
+
+    /// The base normal map, or null to start from a flat normal map
+    #[serde(default)]
+    normal_map: Option<String>,
+
+    /// Where the generated normal map was last exported, or null if it hasn't been
+    #[serde(default)]
+    export_path: Option<String>,
 
     /// Size of the spritesheet when saved, to warn if it changed
     sprite_size: (u32, u32),
@@ -57,6 +71,8 @@ pub(super) enum WorkspaceCommand {
     Open,
     Save,
     SaveAs,
+    Export,
+    ExportAs,
     Close,
 }
 
@@ -64,11 +80,13 @@ impl WorkspaceCommand {
     /// Keyboard shortcut for this command
     pub(super) const fn shortcut(self) -> egui::KeyboardShortcut {
         match self {
-            Self::New    => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N),
-            Self::Open   => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O),
-            Self::Save   => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S),
-            Self::SaveAs => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::S),
-            Self::Close  => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::W),
+            Self::New      => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N),
+            Self::Open     => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O),
+            Self::Save     => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S),
+            Self::SaveAs   => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::S),
+            Self::Export   => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E),
+            Self::ExportAs => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::E),
+            Self::Close    => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::W),
         }
     }
 
@@ -78,7 +96,7 @@ impl WorkspaceCommand {
     }
 
     /// Every command, with the most specific shortcuts first so they are matched before ones they contain
-    pub(super) const ALL: [Self; 5] = [Self::SaveAs, Self::Close, Self::Save, Self::Open, Self::New];
+    pub(super) const ALL: [Self; 7] = [Self::SaveAs, Self::Close, Self::ExportAs, Self::Save, Self::Export, Self::Open, Self::New];
 }
 
 impl StudioApp {
@@ -108,6 +126,8 @@ impl StudioApp {
             },
             WorkspaceCommand::Save => { self.save(ctx, false); },
             WorkspaceCommand::SaveAs => { self.save(ctx, true); },
+            WorkspaceCommand::Export => self.export(false),
+            WorkspaceCommand::ExportAs => self.export(true),
         }
     }
 
@@ -136,6 +156,56 @@ impl StudioApp {
         show_result(result);
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
         saved
+    }
+
+    /// Export the generated normal map to a PNG, asking where if it has never been exported or `export_as` is set.
+    /// The path is remembered for the next export. Shows a dialog if it couldn't be exported.
+    fn export(&mut self, export_as: bool) {
+        let Some(project) = &self.project else { return; };
+        let path = match &project.export_path {
+            Some(path) if !export_as => path.clone(),
+            _ => match self.export_dialog().save_file() {
+                Some(path) => path,
+                None => return,
+            },
+        };
+
+        match self.export_to(&path) {
+            Ok(()) => if let Some(project) = &mut self.project {
+                project.export_path = Some(path);
+            },
+            Err(e) => show_message(rfd::MessageLevel::Error, "Error", &format!("Could not export {}: {e:#}", path.display())),
+        }
+    }
+
+    /// Save dialog for exporting, starting at the last export, or suggesting a name next to the spritesheet
+    fn export_dialog(&self) -> rfd::FileDialog {
+        let dialog = rfd::FileDialog::new().add_filter("PNG files", &["png"]);
+        let Some(project) = &self.project else { return dialog; };
+        let suggested = project.export_path.clone()
+            .unwrap_or_else(|| file::generate_normal_map_filename(project.sprite.path()));
+
+        let dialog = match suggested.parent().filter(|directory| directory.is_dir()) {
+            Some(directory) => dialog.set_directory(directory),
+            None => dialog,
+        };
+        match suggested.file_name() {
+            Some(name) => dialog.set_file_name(name.to_string_lossy()),
+            None => dialog,
+        }
+    }
+
+    /// Write the generated normal map to a PNG
+    fn export_to(&mut self, path: &Path) -> anyhow::Result<()> {
+        let (width, height, pixels) = self.controller.read_output(&self.render_state.device, &self.render_state.queue)?;
+
+        // Write to a temporary file first, so a failed write can't leave a broken image behind
+        let mut temp_path = path.as_os_str().to_owned();
+        temp_path.push(".tmp");
+        image::save_buffer_with_format(&temp_path, &pixels, width, height, image::ColorType::Rgba8, image::ImageFormat::Png)
+            .context("Could not write the file")?;
+        std::fs::rename(&temp_path, path).context("Could not replace the file")?;
+        Ok(())
     }
 
     /// Check it's OK to leave the open project. If it has unsaved changes, ask whether to save them first.
@@ -181,18 +251,6 @@ impl StudioApp {
         }
     }
 
-    /// Treat the open project as having no unsaved changes, as if it was just saved to its path
-    pub(super) fn mark_clean(&mut self) {
-        let Some(path) = self.project.as_ref().map(|project| project.path.clone()) else { return; };
-        let file = self.workspace_file(&path);
-        if let Some(project) = &mut self.project
-            && let Some(file) = file
-        {
-            project.clean = file;
-            project.dirty = false;
-        }
-    }
-
     /// Title for the window, with the name of the workspace file if there is one, and * if it has unsaved changes
     pub(super) fn window_title(&self) -> String {
         let Some(project) = &self.project else { return APP_TITLE.to_owned(); };
@@ -227,7 +285,7 @@ impl StudioApp {
     /// The workspace file the open project would be saved as at a path, if there is a project
     fn workspace_file(&self, path: &Path) -> Option<WorkspaceFile> {
         let project = self.project.as_ref()?;
-        Some(build_workspace_file(&project.sprite, &project.normal, self.controller.save_scene(), path))
+        Some(build_workspace_file(&project.sprite, project.normal.as_ref(), project.export_path.as_deref(), self.controller.save_scene(), path))
     }
 
     /// Save the workspace to a file and make it the current workspace file
@@ -255,25 +313,32 @@ impl StudioApp {
     /// If its spritesheet or normal map can't be loaded, the Missing Files dialog is opened to finish opening it instead.
     /// Returns a warning if it opened but something may be wrong.
     fn open_workspace(&mut self, ctx: &egui::Context, path: &Path) -> anyhow::Result<Option<String>> {
-        let file = read_workspace(&std::fs::read_to_string(path)?)?;
+        let mut file = read_workspace(&std::fs::read_to_string(path)?)?;
         let objects = file.scene.objects.validate().context("The workspace file has invalid objects")?;
         let base = path.parent().unwrap_or(Path::new(""));
+
+        // Upgrading an old file isn't a change the user made, so it doesn't count as unsaved
+        file.version = VERSION;
 
         let pending = PendingOpen {
             path: path.to_owned(),
             objects,
             sprite_path: resolve(&file.spritesheet, base),
-            normal_path: resolve(&file.normal_map, base),
+            normal_path: file.normal_map.as_deref().map(|normal| resolve(normal, base)),
+            export_path: file.export_path.as_deref().map(|export| resolve(export, base)),
             file,
         };
 
-        // Load the images, which are the last things that can fail
+        // Load the images, which are the last things that can fail. Without a base normal map there is nothing to load.
         let sprite = SpriteFileSelection::open(SPRITE_LABEL, pending.sprite_path.clone(), &self.render_state).ok();
-        let normal = SpriteFileSelection::open(NORMAL_LABEL, pending.normal_path.clone(), &self.render_state).ok();
+        let normal = match &pending.normal_path {
+            Some(normal_path) => SpriteFileSelection::open(NORMAL_LABEL, normal_path.clone(), &self.render_state).ok().map(Some),
+            None => Some(None),
+        };
         match (sprite, normal) {
             (Some(sprite), Some(normal)) => Ok(self.finish_open(ctx, pending, sprite, normal)),
             (sprite, normal) => {
-                self.relink_dialog = Some(RelinkDialog::new(pending, sprite, normal));
+                self.relink_dialog = Some(RelinkDialog::new(pending, sprite, normal.flatten()));
                 Ok(None)
             },
         }
@@ -281,14 +346,23 @@ impl StudioApp {
 
     /// Make a workspace file the current one, once its images are loaded.
     /// Returns a warning if the spritesheet's size changed since it was saved.
-    pub(super) fn finish_open(&mut self, ctx: &egui::Context, pending: PendingOpen, sprite: SpriteFileSelection, normal: SpriteFileSelection) -> Option<String> {
+    pub(super) fn finish_open(&mut self, ctx: &egui::Context, pending: PendingOpen, sprite: SpriteFileSelection, normal: Option<SpriteFileSelection>) -> Option<String> {
         let size = sprite.size();
         let saved_size = pending.file.sprite_size;
-        let light = pending.file.scene.light;
 
-        // The file as it was read is what's on disk, so images picked somewhere else count as unsaved changes
-        self.set_project(ctx, Some(Project { sprite, normal, path: pending.path.clone(), saved: true, clean: pending.file, dirty: false }));
-        self.controller.load_scene(light, pending.objects);
+        // Loading the scene resets the light, then setting the project centers it on the spritesheet.
+        // The file as it was read is what's on disk, so images picked somewhere else count as unsaved changes.
+        self.controller.load_scene(pending.objects);
+        let project = Project {
+            sprite,
+            normal,
+            path: pending.path.clone(),
+            saved: true,
+            export_path: pending.export_path,
+            clean: pending.file,
+            dirty: false,
+        };
+        self.set_project(ctx, Some(project));
         self.recent.mark_used(&pending.path);
 
         (size != saved_size).then(|| format!(
@@ -307,19 +381,29 @@ pub(super) struct PendingOpen {
     /// The objects in it, already checked
     objects: LoadedObjects,
 
-    /// Where the workspace file says the images are
+    /// Where the workspace file says the images are. There may be no base normal map.
     pub(super) sprite_path: PathBuf,
-    pub(super) normal_path: PathBuf,
+    pub(super) normal_path: Option<PathBuf>,
+
+    /// Where the workspace file says the normal map was last exported
+    export_path: Option<PathBuf>,
 }
 
-/// Build the workspace file for a project's images and scene, as it would be saved at a path
-pub(super) fn build_workspace_file(sprite: &SpriteFileSelection, normal: &SpriteFileSelection, scene: SavedScene, path: &Path) -> WorkspaceFile {
+/// Build the workspace file for a project's images, export path and scene, as it would be saved at a path
+pub(super) fn build_workspace_file(
+    sprite: &SpriteFileSelection,
+    normal: Option<&SpriteFileSelection>,
+    export_path: Option<&Path>,
+    scene: SavedScene,
+    path: &Path,
+) -> WorkspaceFile {
     let base = path.parent().unwrap_or(Path::new(""));
     WorkspaceFile {
         format: FORMAT.to_owned(),
         version: VERSION,
         spritesheet: to_relative(sprite.path(), base),
-        normal_map: to_relative(normal.path(), base),
+        normal_map: normal.map(|normal| to_relative(normal.path(), base)),
+        export_path: export_path.map(|export| to_relative(export, base)),
         sprite_size: sprite.size(),
         scene,
     }
@@ -442,11 +526,31 @@ mod tests {
             "format": format,
             "version": version,
             "spritesheet": "hero.png",
-            "normal_map": "hero_normal.png",
+            "normal_map": null,
+            "export_path": null,
             "sprite_size": [64, 32],
-            "light": { "position": { "x": 1.0, "y": 2.0 }, "height": 200.0, "color": [255, 255, 255] },
             "zones": [],
         }).to_string()
+    }
+
+    /// The base normal map and export path survive a round trip whether or not they are set
+    #[test]
+    fn optional_paths_round_trip() {
+        for (normal_map, export_path) in [(None, None), (Some("hero_normal.png"), Some("out/hero_normal.png"))] {
+            let json = serde_json::json!({
+                "format": FORMAT,
+                "version": VERSION,
+                "spritesheet": "hero.png",
+                "normal_map": normal_map,
+                "export_path": export_path,
+                "sprite_size": [64, 32],
+                "zones": [],
+            }).to_string();
+            let file = read_workspace(&json).unwrap();
+            assert_eq!(file.normal_map.as_deref(), normal_map);
+            assert_eq!(file.export_path.as_deref(), export_path);
+            assert_eq!(read_workspace(&serde_json::to_string_pretty(&file).unwrap()).unwrap(), file);
+        }
     }
 
     /// Files of the current version can be read
@@ -458,18 +562,43 @@ mod tests {
         assert!(file.scene.objects.validate().is_ok());
     }
 
+    /// Version 1 files saved the light, which is ignored when reading them
+    #[test]
+    fn read_version_1() {
+        let json = serde_json::json!({
+            "format": FORMAT,
+            "version": 1,
+            "spritesheet": "hero.png",
+            "normal_map": "hero_normal.png",
+            "sprite_size": [64, 32],
+            "light": { "position": { "x": 1.0, "y": 2.0 }, "height": 200.0, "color": [255, 255, 255] },
+            "zones": [],
+        }).to_string();
+        let file = read_workspace(&json).unwrap();
+        assert_eq!(file.version, 1);
+        assert!(file.scene.objects.validate().is_ok());
+    }
+
     /// A file that is read and written back out is equal to itself when read again, so opening a file doesn't count as a change.
     /// Uses values that aren't exact in binary, to check floats survive the round trip.
     #[test]
     fn round_trip_equal() {
+        let point = |x: f32, y: f32| serde_json::json!({
+            "position": { "x": x, "y": y },
+            "left_handle": { "x": -1.1, "y": 0.0 },
+            "right_handle": { "x": 1.1, "y": 0.0 },
+            "mode": "continuous",
+        });
         let json = serde_json::json!({
             "format": FORMAT,
             "version": VERSION,
             "spritesheet": "art/hero.png",
             "normal_map": "art/hero_normal.png",
             "sprite_size": [64, 32],
-            "light": { "position": { "x": 0.1, "y": 33.333333 }, "height": 123.456, "color": [10, 20, 30] },
-            "zones": [],
+            "zones": [{
+                "normal": { "x": 0.1, "y": 0.2, "z": 0.97467943 },
+                "points": [point(0.1, 33.333333), point(10.7, 0.3), point(5.55, 12.123456)],
+            }],
         }).to_string();
         let file = read_workspace(&json).unwrap();
         let again = read_workspace(&serde_json::to_string_pretty(&file).unwrap()).unwrap();

@@ -28,6 +28,7 @@ enum MenuAction {
     OpenRecent(PathBuf),
     LoadSpritesheet,
     LoadNormalMap,
+    ResetBaseNormals,
     Controller(Action),
 }
 
@@ -53,6 +54,7 @@ impl StudioApp {
             MenuAction::OpenRecent(path) => self.open_recent(&ui.ctx().clone(), &path),
             MenuAction::LoadSpritesheet => self.load_spritesheet(),
             MenuAction::LoadNormalMap => self.load_normal_map(),
+            MenuAction::ResetBaseNormals => self.reset_base_normals(),
             MenuAction::Controller(action) => self.controller.handle_action(action),
         }
         None
@@ -82,11 +84,18 @@ impl StudioApp {
         command_button(ui, "Save", WorkspaceCommand::Save, has_project, clicked);
         command_button(ui, "Save As…", WorkspaceCommand::SaveAs, has_project, clicked);
         ui.separator();
+        command_button(ui, "Export", WorkspaceCommand::Export, has_project, clicked);
+        command_button(ui, "Export As…", WorkspaceCommand::ExportAs, has_project, clicked);
+        ui.separator();
         if menu_item(ui, "Load Spritesheet…", None, has_project, None) {
             *clicked = Some(MenuAction::LoadSpritesheet);
         }
         if menu_item(ui, "Load Base Normal Map…", None, has_project, None) {
             *clicked = Some(MenuAction::LoadNormalMap);
+        }
+        let has_base_normals = self.project.as_ref().is_some_and(|project| project.normal.is_some());
+        if menu_item(ui, "Reset Base Normals", None, has_base_normals, None) {
+            *clicked = Some(MenuAction::ResetBaseNormals);
         }
     }
 

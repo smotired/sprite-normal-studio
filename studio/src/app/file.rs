@@ -1,7 +1,7 @@
 pub mod loader;
 
 use std::path::{Path, PathBuf};
-use eframe::egui::{Align, Button, Layout, RichText, Ui};
+use eframe::egui::{Align, Button, Layout, Response, RichText, Ui};
 
 use loader::{SpriteFileSelection, SpriteFileSelectionDisplay};
 
@@ -60,15 +60,26 @@ pub fn pick_image(
     }
 }
 
-/// Show a dialog's preview of a picked image and its path, or say nothing is picked
-pub fn preview(ui: &mut Ui, selection: Option<&SpriteFileSelection>) {
+/// What a dialog shows in place of a base normal map preview when there is none
+pub const FLAT_NORMAL_TEXT: &str = "None (flat normal map)";
+
+/// Show a dialog's preview of a picked image and its path, or `none_text` if nothing is picked
+pub fn preview(ui: &mut Ui, selection: Option<&SpriteFileSelection>, none_text: &str) {
     match selection {
         Some(selection) => {
             ui.add(SpriteFileSelectionDisplay::new(selection).max_height(DIALOG_PREVIEW_HEIGHT));
             ui.label(RichText::new(selection.path().display().to_string()).weak().small());
         },
-        None => { ui.label(RichText::new("None selected").weak()); },
+        None => { ui.label(RichText::new(none_text).weak()); },
     }
+}
+
+/// A button on its own row, against the right edge
+pub fn right_aligned_button(ui: &mut Ui, text: &str) -> Response {
+    // In a one-row horizontal so the right-to-left layout doesn't take the rest of the height
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.button(text)).inner
+    }).inner
 }
 
 /// Generate a normal map filename by appending _normal to the file name before the PNG

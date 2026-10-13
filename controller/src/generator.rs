@@ -144,10 +144,15 @@ fn create_output(device: &Device, size: Vec2) -> Texture {
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8Unorm,
-        // Storage for the working pass to write it, texture binding for viewport renderer to read it.
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        // Storage for the working pass to write it, texture binding for viewport renderer to read it, copy source for exporting it.
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })
+}
+
+/// Bytes per row of an RGBA8 texture when copied to a buffer, which must be padded to a multiple of COPY_BYTES_PER_ROW_ALIGNMENT
+fn padded_bytes_per_row(width: u32) -> u32 {
+    (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
 }
 
 /// Create an objects bind group
@@ -164,4 +169,63 @@ fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, zones_
 impl Controller {
     /// Get a reference to the working normal map texture
     pub fn output(&self) -> &Texture { self.generator.output() }
+
+    /// Read the generated normal map back from the GPU, after regenerating anything stale.
+    /// Returns its width, height, and RGBA8 pixels in rows with no padding. Blocks until the GPU is done.
+    pub fn read_output(&mut self, device: &Device, queue: &Queue) -> anyhow::Result<(u32, u32, Vec<u8>)> {
+        self.update(device, queue);
+
+        let output = self.generator.output();
+        let (width, height) = (output.width(), output.height());
+        let padded_row = padded_bytes_per_row(width);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Normal map readback buffer"),
+            size: (padded_row * height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Copy the texture into the buffer
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            output.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded_row), rows_per_image: Some(height) },
+            },
+            output.size(),
+        );
+        queue.submit([encoder.finish()]);
+
+        // Wait for the copy, then take each row without its padding
+        let slice = buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| { let _ = sender.send(result); });
+        device.poll(wgpu::PollType::wait_indefinitely())?;
+        receiver.recv()??;
+
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        {
+            let mapped = slice.get_mapped_range()?;
+            for row in mapped.chunks(padded_row as usize) {
+                pixels.extend_from_slice(&row[..(width * 4) as usize]);
+            }
+        }
+        buffer.unmap();
+
+        Ok((width, height, pixels))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Rows are padded up to the copy alignment, unless they already fill it
+    #[test]
+    fn padded_rows() {
+        assert_eq!(padded_bytes_per_row(1), 256);
+        assert_eq!(padded_bytes_per_row(64), 256);
+        assert_eq!(padded_bytes_per_row(65), 512);
+    }
 }

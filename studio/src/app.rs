@@ -24,13 +24,16 @@ use crate::app::file::loader::SpriteFileSelection;
 struct Project {
     /// The current sprite file, which is not modified
     sprite: SpriteFileSelection,
-    /// The current normal map file, which is not modified
-    normal: SpriteFileSelection,
+    /// The base normal map file, which is not modified, or None to start from a flat normal map
+    normal: Option<SpriteFileSelection>,
 
     /// Path to the workspace file. If it hasn't been saved yet, this is only where Save As starts.
     path: PathBuf,
     /// If the workspace file was opened from or saved to the path
     saved: bool,
+
+    /// Where the generated normal map was last exported, which Export writes to again
+    export_path: Option<PathBuf>,
 
     /// What the workspace file holds, or would hold for a project that hasn't been saved yet, to detect unsaved changes
     clean: workspace::WorkspaceFile,
@@ -103,14 +106,26 @@ impl StudioApp {
 
     fn update_input_textures(&mut self) {
         let Some(project) = &self.project else { return; };
-        self.controller.set_inputs(&self.render_state.device, project.sprite.texture(), project.normal.texture());
+
+        // Without a base normal map, start from a flat one. The controller keeps the texture alive while it uses it.
+        let flat;
+        let normal = match &project.normal {
+            Some(normal) => normal.texture(),
+            None => {
+                flat = file::loader::flat_normal_texture(&self.render_state, project.sprite.size());
+                &flat
+            },
+        };
+
+        self.controller.set_inputs(&self.render_state.device, project.sprite.texture(), normal);
         self.renderer.set_inputs(&self.render_state.device, project.sprite.texture(), self.controller.output());
     }
 
     /// Replace the open project, or close it with None to go back to the Welcome screen
     fn set_project(&mut self, ctx: &egui::Context, project: Option<Project>) {
         if let Some(old) = std::mem::replace(&mut self.project, project) {
-            self.retired_selections.extend([old.sprite, old.normal]);
+            self.retired_selections.push(old.sprite);
+            self.retired_selections.extend(old.normal);
         }
         self.show_error_dialog = false;
         self.update_input_textures();

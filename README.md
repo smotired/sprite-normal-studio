@@ -90,7 +90,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Saving workspace files (with path to sprite and normal map, all shapes,
     zones, and lights, but not camera)
 [x] Loading workspace files
-[ ] Exporting normal map (Ctrl+E exports to path with confirmation if it
+[x] Exporting normal map (Ctrl+E exports to path with confirmation if it
     would overwrite. Ctrl+Shift+E opens dialog.)
 [ ] Having multiple workspace files open
 [ ] Copy/pasting zones between workspace files

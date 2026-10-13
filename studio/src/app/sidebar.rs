@@ -8,6 +8,7 @@ use controller::{Controller, EditorToolKind};
 use eframe::egui;
 
 use crate::app::{file, workspace, StudioApp};
+use crate::app::file::loader::SpriteFileSelection;
 
 /// A section of the sidebar with options for one editor tool.
 /// Each one keeps its own state, which is kept when switching between tools.
@@ -60,34 +61,44 @@ impl StudioApp {
             });
     }
 
-    /// Pick a new spritesheet for the open project. The base normal map is also reset to the one next to it,
-    /// or a flat one if there isn't one. Shows an error if the picked file can't be loaded.
+    /// Pick a new spritesheet for the open project. Shows an error if the picked file can't be loaded.
     pub(super) fn load_spritesheet(&mut self) {
         let Some(project) = &mut self.project else { return; };
         let Some(path) = file::pick_png(Some(project.sprite.path())) else { return; };
 
         match project.sprite.try_select(path.clone(), &self.render_state) {
-            Ok(size) => {
-                project.normal.select_or_fill(
-                    file::generate_normal_map_filename(&path),
-                    &self.render_state,
-                    size,
-                    file::loader::FLAT_NORMAL_COLOR,
-                );
-                self.update_input_textures();
-            },
-            Err(e) => workspace::show_message(rfd::MessageLevel::Error, "Error", &format!("Could not load {}: {e:#}", path.display())),
+            Ok(_) => self.update_input_textures(),
+            Err(e) => show_load_error(&path, e),
         }
     }
 
     /// Pick a new base normal map for the open project. Shows an error if the picked file can't be loaded.
     pub(super) fn load_normal_map(&mut self) {
         let Some(project) = &mut self.project else { return; };
-        let Some(path) = file::pick_png(Some(project.normal.path())) else { return; };
+        let current = project.normal.as_ref().map_or(project.sprite.path(), |normal| normal.path());
+        let Some(path) = file::pick_png(Some(current)) else { return; };
 
-        match project.normal.try_select(path.clone(), &self.render_state) {
-            Ok(_) => self.update_input_textures(),
-            Err(e) => workspace::show_message(rfd::MessageLevel::Error, "Error", &format!("Could not load {}: {e:#}", path.display())),
+        let result = match &mut project.normal {
+            Some(normal) => normal.try_select(path.clone(), &self.render_state).map(|_| ()),
+            None => SpriteFileSelection::open(workspace::NORMAL_LABEL, path.clone(), &self.render_state)
+                .map(|normal| project.normal = Some(normal)),
+        };
+        match result {
+            Ok(()) => self.update_input_textures(),
+            Err(e) => show_load_error(&path, e),
         }
     }
+
+    /// Stop using a base normal map for the open project, so the normal map starts flat
+    pub(super) fn reset_base_normals(&mut self) {
+        let Some(project) = &mut self.project else { return; };
+        let Some(normal) = project.normal.take() else { return; };
+        self.retired_selections.push(normal);
+        self.update_input_textures();
+    }
+}
+
+/// Show an error for an image that couldn't be loaded
+fn show_load_error(path: &std::path::Path, e: anyhow::Error) {
+    workspace::show_message(rfd::MessageLevel::Error, "Error", &format!("Could not load {}: {e:#}", path.display()));
 }
