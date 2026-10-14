@@ -7,6 +7,7 @@ impl StudioApp {
     /// Render the tool selection strip. Must be shown after the sidebar so it sits directly to its right.
     /// Returns the panel's response so the viewport can be placed beside it.
     pub(super) fn show_toolbar(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        let controller = self.projects.get_mut(self.current).map(|project| &mut project.controller);
         egui::Panel::left("tools")
             .exact_size(21.0)
             .frame(
@@ -20,9 +21,10 @@ impl StudioApp {
 
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
-                    tool_button(ui, &mut self.controller, "Z", EditorToolKind::Zone);
-                    tool_button(ui, &mut self.controller, "P", EditorToolKind::Point);
-                    tool_button(ui, &mut self.controller, "A", EditorToolKind::Pen);
+                    let Some(controller) = controller else { return; };
+                    tool_button(ui, controller, "Z", EditorToolKind::Zone);
+                    tool_button(ui, controller, "P", EditorToolKind::Point);
+                    tool_button(ui, controller, "A", EditorToolKind::Pen);
                 });
             })
             .response

@@ -1,7 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::Context;
-use controller::{LoadedObjects, SavedScene};
+use controller::{Controller, LoadedObjects, SavedScene};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
@@ -64,7 +64,7 @@ pub(super) struct WorkspaceFile {
     scene: SavedScene,
 }
 
-/// Commands for the workspace file, from the File menu or a shortcut
+/// Commands for the workspace file and tabs, from the File menu, the tab bar or a shortcut
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub(super) enum WorkspaceCommand {
     New,
@@ -74,6 +74,9 @@ pub(super) enum WorkspaceCommand {
     Export,
     ExportAs,
     Close,
+    Quit,
+    NextTab,
+    PrevTab,
 }
 
 impl WorkspaceCommand {
@@ -87,84 +90,90 @@ impl WorkspaceCommand {
             Self::Export   => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E),
             Self::ExportAs => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::E),
             Self::Close    => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::W),
+            Self::Quit     => egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::W),
+            Self::NextTab  => egui::KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::Tab),
+            Self::PrevTab  => egui::KeyboardShortcut::new(egui::Modifiers::CTRL.plus(egui::Modifiers::SHIFT), egui::Key::Tab),
         }
     }
 
     /// If this command does anything when there is no open project
     pub(super) const fn works_without_project(self) -> bool {
-        matches!(self, Self::New | Self::Open)
+        matches!(self, Self::New | Self::Open | Self::Quit)
     }
 
     /// Every command, with the most specific shortcuts first so they are matched before ones they contain
-    pub(super) const ALL: [Self; 7] = [Self::SaveAs, Self::Close, Self::ExportAs, Self::Save, Self::Export, Self::Open, Self::New];
+    pub(super) const ALL: [Self; 10] = [
+        Self::SaveAs, Self::Close, Self::ExportAs, Self::PrevTab,
+        Self::Save, Self::Quit, Self::Export, Self::NextTab, Self::Open, Self::New,
+    ];
 }
 
 impl StudioApp {
     /// Run a workspace command, showing a dialog for anything that went wrong
     pub(super) fn run_workspace_command(&mut self, ctx: &egui::Context, command: WorkspaceCommand) {
-        if !command.works_without_project() && self.project.is_none() { return; }
+        if !command.works_without_project() && self.projects.is_empty() { return; }
         if self.new_project_dialog.is_some() || self.relink_dialog.is_some() { return; }
 
         match command {
-            WorkspaceCommand::New => {
-                if self.confirm_discard(ctx) {
-                    self.new_project_dialog = Some(Default::default());
-                }
-            },
+            WorkspaceCommand::New => self.new_project_dialog = Some(Default::default()),
             WorkspaceCommand::Close => {
-                if self.confirm_discard(ctx) {
-                    self.set_project(ctx, None);
+                if self.confirm_discard(ctx, self.current) {
+                    self.close_project(ctx, self.current);
                 }
             },
             WorkspaceCommand::Open => {
-                if self.confirm_discard(ctx)
-                    && let Some(path) = self.workspace_file_dialog().pick_file()
-                {
-                    let result = self.open_workspace(ctx, &path).with_context(|| format!("Could not open {}", path.display()));
-                    show_result(result);
+                if let Some(path) = self.workspace_file_dialog().pick_file() {
+                    self.open_recent(ctx, &path);
                 }
             },
-            WorkspaceCommand::Save => { self.save(ctx, false); },
-            WorkspaceCommand::SaveAs => { self.save(ctx, true); },
+            WorkspaceCommand::Save => { self.save(ctx, self.current, false); },
+            WorkspaceCommand::SaveAs => { self.save(ctx, self.current, true); },
             WorkspaceCommand::Export => self.export(false),
             WorkspaceCommand::ExportAs => self.export(true),
+            // Closing the window asks about every project with unsaved changes
+            WorkspaceCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            WorkspaceCommand::NextTab => self.cycle_tab(ctx, false),
+            WorkspaceCommand::PrevTab => self.cycle_tab(ctx, true),
         }
     }
 
-    /// Open a workspace file from the recent files list, showing a dialog for anything that went wrong
+    /// Open a workspace file in a new tab, or select its tab if it's already open. Shows a dialog for anything that went wrong.
     pub(super) fn open_recent(&mut self, ctx: &egui::Context, path: &Path) {
-        if !self.confirm_discard(ctx) { return; }
+        if let Some(index) = self.projects.iter().position(|project| project.saved && same_file(&project.path, path)) {
+            self.activate(ctx, index);
+            return;
+        }
         let result = self.open_workspace(ctx, path).with_context(|| format!("Could not open {}", path.display()));
         show_result(result);
     }
 
-    /// Save the open project, asking where if it has never been saved or `save_as` is set.
+    /// Save a project, asking where if it has never been saved or `save_as` is set.
     /// Shows a dialog for anything that went wrong. Returns true if the file was written.
-    fn save(&mut self, ctx: &egui::Context, save_as: bool) -> bool {
-        let Some(project) = &self.project else { return false; };
+    fn save(&mut self, ctx: &egui::Context, index: usize, save_as: bool) -> bool {
+        let Some(project) = self.projects.get(index) else { return false; };
         let path = if project.saved && !save_as {
             project.path.clone()
         } else {
-            match self.save_as_dialog().save_file() {
+            match self.save_as_dialog(index).save_file() {
                 Some(path) => path,
                 None => return false,
             }
         };
 
-        let result = self.save_workspace(&path).with_context(|| format!("Could not save {}", path.display()));
+        let result = self.save_workspace(index, &path).with_context(|| format!("Could not save {}", path.display()));
         let saved = result.is_ok();
         show_result(result);
         if saved {
-            self.controller.set_feedback(format!("Saved {}", file_name(&path)));
+            self.projects[index].controller.set_feedback(format!("Saved {}", file_name(&path)));
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
         saved
     }
 
-    /// Export the generated normal map to a PNG, asking where if it has never been exported or `export_as` is set.
+    /// Export the current project's normal map to a PNG, asking where if it has never been exported or `export_as` is set.
     /// The path is remembered for the next export. Shows a dialog if it couldn't be exported.
     fn export(&mut self, export_as: bool) {
-        let Some(project) = &self.project else { return; };
+        let Some(project) = self.project() else { return; };
         let path = match &project.export_path {
             Some(path) if !export_as => path.clone(),
             _ => match self.export_dialog().save_file() {
@@ -174,11 +183,9 @@ impl StudioApp {
         };
 
         match self.export_to(&path) {
-            Ok(()) => {
-                self.controller.set_feedback(format!("Exported {}", file_name(&path)));
-                if let Some(project) = &mut self.project {
-                    project.export_path = Some(path);
-                }
+            Ok(()) => if let Some(project) = self.project_mut() {
+                project.controller.set_feedback(format!("Exported {}", file_name(&path)));
+                project.export_path = Some(path);
             },
             Err(e) => show_message(rfd::MessageLevel::Error, "Error", &format!("Could not export {}: {e:#}", path.display())),
         }
@@ -187,7 +194,7 @@ impl StudioApp {
     /// Save dialog for exporting, starting at the last export, or suggesting a name next to the spritesheet
     fn export_dialog(&self) -> rfd::FileDialog {
         let dialog = rfd::FileDialog::new().add_filter("PNG files", &["png"]);
-        let Some(project) = &self.project else { return dialog; };
+        let Some(project) = self.project() else { return dialog; };
         let suggested = project.export_path.clone()
             .unwrap_or_else(|| file::generate_normal_map_filename(project.sprite.path()));
 
@@ -201,9 +208,10 @@ impl StudioApp {
         }
     }
 
-    /// Write the generated normal map to a PNG
+    /// Write the current project's normal map to a PNG
     fn export_to(&mut self, path: &Path) -> anyhow::Result<()> {
-        let (width, height, pixels) = self.controller.read_output(&self.render_state.device, &self.render_state.queue)?;
+        let Some(project) = self.projects.get_mut(self.current) else { anyhow::bail!("There is no open project to export."); };
+        let (width, height, pixels) = project.controller.read_output(&self.render_state.device, &self.render_state.queue)?;
 
         // Write to a temporary file first, so a failed write can't leave a broken image behind
         let mut temp_path = path.as_os_str().to_owned();
@@ -214,11 +222,11 @@ impl StudioApp {
         Ok(())
     }
 
-    /// Check it's OK to leave the open project. If it has unsaved changes, ask whether to save them first.
+    /// Check it's OK to close a project. If it has unsaved changes, ask whether to save them first.
     /// Returns false if the user cancelled, or chose to save and it wasn't saved.
-    pub(super) fn confirm_discard(&mut self, ctx: &egui::Context) -> bool {
-        if !self.has_unsaved_changes() { return true; }
-        let name = self.project.as_ref()
+    pub(super) fn confirm_discard(&mut self, ctx: &egui::Context, index: usize) -> bool {
+        if !self.has_unsaved_changes(index) { return true; }
+        let name = self.projects.get(index)
             .and_then(|project| project.path.file_name())
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
@@ -232,24 +240,25 @@ impl StudioApp {
 
         // Platforms report custom buttons by their label, or as the standard button in the same place
         match choice {
-            rfd::MessageDialogResult::Yes => self.save(ctx, false),
-            rfd::MessageDialogResult::Custom(label) if label == SAVE => self.save(ctx, false),
+            rfd::MessageDialogResult::Yes => self.save(ctx, index, false),
+            rfd::MessageDialogResult::Custom(label) if label == SAVE => self.save(ctx, index, false),
             rfd::MessageDialogResult::No => true,
             rfd::MessageDialogResult::Custom(label) if label == DONT_SAVE => true,
             _ => false,
         }
     }
 
-    /// If the open project has changes that aren't in its workspace file
-    pub(super) fn has_unsaved_changes(&self) -> bool {
-        let Some(project) = &self.project else { return false; };
-        self.workspace_file(&project.path).is_some_and(|file| file != project.clean)
+    /// If a project has changes that aren't in its workspace file. A project that has never been saved always has.
+    pub(super) fn has_unsaved_changes(&self, index: usize) -> bool {
+        let Some(project) = self.projects.get(index) else { return false; };
+        !project.saved || self.workspace_file(index, &project.path).is_some_and(|file| file != project.clean)
     }
 
-    /// Recheck if the open project has unsaved changes, and update the window title if that changed
+    /// Recheck if the current project has unsaved changes, and update the window title if that changed.
+    /// The other projects can't change while their tabs aren't selected.
     pub(super) fn update_dirty(&mut self, ctx: &egui::Context) {
-        let dirty = self.has_unsaved_changes();
-        if let Some(project) = &mut self.project
+        let dirty = self.has_unsaved_changes(self.current);
+        if let Some(project) = self.project_mut()
             && project.dirty != dirty
         {
             project.dirty = dirty;
@@ -257,17 +266,15 @@ impl StudioApp {
         }
     }
 
-    /// Title for the window, with the name of the workspace file if there is one, and * if it has unsaved changes
+    /// Title for the window, with the name of the current project's workspace file if there is one, and * if it has unsaved changes
     pub(super) fn window_title(&self) -> String {
-        let Some(project) = &self.project else { return APP_TITLE.to_owned(); };
-        let name = project.path.file_name().unwrap_or_default().to_string_lossy();
-        let dirty = if project.dirty { "*" } else { "" };
-        format!("{name}{dirty} - {APP_TITLE}")
+        let Some(project) = self.project() else { return APP_TITLE.to_owned(); };
+        format!("{} - {APP_TITLE}", tab_title(project))
     }
 
     /// File dialog for workspace files, starting in the current workspace's folder, or the most recent one's
     fn workspace_file_dialog(&self) -> rfd::FileDialog {
-        let current = self.project.as_ref().map(|project| project.path.as_path())
+        let current = self.project().map(|project| project.path.as_path())
             .or(self.recent.paths().first().map(PathBuf::as_path));
         let dialog = rfd::FileDialog::new().add_filter("Sprite Normal Studio workspace", &[EXTENSION]);
         match current.and_then(Path::parent).filter(|directory| directory.is_dir()) {
@@ -276,27 +283,32 @@ impl StudioApp {
         }
     }
 
-    /// Save dialog, suggesting the current workspace's name
-    fn save_as_dialog(&self) -> rfd::FileDialog {
-        let name = self.project.as_ref()
+    /// Save dialog for a project, suggesting its workspace's name and starting in its folder
+    fn save_as_dialog(&self, index: usize) -> rfd::FileDialog {
+        let project = self.projects.get(index);
+        let name = project
             .and_then(|project| project.path.file_stem())
             .map(|stem| format!("{}.{EXTENSION}", stem.to_string_lossy()));
         let dialog = self.workspace_file_dialog();
+        let dialog = match project.and_then(|project| project.path.parent()).filter(|directory| directory.is_dir()) {
+            Some(directory) => dialog.set_directory(directory),
+            None => dialog,
+        };
         match name {
             Some(name) => dialog.set_file_name(name),
             None => dialog,
         }
     }
 
-    /// The workspace file the open project would be saved as at a path, if there is a project
-    fn workspace_file(&self, path: &Path) -> Option<WorkspaceFile> {
-        let project = self.project.as_ref()?;
-        Some(build_workspace_file(&project.sprite, project.normal.as_ref(), project.export_path.as_deref(), self.controller.save_scene(), path))
+    /// The workspace file a project would be saved as at a path
+    fn workspace_file(&self, index: usize, path: &Path) -> Option<WorkspaceFile> {
+        let project = self.projects.get(index)?;
+        Some(build_workspace_file(&project.sprite, project.normal.as_ref(), project.export_path.as_deref(), project.controller.save_scene(), path))
     }
 
-    /// Save the workspace to a file and make it the current workspace file
-    fn save_workspace(&mut self, path: &Path) -> anyhow::Result<Option<String>> {
-        let Some(file) = self.workspace_file(path) else { anyhow::bail!("There is no open project to save."); };
+    /// Save a project to a file and make it the project's workspace file
+    fn save_workspace(&mut self, index: usize, path: &Path) -> anyhow::Result<Option<String>> {
+        let Some(file) = self.workspace_file(index, path) else { anyhow::bail!("There is no open project to save."); };
         let json = serde_json::to_string_pretty(&file)?;
 
         // Write to a temporary file first, so a failed write can't leave a broken workspace file behind
@@ -305,7 +317,7 @@ impl StudioApp {
         std::fs::write(&temp_path, json).context("Could not write the file")?;
         std::fs::rename(&temp_path, path).context("Could not replace the file")?;
 
-        if let Some(project) = &mut self.project {
+        if let Some(project) = self.projects.get_mut(index) {
             project.path = path.to_owned();
             project.saved = true;
             project.clean = file;
@@ -315,7 +327,7 @@ impl StudioApp {
         Ok(None)
     }
 
-    /// Open a workspace file and make it the current workspace file. Nothing changes if it can't be opened.
+    /// Open a workspace file in a new tab. Nothing changes if it can't be opened.
     /// If its spritesheet or normal map can't be loaded, the Missing Files dialog is opened to finish opening it instead.
     /// Returns a warning if it opened but something may be wrong.
     fn open_workspace(&mut self, ctx: &egui::Context, path: &Path) -> anyhow::Result<Option<String>> {
@@ -350,15 +362,16 @@ impl StudioApp {
         }
     }
 
-    /// Make a workspace file the current one, once its images are loaded.
+    /// Open a workspace file in a new tab, once its images are loaded.
     /// Returns a warning if the spritesheet's size changed since it was saved.
     pub(super) fn finish_open(&mut self, ctx: &egui::Context, pending: PendingOpen, sprite: SpriteFileSelection, normal: Option<SpriteFileSelection>) -> Option<String> {
         let size = sprite.size();
         let saved_size = pending.file.sprite_size;
 
-        // Loading the scene resets the light, then setting the project centers it on the spritesheet.
+        // Loading the scene resets the light, then adding the project centers it on the spritesheet.
         // The file as it was read is what's on disk, so images picked somewhere else count as unsaved changes.
-        self.controller.load_scene(pending.objects);
+        let mut controller = Controller::new(&self.render_state.device);
+        controller.load_scene(pending.objects);
         let project = Project {
             sprite,
             normal,
@@ -367,8 +380,9 @@ impl StudioApp {
             export_path: pending.export_path,
             clean: pending.file,
             dirty: false,
+            controller,
         };
-        self.set_project(ctx, Some(project));
+        self.add_project(ctx, project);
         self.recent.mark_used(&pending.path);
 
         (size != saved_size).then(|| format!(
@@ -376,6 +390,18 @@ impl StudioApp {
             size.0, size.1, saved_size.0, saved_size.1,
         ))
     }
+}
+
+/// The name of a project's workspace file, with * if it has unsaved changes
+pub(super) fn tab_title(project: &Project) -> String {
+    let name = project.path.file_name().unwrap_or_default().to_string_lossy();
+    let dirty = if project.dirty { "*" } else { "" };
+    format!("{name}{dirty}")
+}
+
+/// If two paths are the same file, even if they are written differently
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
 }
 
 /// A workspace file that has been read, but whose images haven't all been loaded yet

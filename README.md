@@ -82,8 +82,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 *10/12/26 - present*
 
 ```
-[x] Undo/redo with history. Use a stack like Unity's Undo class. Look for an
-    external crate first.
+[x] Undo/redo with history. Use a stack like Unity's Undo class.
 [ ] Copy and paste selected zones.
 [ ] Rotate/scale selection
 [ ] Holding shift/alt/etc while rotate/scale to snap/keep ratio/etc. All the things.
@@ -92,7 +91,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Loading workspace files
 [x] Exporting normal map (Ctrl+E exports to path with confirmation if it
     would overwrite. Ctrl+Shift+E opens dialog.)
-[ ] Having multiple workspace files open
+[x] Having multiple workspace files open
 [ ] Copy/pasting zones between workspace files
 ```
 

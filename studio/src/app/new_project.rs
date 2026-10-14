@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use controller::Controller;
 use eframe::egui;
 
 use crate::app::file::{self, loader::SpriteFileSelection};
@@ -119,7 +120,7 @@ impl StudioApp {
         }
     }
 
-    /// Create the project from the New Project dialog. It isn't saved until the user saves it.
+    /// Create the project from the New Project dialog in a new tab. It isn't saved until the user saves it.
     fn create_project(&mut self, ctx: &egui::Context) {
         let Some(dialog) = &mut self.new_project_dialog else { return; };
         let name = dialog.name.trim();
@@ -138,8 +139,10 @@ impl StudioApp {
         let folder = sprite.path().parent().unwrap_or(Path::new(""));
         let path = folder.join(format!("{}.{EXTENSION}", dialog.name.trim()));
 
-        self.controller.new_scene();
-        let clean = build_workspace_file(&sprite, normal.as_ref(), None, self.controller.save_scene(), &path);
-        self.set_project(ctx, Some(Project { sprite, normal, path, saved: false, export_path: None, clean, dirty: false }));
+        let mut controller = Controller::new(&self.render_state.device);
+        controller.new_scene();
+        let clean = build_workspace_file(&sprite, normal.as_ref(), None, controller.save_scene(), &path);
+        self.add_project(ctx, Project { sprite, normal, path, saved: false, export_path: None, clean, dirty: true, controller });
+
     }
 }
