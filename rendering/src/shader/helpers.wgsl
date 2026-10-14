@@ -126,6 +126,34 @@ fn draw_box(
     return base_color;
 }
 
+// Rotate a vector by a rotation given as its cosine and sine
+fn rotate(v: vec2<f32>, rotation: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(v.x * rotation.x - v.y * rotation.y, v.x * rotation.y + v.y * rotation.x);
+}
+
+// Rotate a vector backwards by a rotation given as its cosine and sine
+fn unrotate(v: vec2<f32>, rotation: vec2<f32>) -> vec2<f32> {
+    return rotate(v, vec2<f32>(rotation.x, -rotation.y));
+}
+
+// Function to fill a rotated box with a feathered edge
+fn draw_rotated_box(
+    base_color: vec3<f32>,   // RGB base canvas color.
+    pos: vec2<f32>,          // Position of this viewport pixel.
+    color: vec4<f32>,        // RGBA fill color for the box.
+    center: vec2<f32>,       // Center of the box.
+    half_size: f32,          // Half the uncorrected width and height of the box.
+    rotation: vec2<f32>,     // Cosine and sine of the rotation of the box around its center.
+) -> vec3<f32> {
+    // Distance outside the box, in its own space
+    let local = unrotate(pos - center, rotation);
+    let distance = max(abs(local.x), abs(local.y)) - half_size * params.inv_scale;
+    if (distance > FEATHER * params.inv_scale) { return base_color; }
+
+    let feathered = feather_color(color, max(distance, 0.0), 0.0);
+    return mix(base_color, feathered.rgb, feathered.a);
+}
+
 // Function to draw a line
 fn draw_line(
     base_color: vec3<f32>,   // RGB base canvas color.

@@ -79,13 +79,13 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 
 ### Phase IV - Editor Features
-*10/12/26 - present*
+*10/12/26 - 10/14/26*
 
 ```
 [x] Undo/redo with history. Use a stack like Unity's Undo class.
 [x] Copy and paste selected zones.
-[ ] Rotate/scale selection
-[ ] Holding shift/alt/etc while rotate/scale to snap/keep ratio/etc. All the things.
+[x] Rotate/scale selection
+[x] Holding shift/alt/etc while rotate/scale to snap/keep ratio/etc. All the things.
 [x] Saving workspace files (with path to sprite and normal map, all shapes,
     zones, and lights, but not camera)
 [x] Loading workspace files
@@ -154,56 +154,3 @@ Will add steps to this section as I think of them.
 [ ] Marketing
 [ ] Launch
 ```
-
-## Keybinds Reference
-
-This section will be added to as I add keybinds (and remember).
-
-### Workspace files
-
-> `Ctrl + O` - Open a workspace file.  
-> `Ctrl + S` - Save the workspace file.  
-> `Ctrl + Shift + S` - Save the workspace to a new file.  
-
-### Select tools
-
-> `V` - Zone selection tool  
-> `Shift + V` - Anchor point selection tool  
-> `P` - Pen tool  
-
-### Camera
-
-> `WASD` - Pan camera. Hold shift to pan more quickly.  
-> `Middle Click + Drag` - Pan camera.
-> `Home` - Recenter camera.  
-> `Shift + Scroll` - Zoom in or out.  
-> `Ctrl + Plus` - Zoom in.  
-> `Ctrl + Minus` - Zoom out.  
-
-### Objects
-
-> `Left Click + Drag` - Drag light or selected zones/control points/shapes.
-> `PageUp/PageDown` - Adjust light height while dragging it.  
-> `Escape` - Cancel zone path or shape creation.  
-> `Delete` - Delete selected zone path/vertex or shape.  
-> `Shift + Z` - Set the selected zones' normal vectors to straight out.  
-> `Ctrl + K` - Separate the selected zones or points from neighbors.  
-> `Ctrl + B` - Toggle the selected point between linear and continuous.  
-> `Ctrl + M` - Merge the selected points into one point.  
-> `I` - Toggle if branching zones inherit the normal of the zone they branch from in the pen tool.  
-> `C` - Toggle if the pen tool stays active after finishing a zone.
-
-### History
-
-> `Ctrl + Z` - Undo.
-> `Ctrl + Shift + Z` - Redo.  
-
-### Rendering
-
-> `L` - Toggle lighting. If normal maps are on and light is off, the normal map itself is visible.  
-> `Shift + L` - Toggle shading w/ normal map. If disabled with lighting on, shades flat.  
-> `Ctrl + L` - Toggle both lighting and normal map. Allows quick swap between full shaded and flat unshaded sprites.
-
-### Overlay
-
-> `O` - Toggle entire overlay.  

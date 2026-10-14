@@ -2,7 +2,7 @@ use studio_math::Vec2;
 use studio_math::bounds::bounds_correct;
 use wgpu::{Device, util::DeviceExt};
 
-use crate::{interaction::{camera::Camera, light::Light, overlay::OverlayState, tools::EditorTool}};
+use crate::{interaction::{camera::Camera, light::Light, overlay::OverlayState, tools::{EditorTool, TransformBox}}};
 
 /// Formats data used for the actual rendering process.
 #[repr(C)] // Needed for Rust to pass to shaders correctly
@@ -46,8 +46,17 @@ pub struct ViewportDataUniform {
     // Set by the renderer, since the controller doesn't know about the display.
     pub pixels_per_point: f32,
 
-    // Keeps the struct size a multiple of 16 bytes
-    _padding: [f32; 3],
+    // Aligns the transform box to 8 bytes, like the shader expects
+    _padding: f32,
+
+    // Center of the transform box around the selection. Only drawn if overlay flag 08 is set.
+    pub transform_center: Vec2,
+
+    // Half the width and height of the transform box, before it is rotated
+    pub transform_half_size: Vec2,
+
+    // Cosine and sine of the rotation of the transform box
+    pub transform_rotation: Vec2,
 }
 
 impl ViewportDataUniform {
@@ -58,6 +67,7 @@ impl ViewportDataUniform {
         cursor: Vec2,
         (zone_count, point_count): (usize, usize),
         tool: &dyn EditorTool,
+        transform_box: Option<TransformBox>,
     ) -> Self {
         // Calculate selection box
         let (selection_box_start, selection_box_end) = {
@@ -66,10 +76,17 @@ impl ViewportDataUniform {
             } else { (Vec2::ZERO, Vec2::ZERO) }
         };
 
+        // Draw the transform box along with the zone paths
+        let mut overlay_flags = overlay.get_flags(tool);
+        let transform_box = transform_box.filter(|_| overlay_flags & (1 << 4) != 0);
+        if transform_box.is_some() { overlay_flags |= 1 << 8; }
+        let TransformBox { center, half_size, angle } = transform_box.unwrap_or(TransformBox { center: Vec2::ZERO, half_size: Vec2::ZERO, angle: 0.0 });
+        let (sin, cos) = angle.sin_cos();
+
         Self {
             camera_pos: camera.position,
             inv_scale: camera.inv_scale(),
-            overlay_flags: overlay.get_flags(tool),
+            overlay_flags,
             light_pos: light.position(),
             light_height: light.height(),
             light_color: light.packed_color(),
@@ -79,7 +96,10 @@ impl ViewportDataUniform {
             selection_box_start,
             selection_box_end,
             pixels_per_point: 1.0,
-            _padding: [0.0; 3],
+            _padding: 0.0,
+            transform_center: center,
+            transform_half_size: half_size,
+            transform_rotation: Vec2::new(cos, sin),
         }
     }
 
@@ -112,7 +132,7 @@ mod tests {
         let tool = EditorToolZone::init();
         let overlay = OverlayState::default();
 
-        let uniform = ViewportDataUniform::new(&Light::default(), &camera, &overlay, Vec2::new(5.0, 6.0), (3, 12), tool.as_ref());
+        let uniform = ViewportDataUniform::new(&Light::default(), &camera, &overlay, Vec2::new(5.0, 6.0), (3, 12), tool.as_ref(), None);
         assert_eq!(uniform.camera_pos, Vec2::new(10.0, 20.0));
         assert_eq!(uniform.inv_scale, 0.5);
         assert_eq!(uniform.overlay_flags, overlay.get_flags(tool.as_ref()));
@@ -124,6 +144,26 @@ mod tests {
         assert_eq!(uniform.selection_box_start, Vec2::new(0.0, 0.0));
         assert_eq!(uniform.selection_box_end, Vec2::new(0.0, 0.0));
         assert_eq!(uniform.pixels_per_point, 1.0);
+        assert_eq!(uniform.overlay_flags & (1 << 8), 0);
+    }
+
+    /// The transform box is passed along and drawn, but only if the overlay is on
+    #[test]
+    fn transform_box() {
+        let camera = Camera::default();
+        let tool = EditorToolZone::init();
+        let transform_box = TransformBox { center: Vec2::new(5.0, 6.0), half_size: Vec2::new(2.0, 3.0), angle: std::f32::consts::FRAC_PI_2 };
+
+        let mut overlay = OverlayState::default();
+        let uniform = ViewportDataUniform::new(&Light::default(), &camera, &overlay, Vec2::ZERO, (0, 0), tool.as_ref(), Some(transform_box));
+        assert_ne!(uniform.overlay_flags & (1 << 8), 0);
+        assert_eq!(uniform.transform_center, Vec2::new(5.0, 6.0));
+        assert_eq!(uniform.transform_half_size, Vec2::new(2.0, 3.0));
+        assert!(uniform.transform_rotation.distance(Vec2::new(0.0, 1.0)) < 1e-6);
+
+        overlay.toggle_overlay();
+        let uniform = ViewportDataUniform::new(&Light::default(), &camera, &overlay, Vec2::ZERO, (0, 0), tool.as_ref(), Some(transform_box));
+        assert_eq!(uniform.overlay_flags & (1 << 8), 0);
     }
 
     /// Bytes should cover the whole struct

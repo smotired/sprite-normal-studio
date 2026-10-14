@@ -3,7 +3,17 @@ use crate::InputModifiers;
 use crate::interaction::tools::ControllerStateInput;
 use crate::objects::ControlPointMode;
 
-const CLICK_TOLERANCE: f32 = 6.0; // since of control point boxes in the overlay plus 3 pixels
+pub const CLICK_TOLERANCE: f32 = 6.0; // since of control point boxes in the overlay plus 3 pixels
+
+/// Shortest edge of a transform box, in screen pixels, that has a midpoint handle.
+/// Shorter edges would have the midpoint handle overlapping the corners. Must match TRANSFORM_MIN_MIDPOINT_EDGE in overlay.wgsl.
+pub const MIN_MIDPOINT_EDGE: f32 = 4.0 * CLICK_TOLERANCE;
+
+/// How far outside the corners of a transform box, in screen pixels, dragging rotates instead of scaling
+pub const ROTATE_TOLERANCE: f32 = 15.0;
+
+/// Increment in radians that rotation snaps to while holding ctrl
+pub const ROTATE_SNAP: f32 = 5.0 * std::f32::consts::PI / 180.0;
 
 /// Size in pixels of the grid that dragging snaps to while holding ctrl.
 /// This will be replaced with a user setting in the future.

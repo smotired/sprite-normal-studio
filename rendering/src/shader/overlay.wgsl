@@ -231,6 +231,55 @@ fn overlay_zone_paths(
 }
 
 /***********************************/
+/*      TRANSFORM BOX OVERLAY      */
+/***********************************/
+
+// Shortest edge of the transform box, in screen points, that has a midpoint handle. Must match MIN_MIDPOINT_EDGE in the zone tool.
+const TRANSFORM_MIN_MIDPOINT_EDGE = 24.0;
+
+fn overlay_transform_box(
+    color: vec3<f32>,   // Base color below this part of the overlay
+    pos: vec2<f32>,     // World-space position of this pixel
+) -> vec3<f32> {        // Returns new color after adding overlay
+    var col = color;
+    let box_color = vec4<f32>(1, 1, 1, 1);
+    let center = params.transform_center;
+    let half = params.transform_half_size;
+    let rotation = params.transform_rotation;
+
+    // Skip pixels nowhere near the box or its handles
+    let margin = (CONTROL_POINT_HALF_WIDTH + FEATHER) * params.inv_scale * 1.5;
+    let local = unrotate(pos - center, rotation);
+    if (abs(local.x) > half.x + margin || abs(local.y) > half.y + margin) {
+        return col;
+    }
+
+    // Corners, going around the box
+    var corners = array<vec2<f32>, 4>(
+        center + rotate(vec2<f32>(-half.x, -half.y), rotation),
+        center + rotate(vec2<f32>( half.x, -half.y), rotation),
+        center + rotate(vec2<f32>( half.x,  half.y), rotation),
+        center + rotate(vec2<f32>(-half.x,  half.y), rotation),
+    );
+
+    // Edges
+    for (var i = 0u; i < 4u; i += 1u) {
+        col = draw_line(col, pos, box_color, corners[i], corners[(i + 1u) % 4u], PATH_HALF_WIDTH);
+    }
+
+    // Handles at each corner, and at the midpoint of each edge long enough on screen to fit one between the corners
+    for (var i = 0u; i < 4u; i += 1u) {
+        let next = corners[(i + 1u) % 4u];
+        col = draw_rotated_box(col, pos, box_color, corners[i], CONTROL_POINT_HALF_WIDTH, rotation);
+        if (length(next - corners[i]) >= TRANSFORM_MIN_MIDPOINT_EDGE * params.inv_scale) {
+            col = draw_rotated_box(col, pos, box_color, (corners[i] + next) * 0.5, CONTROL_POINT_HALF_WIDTH, rotation);
+        }
+    }
+
+    return col;
+}
+
+/***********************************/
 /*      MAIN OVERLAY METHOD        */
 /***********************************/
 
@@ -248,6 +297,11 @@ fn overlay_color(
     // Zone paths/points if paths are enabled
     if (flag(4)) {
         color = overlay_zone_paths(color, pos);
+    }
+
+    // Transform box around the selection, below the light
+    if (flag(8)) {
+        color = overlay_transform_box(color, pos);
     }
 
     // Lights
