@@ -1,7 +1,7 @@
 pub mod loader;
 
 use std::path::{Path, PathBuf};
-use eframe::egui::{Align, Button, Layout, Response, RichText, Ui};
+use eframe::egui::{Align, Button, CursorIcon, Id, Layout, Rect, Response, RichText, Sense, Stroke, Ui, Vec2};
 
 use loader::{SpriteFileSelection, SpriteFileSelectionDisplay};
 
@@ -80,6 +80,37 @@ pub fn right_aligned_button(ui: &mut Ui, text: &str) -> Response {
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.button(text)).inner
     }).inner
+}
+
+/// A small button with a cross, drawn instead of using a glyph so it doesn't depend on the font
+pub fn close_button(ui: &mut Ui) -> Response {
+    let size = Vec2::splat(ui.spacing().interact_size.y);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let response = response.on_hover_cursor(CursorIcon::PointingHand);
+    paint_cross(ui, rect, &response);
+    response
+}
+
+/// A cross button in a rect that has already been laid out. It is only drawn if `visible`, but can always be clicked.
+pub fn close_button_at(ui: &mut Ui, rect: Rect, id: Id, visible: bool) -> Response {
+    let response = ui.interact(rect, id, Sense::click()).on_hover_cursor(CursorIcon::PointingHand);
+    if visible {
+        paint_cross(ui, rect, &response);
+    }
+    response
+}
+
+/// Draw a cross button, with a background while it is hovered
+fn paint_cross(ui: &Ui, rect: Rect, response: &Response) {
+    if !ui.is_rect_visible(rect) { return; }
+    let visuals = ui.style().interact(response);
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect, visuals.corner_radius, visuals.bg_fill);
+    }
+    let cross = rect.shrink(rect.width() * 0.3);
+    let stroke = Stroke::new(1.5, visuals.fg_stroke.color);
+    ui.painter().line_segment([cross.left_top(), cross.right_bottom()], stroke);
+    ui.painter().line_segment([cross.right_top(), cross.left_bottom()], stroke);
 }
 
 /// Generate a normal map filename by appending _normal to the file name before the PNG

@@ -1,6 +1,7 @@
 use eframe::egui;
 
-use crate::app::StudioApp;
+use crate::app::{file, StudioApp};
+
 
 /// Widest the welcome area gets
 const WIDTH: f32 = 420.0;
@@ -62,7 +63,7 @@ impl StudioApp {
 
                     // The folder fills the rest of the row, cut off if it's too long
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if remove_button(ui).on_hover_text("Remove from recent projects").clicked() {
+                        if file::close_button(ui).on_hover_text("Remove from recent projects").clicked() {
                             remove = Some(path.clone());
                         }
                         let folder = path.parent().map(|folder| folder.display().to_string()).unwrap_or_default();
@@ -79,23 +80,4 @@ impl StudioApp {
             self.open_recent(&ui.ctx().clone(), &path);
         }
     }
-}
-
-/// A small button with a cross, drawn instead of using a glyph so it doesn't depend on the font
-fn remove_button(ui: &mut egui::Ui) -> egui::Response {
-    let size = egui::Vec2::splat(ui.spacing().interact_size.y);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-
-    if ui.is_rect_visible(rect) {
-        let visuals = ui.style().interact(&response);
-        if response.hovered() || response.has_focus() {
-            ui.painter().rect_filled(rect, visuals.corner_radius, visuals.bg_fill);
-        }
-        let cross = rect.shrink(rect.width() * 0.3);
-        let stroke = egui::Stroke::new(1.5, visuals.fg_stroke.color);
-        ui.painter().line_segment([cross.left_top(), cross.right_bottom()], stroke);
-        ui.painter().line_segment([cross.right_top(), cross.left_bottom()], stroke);
-    }
-    response
 }

@@ -44,11 +44,14 @@ impl StudioApp {
     /// Returns the response for the editor image itself.
     pub(super) fn show_editor(&mut self, ui: &mut Ui) -> Response {
         CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
+            let Some(project) = self.projects.get_mut(self.current) else {
+                return ui.allocate_response(ui.available_size(), Sense::hover());
+            };
             ui.add(Editor::new(
                 &mut self.renderer,
                 &self.render_state,
                 self.viewport_texture_id,
-                &mut self.controller,
+                &mut project.controller,
             ))
         }).inner
     }

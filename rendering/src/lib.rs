@@ -185,6 +185,13 @@ impl Renderer {
         &self.texture.view
     }
 
+    /// Draw a different controller's objects. Always rebinds, since its buffers may be the same size as the old ones.
+    pub fn set_objects(&mut self, device: &Device, selection_buffer: Buffer, object_buffers: BufferStates) {
+        let (zones_buffer, points_buffer, siblings_buffer) = object_buffers;
+        self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, selection_buffer, zones_buffer.0, points_buffer.0, siblings_buffer.0);
+        self.control.object_buffer_sizes = (zones_buffer.1, points_buffer.1, siblings_buffer.1);
+    }
+
     /// Set the input textures for the viewport
     pub fn set_inputs(&mut self, device: &Device, sprite: &Texture, normal: &Texture)
     {

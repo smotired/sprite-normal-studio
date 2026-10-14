@@ -55,7 +55,9 @@ impl StudioApp {
                     .show(ui, |ui| {
                         egui::Frame::new().inner_margin(margin).show(ui, |ui| {
                             // Options for the selected tool
-                            self.tool_sidebars.get(self.controller.selected_tool()).ui(ui, &mut self.controller);
+                            if let Some(project) = self.projects.get_mut(self.current) {
+                                self.tool_sidebars.get(project.controller.selected_tool()).ui(ui, &mut project.controller);
+                            }
                         });
                     });
             });
@@ -63,7 +65,7 @@ impl StudioApp {
 
     /// Pick a new spritesheet for the open project. Shows an error if the picked file can't be loaded.
     pub(super) fn load_spritesheet(&mut self) {
-        let Some(project) = &mut self.project else { return; };
+        let Some(project) = self.projects.get_mut(self.current) else { return; };
         let Some(path) = file::pick_png(Some(project.sprite.path())) else { return; };
 
         match project.sprite.try_select(path.clone(), &self.render_state) {
@@ -74,7 +76,7 @@ impl StudioApp {
 
     /// Pick a new base normal map for the open project. Shows an error if the picked file can't be loaded.
     pub(super) fn load_normal_map(&mut self) {
-        let Some(project) = &mut self.project else { return; };
+        let Some(project) = self.projects.get_mut(self.current) else { return; };
         let current = project.normal.as_ref().map_or(project.sprite.path(), |normal| normal.path());
         let Some(path) = file::pick_png(Some(current)) else { return; };
 
@@ -91,11 +93,14 @@ impl StudioApp {
 
     /// Stop using a base normal map for the open project, so the normal map starts flat
     pub(super) fn reset_base_normals(&mut self) {
-        let Some(project) = &mut self.project else { return; };
+        let Some(project) = self.projects.get_mut(self.current) else { return; };
         let Some(normal) = project.normal.take() else { return; };
         self.retired_selections.push(normal);
         self.update_input_textures();
-        self.controller.set_feedback("Reset base normals to a flat normal map");
+        if let Some(project) = self.project_mut() {
+            project.controller.set_feedback("Reset base normals to a flat normal map");
+        }
+
     }
 }
 

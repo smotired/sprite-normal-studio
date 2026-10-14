@@ -8,11 +8,13 @@ impl StudioApp {
     /// Shows a checkmark, with feedback text if there is any, or the error from the latest tool action if it failed.
     /// Clicking text opens the full text, in case it was truncated.
     pub(super) fn show_status_bar(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        let status = self.project().map(|project| project.controller.status().clone()).unwrap_or_default();
+        let status = &status;
         let response = egui::Panel::bottom("status")
             .resizable(false)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    match self.controller.status() {
+                    match status {
                         Status::Ok => {
                             ui.label(egui::RichText::new("✔").color(egui::Color32::GREEN));
                         },
@@ -33,7 +35,7 @@ impl StudioApp {
             .response;
 
         // Open the full text when the bar is clicked
-        if *self.controller.status() != Status::Ok {
+        if *status != Status::Ok {
             let response = response.interact(egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
             if response.clicked() {
                 self.show_status_dialog = true;
@@ -46,7 +48,8 @@ impl StudioApp {
     /// Render the dialog with the full status text, if it is open
     pub(super) fn show_status_dialog(&mut self, ui: &mut egui::Ui) {
         if !self.show_status_dialog { return; }
-        let (heading, text) = match self.controller.status() {
+        let Some(project) = self.projects.get(self.current) else { return; };
+        let (heading, text) = match project.controller.status() {
             Status::Ok => {
                 self.show_status_dialog = false;
                 return;

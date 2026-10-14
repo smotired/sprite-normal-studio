@@ -37,7 +37,7 @@ impl StudioApp {
     /// Returns the workspace command that was clicked, if any. Everything else clicked is run here.
     pub(super) fn show_menu_bar(&mut self, ui: &mut egui::Ui) -> Option<WorkspaceCommand> {
         let mut clicked = None;
-        let has_project = self.project.is_some();
+        let has_project = !self.projects.is_empty();
         egui::Panel::top("menu").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| self.file_menu(ui, &mut clicked));
@@ -55,14 +55,16 @@ impl StudioApp {
             MenuAction::LoadSpritesheet => self.load_spritesheet(),
             MenuAction::LoadNormalMap => self.load_normal_map(),
             MenuAction::ResetBaseNormals => self.reset_base_normals(),
-            MenuAction::Controller(action) => self.controller.handle_action(action),
+            MenuAction::Controller(action) => if let Some(project) = self.project_mut() {
+                project.controller.handle_action(action);
+            },
         }
         None
     }
 
     /// File menu: the workspace file, and the images it uses
     fn file_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
-        let has_project = self.project.is_some();
+        let has_project = !self.projects.is_empty();
         command_button(ui, "New…", WorkspaceCommand::New, has_project, clicked);
         command_button(ui, "Open…", WorkspaceCommand::Open, has_project, clicked);
 
@@ -93,7 +95,7 @@ impl StudioApp {
         if menu_item(ui, "Load Base Normal Map…", None, has_project, None) {
             *clicked = Some(MenuAction::LoadNormalMap);
         }
-        let has_base_normals = self.project.as_ref().is_some_and(|project| project.normal.is_some());
+        let has_base_normals = self.project().is_some_and(|project| project.normal.is_some());
         if menu_item(ui, "Reset Base Normals", None, has_base_normals, None) {
             *clicked = Some(MenuAction::ResetBaseNormals);
         }
@@ -101,7 +103,8 @@ impl StudioApp {
 
     /// Edit menu: the selection, and undo history
     fn edit_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
-        let controller = &self.controller;
+        let Some(project) = self.project() else { return; };
+        let controller = &project.controller;
         let selecting_tool = matches!(controller.selected_tool(), EditorToolKind::Zone | EditorToolKind::Point);
 
         let items = [
@@ -119,7 +122,8 @@ impl StudioApp {
 
     /// View menu: the camera, and what is drawn. Every item leaves room for a checkmark so the shortcuts line up.
     fn view_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
-        let controller = &self.controller;
+        let Some(project) = self.project() else { return; };
+        let controller = &project.controller;
         for (label, shortcut, action) in [
             ("Zoom In", ZOOM_IN, Action::CameraScale(1, None)),
             ("Zoom Out", ZOOM_OUT, Action::CameraScale(-1, None)),
@@ -151,7 +155,9 @@ impl StudioApp {
 
     /// Path menu: changes to the selected zones or points. Each item is only enabled if it would do something.
     fn path_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
-        let controller = &self.controller;
+        let Some(project) = self.project() else { return; };
+        let controller = &project.controller;
+
         let tool = controller.selected_tool();
         let zones_selected = tool == EditorToolKind::Zone && !controller.selected_points().is_empty();
         let in_point_tool = tool == EditorToolKind::Point;
