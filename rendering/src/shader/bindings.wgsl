@@ -30,7 +30,7 @@ struct Params {
     // 05: If the currently selected zone path should have its points drawn
     // 06: If a path is being created. It is always the last zone, and should not be closed.
     // 07: If the latest point of the path being created is its first point, so the ghost path closes to it
-    // 08: 
+    // 08: If the transform box around the selection should be drawn
     // 09: 
     // 10: 
     // 11: 
@@ -80,6 +80,15 @@ struct Params {
 
     // Physical pixels per screen point. The output texture is in physical pixels, so this converts its pixels to points.
     pixels_per_point: f32,
+
+    // Center of the transform box around the selection. Only drawn if flag 08 is set.
+    transform_center: vec2<f32>,
+
+    // Half the width and height of the transform box, before it is rotated
+    transform_half_size: vec2<f32>,
+
+    // Cosine and sine of the rotation of the transform box
+    transform_rotation: vec2<f32>,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 

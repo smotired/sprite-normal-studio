@@ -1,5 +1,6 @@
 use anyhow::Ok;
 use studio_math::Vec2;
+use studio_math::transform::Affine2;
 
 use super::{ControlPoint, ControlPointMode, ControlPointHandleSyncMode, SiblingsList};
 
@@ -12,6 +13,14 @@ impl ControlPoint {
     /// Add a delta to the position of a control point. Updates its siblings as well.
     pub fn add_position_delta(point_id: u16, delta: Vec2, points: &mut Vec<ControlPoint>, siblings: &SiblingsList) -> anyhow::Result<()> {
         Self::traverse_siblings_mut(point_id, points, siblings, |point, _| { point.position += delta; })
+    }
+
+    /// Set the position and handles of this point to those of an original point, transformed.
+    /// Doesn't update siblings, so every sibling must be transformed from its own original as well.
+    pub fn set_transformed(&mut self, original: &ControlPoint, transform: &Affine2) {
+        self.position = transform.point(original.position);
+        self.left_handle = transform.vector(original.left_handle);
+        self.right_handle = transform.vector(original.right_handle);
     }
 
     /// Push the root's stored handle value to every handle (on its siblings) that follows it.

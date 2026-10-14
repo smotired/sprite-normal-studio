@@ -1,9 +1,10 @@
 use studio_math::Vec2;
+use studio_math::transform::Affine2;
 
-use crate::{InputModifiers, SavedObjects};
-use crate::objects::merge_bounds;
+use crate::{Bounds, InputModifiers, ObjectBuffers, SavedObjects};
+use crate::objects::{merge_bounds, PointsSnapshot};
 
-use super::{EditorTool, EditorToolKind, ControllerStateInput, PastePlacement, SelectionType, SpecialAction, utils};
+use super::{EditorTool, EditorToolKind, ControllerStateInput, PastePlacement, SelectionType, SpecialAction, TransformBox, utils};
 use super::result::{ToolResult, DefaultResults};
 
 /// The Zone tool allows mananging entire zones at once.
@@ -28,6 +29,22 @@ use super::result::{ToolResult, DefaultResults};
 /// Dragging a selection box:
 /// Uses the same selection rules as above, applied against the selection from before the drag started.
 /// The result is tentative until the drag is released, and can be cancelled.
+///
+/// Transforming selected zones:
+/// The selected zones have a box around their control points, with a handle at each corner and edge midpoint.
+/// Dragging a handle scales the zones, keeping the opposite side or corner in place.
+/// Dragging just outside a corner rotates the zones around the center of the box.
+/// Edges too short on screen for a midpoint handle to fit between the corners don't have one.
+/// These take priority over dragging zones or a selection box. Clicking a handle does nothing, but clicking outside a corner selects as usual.
+/// The box isn't shown or used while dragging out a selection box.
+///
+/// While scaling:
+/// SHIFT: scale uniformly, to the largest size that fits where the handle was dragged
+/// ALT: keep the center in place, moving the opposite side or corner instead
+/// CTRL: snap the dragged handle to the grid
+///
+/// While rotating:
+/// CTRL: snap to increments of utils::ROTATE_SNAP
 #[derive(Default, Clone)]
 pub struct EditorToolZone {
     /// The zone that is selected.
@@ -51,6 +68,96 @@ pub struct EditorToolZone {
 
     /// The end point for our selection box if we are instead dragging out a box of zones
     selection_box_end: Option<Vec2>,
+
+    /// The transform in progress if we are instead dragging the transform box
+    transform: Option<TransformDrag>,
+}
+
+/// The part of the transform box that was grabbed
+#[derive(Copy, Clone, PartialEq, Debug)]
+enum TransformHandle {
+    /// Scale from a handle. Each axis is -1 for the min side, 1 for the max side, or 0 for the middle.
+    Scale(i8, i8),
+
+    /// Rotate around the center from outside a corner
+    Rotate,
+}
+
+/// A drag on the transform box
+#[derive(Clone)]
+struct TransformDrag {
+    /// What was grabbed
+    handle: TransformHandle,
+
+    /// The transform box when the drag started
+    bounds: Bounds,
+
+    /// The mouse position where the drag started
+    origin: Vec2,
+
+    /// The current rotation in radians, if rotating
+    angle: f32,
+
+    /// The points being transformed, from before the drag
+    snapshot: PointsSnapshot,
+}
+
+impl TransformDrag {
+    /// Get the transform for the mouse being dragged to a position, from where the points were before the drag
+    fn update(&mut self, pos: Vec2, modifiers: InputModifiers) -> Affine2 {
+        let (min, max) = self.bounds;
+        let center = (min + max) * 0.5;
+        let half = (max - min) * 0.5;
+
+        match self.handle {
+            TransformHandle::Rotate => {
+                let angle_of = |pos: Vec2| (pos.y - center.y).atan2(pos.x - center.x);
+                let mut angle = angle_of(pos) - angle_of(self.origin);
+                if modifiers.ctrl { angle = (angle / utils::ROTATE_SNAP).round() * utils::ROTATE_SNAP; }
+                self.angle = angle;
+                Affine2::rotate_about(angle, center)
+            },
+
+            TransformHandle::Scale(handle_x, handle_y) => {
+                // Move the grabbed handle along with the mouse
+                let handle = handle_position(self.bounds, handle_x, handle_y);
+                let mut target = handle + (pos - self.origin);
+                if modifiers.ctrl { target = utils::snap_to_grid(target); }
+
+                // Scale each axis so the handle reaches the target, keeping the opposite side (or the center) in place.
+                // Axes with no extent can't be scaled by a handle.
+                let axis = |side: i8, center: f32, half: f32, handle: f32, target: f32| {
+                    let anchor = if modifiers.alt { center } else { center - half * side as f32 };
+                    let extent = handle - anchor;
+                    if side == 0 || extent.abs() < 1e-6 { None }
+                    else { Some(((target - anchor) / extent, anchor)) }
+                };
+                let x = axis(handle_x, center.x, half.x, handle.x, target.x);
+                let y = axis(handle_y, center.y, half.y, handle.y, target.y);
+
+                // Shift: scale every axis by the same amount, keeping the direction of each scaled axis.
+                // Axes that aren't scaled by the handle scale around the center.
+                let uniform = if modifiers.shift {
+                    [x, y].into_iter().flatten().map(|(factor, _)| factor.abs()).reduce(f32::min)
+                } else { None };
+                let resolve = |axis: Option<(f32, f32)>, center: f32| match (axis, uniform) {
+                    (Some((factor, anchor)), Some(uniform)) => (uniform.copysign(factor), anchor),
+                    (Some((factor, anchor)), None) => (factor, anchor),
+                    (None, uniform) => (uniform.unwrap_or(1.0), center),
+                };
+                let (factor_x, anchor_x) = resolve(x, center.x);
+                let (factor_y, anchor_y) = resolve(y, center.y);
+                Affine2::scale_about(Vec2::new(factor_x, factor_y), Vec2::new(anchor_x, anchor_y))
+            },
+        }
+    }
+}
+
+/// Get the position of a handle on a box. Each axis is -1 for the min side, 1 for the max side, or 0 for the middle.
+fn handle_position((min, max): Bounds, handle_x: i8, handle_y: i8) -> Vec2 {
+    let center = (min + max) * 0.5;
+    let half = (max - min) * 0.5;
+    center + Vec2::new(half.x * handle_x as f32, half.y * handle_y as f32)
 }
 
 impl EditorTool for EditorToolZone {
@@ -87,14 +194,37 @@ impl EditorTool for EditorToolZone {
             None
         }
     }
+    fn transform_box(&self, objects: &ObjectBuffers) -> Option<TransformBox> {
+        // While rotating, the box turns with the zones
+        if let Some(drag) = &self.transform && drag.handle == TransformHandle::Rotate {
+            let (min, max) = drag.bounds;
+            return Some(TransformBox { center: (min + max) * 0.5, half_size: (max - min) * 0.5, angle: drag.angle });
+        }
+
+        // Otherwise it's around the selection, unless a selection box is being dragged out
+        if self.selection_origin.is_some() { return None; }
+        let (min, max) = objects.zones_bounds(&self.selected_zones).ok().flatten()?;
+        Some(TransformBox { center: (min + max) * 0.5, half_size: (max - min) * 0.5, angle: 0.0 })
+    }
 
     fn handle_click(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
+        // Clicking a transform box handle does nothing, rather than changing the selection
+        if let Some((TransformHandle::Scale(..), _)) = self.transform_hit(&state, pos)? { return self.ok(); }
+
         let (new_selection, _) = self.get_updated_selection(&state, pos, false, modifiers)?;
         self.set_selection(new_selection, &state)?;
         self.ok()
     }
 
     fn handle_drag_start(&mut self, state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
+        // Dragging the transform box takes priority over everything else
+        if let Some((handle, bounds)) = self.transform_hit(&state, pos)? {
+            self.abandon_drag();
+            let snapshot = state.objects.snapshot_zone_points(&self.selected_zones)?;
+            self.transform = Some(TransformDrag { handle, bounds, origin: pos, angle: 0.0, snapshot });
+            return self.ok();
+        }
+
         let clicked_zone_info = self.zone_from_pos(&state, pos)?;
         let (new_selection, reference_delta) = self.get_updated_selection(&state, pos, true, modifiers)?;
         self.drag_origin = Some(pos);
@@ -149,8 +279,17 @@ impl EditorTool for EditorToolZone {
     }
 
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
+        // Transform the selected zones from where they started if we are dragging the transform box
+        if let Some(drag) = self.transform.as_mut() {
+            let transform = drag.update(pos, modifiers);
+            let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
+            state.objects.apply_transform(&drag.snapshot, &transform)?;
+            let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
+            return self.stale_in(merge_bounds(before, after));
+        }
+
         // Drag selected zones if we are doing that
-        if let Some(reference_delta) = self.reference_delta && !self.selected_zones.is_empty() {
+        else if let Some(reference_delta) = self.reference_delta && !self.selected_zones.is_empty() {
             let mut target = pos - reference_delta;
             if let Some(origin) = self.drag_origin {
                 target = utils::snap_drag_target(target, origin - reference_delta, origin, pos, modifiers);
@@ -176,6 +315,7 @@ impl EditorTool for EditorToolZone {
         }
 
         // Release drag on selected zones, but keep them selected
+        self.transform = None;
         self.reference_delta = None;
         self.drag_origin = None;
         self.selection_origin = None;
@@ -184,6 +324,14 @@ impl EditorTool for EditorToolZone {
     }
 
     fn handle_cancel(&mut self, mut state: ControllerStateInput) -> ToolResult {
+        // If transforming zones, put them back how they started
+        if let Some(drag) = self.transform.take() {
+            let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
+            state.objects.restore_snapshot(&drag.snapshot)?;
+            let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
+            return self.stale_in(merge_bounds(before, after));
+        }
+
         // If dragging zones, put them back where they started
         if let (Some(reference_delta), Some(origin)) = (self.reference_delta.take(), self.drag_origin.take()) {
             if !self.selected_zones.is_empty() {
@@ -245,7 +393,7 @@ impl EditorTool for EditorToolZone {
         let points = points_from_zone_selection(&zones, &state)?;
 
         // Move them into place, and select them
-        if let Some(center) = state.objects.points_center(&points)? {
+        if let Some(center) = state.objects.zones_center(&zones)? {
             let target = placement.target(center, state.camera_inv_scale);
             state.objects.move_points(&points, target - center)?;
         }
@@ -273,6 +421,7 @@ impl EditorToolZone {
     /// Stop dragging zones or a selection box, keeping the committed selection
     fn abandon_drag(&mut self) {
         self.tentative_selection = None;
+        self.transform = None;
         self.reference_delta = None;
         self.drag_origin = None;
         self.selection_origin = None;
@@ -286,6 +435,35 @@ impl EditorToolZone {
         state.objects.move_zones(&self.selected_zones[..], first_point_position)?;
         let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
         self.stale_in(merge_bounds(before, after))
+    }
+
+    /// Get the part of the transform box around the selected zones at a position, and the box itself, if any.
+    /// Handles take priority over rotating, and corners over edges.
+    fn transform_hit(&self, state: &ControllerStateInput, pos: Vec2) -> anyhow::Result<Option<(TransformHandle, Bounds)>> {
+        if self.selected_zones.is_empty() { return Ok(None); }
+        let Some(bounds) = state.objects.zones_bounds(&self.selected_zones)? else { return Ok(None); };
+
+        // Scale handles, at the same size as control points. Short edges don't have midpoint handles.
+        let tolerance = utils::CLICK_TOLERANCE * state.camera_inv_scale;
+        let min_edge = utils::MIN_MIDPOINT_EDGE * state.camera_inv_scale;
+        let size = bounds.1 - bounds.0;
+        const HANDLES: [(i8, i8); 8] = [(-1, -1), (1, -1), (1, 1), (-1, 1), (0, -1), (1, 0), (0, 1), (-1, 0)];
+        for (handle_x, handle_y) in HANDLES {
+            if (handle_x == 0 && size.x < min_edge) || (handle_y == 0 && size.y < min_edge) { continue; }
+            let delta = handle_position(bounds, handle_x, handle_y) - pos;
+            if delta.x.abs().max(delta.y.abs()) <= tolerance {
+                return Ok(Some((TransformHandle::Scale(handle_x, handle_y), bounds)));
+            }
+        }
+
+        // Rotating, just outside the corners
+        let (min, max) = bounds;
+        let inside = pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y;
+        let rotate_tolerance = utils::ROTATE_TOLERANCE * state.camera_inv_scale;
+        if !inside && HANDLES[..4].iter().any(|&(x, y)| handle_position(bounds, x, y).distance(pos) <= rotate_tolerance) {
+            return Ok(Some((TransformHandle::Rotate, bounds)));
+        }
+        Ok(None)
     }
 
     fn set_selection(&mut self, selected_zones: Vec<u16>, state: &ControllerStateInput) -> anyhow::Result<()> {
@@ -595,10 +773,10 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_click(state(&objects), Vec2::new(25.0, 25.0), IM::alt()).unwrap();
         assert_selected_zones(&tool, &[0, 1]);
 
-        tool.handle_click(state(&objects), Vec2::new(0.0, 5.0), IM::alt()).unwrap(); // path
+        tool.handle_click(state(&objects), Vec2::new(0.0, 7.0), IM::alt()).unwrap(); // path
         assert_selected_zones(&tool, &[1]);
 
-        tool.handle_click(state(&objects), Vec2::new(140.0, 0.0), IM::alt()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(140.0, 7.0), IM::alt()).unwrap();
         assert!(tool.selection().is_empty());
     }
 
@@ -611,7 +789,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         add_square(&mut objects, 10.0);
         let (branch_zone, _) = objects.create_branching_zone(2).unwrap();
         objects.create_point(branch_zone, Vec2::new(10.0, 20.0)).unwrap();
-        objects.create_point(branch_zone, Vec2::new(0.0, 20.0)).unwrap();
+        objects.create_point(branch_zone, Vec2::new(0.0, 13.0)).unwrap();
         objects.complete_branching_zone(2, branch_zone, 3).unwrap();
 
         // Add another set of connected zones
@@ -639,64 +817,67 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         };
 
         // Start by selecting only zone 0
-        let result = tool.handle_click(state(&objects), Vec2::new(10.5, 0.0), IM::ctrl()).unwrap();
+        let result = tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(10.5, 0.0), IM::ctrl()).unwrap();
         assert_eq!(result.new_tool, EditorToolKind::Zone);
         assert!(result.normals_stale.is_none());
         assert_selected_zones(&tool, &[0]);
 
         // Ctrl+Shift to select a zone on the other graph
-        tool.handle_click(state(&objects), Vec2::new(90.0, 1.0), IM::ctrl_shift()).unwrap(); // path
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(90.0, 1.0), IM::ctrl_shift()).unwrap(); // path
         assert_selected_zones(&tool, &[0, 2]);
 
         // Shift+Alt on second connected to toggle the whole first graph on
-        tool.handle_click(state(&objects), Vec2::new(0.0, 20.0), IM::alt_shift()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::alt_shift()).unwrap();
         assert_selected_zones(&tool, &[0, 1, 2]);
 
         // Shift+Alt again to toggle the whole first graph off
-        tool.handle_click(state(&objects), Vec2::new(0.0, 20.0), IM::alt_shift()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::alt_shift()).unwrap();
         assert_selected_zones(&tool, &[2]);
 
         // Shift to turn the whole first graph back on
-        tool.handle_click(state(&objects), Vec2::new(0.0, 20.0), IM::shift()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::shift()).unwrap();
         assert_selected_zones(&tool, &[0, 1, 2]);
 
         // Ctrl+Alt on second to deselect it
-        tool.handle_click(state(&objects), Vec2::new(0.0, 20.0), IM::ctrl_alt()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::ctrl_alt()).unwrap();
         assert_selected_zones(&tool, &[0, 2]);
 
         // Alt on second to deselect whole first graph, even though the clicked zone isn't selected
-        tool.handle_click(state(&objects), Vec2::new(0.0, 20.0), IM::alt()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::alt()).unwrap();
         assert_selected_zones(&tool, &[2]);
 
         // Shift+Ctrl+Alt to toggle a zone on the first graph on
-        tool.handle_click(state(&objects), Vec2::new(0.0, 20.0), IM::all()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::all()).unwrap();
         assert_selected_zones(&tool, &[1, 2]);
 
         // Shift+Ctrl on final zone to select full second graph
-        tool.handle_click(state(&objects), Vec2::new(40.0, 100.0), IM::ctrl_shift()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(40.0, 100.0), IM::ctrl_shift()).unwrap();
         assert_selected_zones(&tool, &[1, 2, 3]);
 
         // Shift+Ctrl+Alt to toggle a zone on the second graph off
-        tool.handle_click(state(&objects), Vec2::new(90.0, 00.0), IM::all()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(90.0, 00.0), IM::all()).unwrap();
         assert_selected_zones(&tool, &[1, 3]);
 
         // No modifier keys to select full first zone and deselect the other shape
-        tool.handle_click(state(&objects), Vec2::new(0.0, 20.0), IM::none()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::none()).unwrap();
         assert_selected_zones(&tool, &[0, 1]);
 
         // Alt to deselect whole first zone
-        tool.handle_click(state(&objects), Vec2::new(0.0, 20.0), IM::alt()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::alt()).unwrap();
         assert!(tool.selection().is_empty())
     }
 
     /// Ctrl+clicking a point shared by two zones cycles through them
     #[test]
     fn click_cycles_shared_points() {
+        // The shared points and path are away from the corners and edge midpoints of both zones, where clicks would hit the transform box
         let mut objects = ObjectBuffers::headless();
-        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(0.0, 0.0), (10.0, 0.0), (40.0, 0.0), (40.0, 10.0), (0.0, 10.0)]);
         let (zone_id, _) = objects.create_branching_zone(1).unwrap();
-        objects.create_point(zone_id, Vec2::new(20.0, 0.0)).unwrap();
+        objects.create_point(zone_id, Vec2::new(0.0, -10.0)).unwrap();
+        objects.create_point(zone_id, Vec2::new(30.0, -10.0)).unwrap();
         objects.complete_branching_zone(1, zone_id, 2).unwrap();
+        let state = |objects: &ObjectBuffers| state_scaled(objects, 0.25);
         let mut tool = EditorToolZone::init();
 
         tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), IM::ctrl()).unwrap();
@@ -708,15 +889,18 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         assert_eq!(tool.selection(), &first[..]);
 
         // Check clicks on the shared path as well
-        tool.handle_click(state(&objects), Vec2::new(10.0, 5.0), IM::ctrl()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(30.0, 0.0), IM::ctrl()).unwrap();
         assert_eq!(tool.selection(), &second[..]);
-        tool.handle_click(state(&objects), Vec2::new(10.0, 5.0), IM::ctrl()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(30.0, 0.0), IM::ctrl()).unwrap();
         assert_eq!(tool.selection(), &first[..]);
 
-        // Check a ctrl click on a non-shared point and path
-        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), IM::ctrl()).unwrap();
+        // Check a ctrl click on a non-shared path of the first zone, from either zone
+        let first_zone = objects.get_point_info(first[0]).unwrap().zone_id();
+        let unshared = if first_zone == 0 { Vec2::new(5.0, 10.0) } else { Vec2::new(15.0, -10.0) };
+        tool.handle_click(state(&objects), unshared, IM::ctrl()).unwrap();
         assert_eq!(tool.selection(), &first[..]);
-        tool.handle_click(state(&objects), Vec2::new(5.0, 0.0), IM::ctrl()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), IM::ctrl()).unwrap();
+        tool.handle_click(state(&objects), unshared, IM::ctrl()).unwrap();
         assert_eq!(tool.selection(), &first[..]);
     }
 
@@ -793,9 +977,9 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_click(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
         tool.handle_click(state(&objects), Vec2::new(90.0, 1.0), IM::shift()).unwrap();
 
-        // Drag the second zone, without holding shift
-        tool.handle_drag_start(state(&objects), Vec2::new(140.0, 100.0), Default::default()).unwrap();
-        let result = tool.handle_dragging_to(state(&objects), Vec2::new(145.0, 102.0), Default::default()).unwrap();
+        // Drag the second zone, without holding shift, away from the transform box handles
+        tool.handle_drag_start(state(&objects), Vec2::new(40.0, 0.0), Default::default()).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(45.0, 2.0), Default::default()).unwrap();
         assert!(result.normals_stale.is_some());
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 2.0));
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(45.0, 2.0));
@@ -1096,7 +1280,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         assert_eq!(result.normals_stale, Some((Vec2::ZERO, Vec2::new(10.0, 10.0))));
         assert_eq!(tool.selected_zones, vec![1]);
         assert_eq!(tool.selection(), &[4, 5, 6, 7]);
-        assert_eq!(objects.points_center(tool.selection()).unwrap(), Some(Vec2::new(5.0, 5.0)));
+        assert_eq!(objects.zones_center(&tool.selected_zones).unwrap(), Some(Vec2::new(5.0, 5.0)));
 
         // At the mouse
         tool.handle_paste(state(&objects), &copied, PastePlacement::At(Vec2::new(50.0, 20.0))).unwrap();
@@ -1105,11 +1289,11 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         // Offset from where they were copied, scaled to the camera
         tool.handle_paste(state_scaled(&objects, 0.5), &copied, PastePlacement::Offset(None)).unwrap();
-        assert_eq!(objects.points_center(tool.selection()).unwrap(), Some(Vec2::new(10.0, 10.0)));
+        assert_eq!(objects.zones_center(&tool.selected_zones).unwrap(), Some(Vec2::new(10.0, 10.0)));
 
         // Offset from somewhere else, i.e. the last paste
         tool.handle_paste(state(&objects), &copied, PastePlacement::Offset(Some(Vec2::new(50.0, 20.0)))).unwrap();
-        assert_eq!(objects.points_center(tool.selection()).unwrap(), Some(Vec2::new(60.0, 30.0)));
+        assert_eq!(objects.zones_center(&tool.selected_zones).unwrap(), Some(Vec2::new(60.0, 30.0)));
         assert_eq!(objects.object_counts(), (5, 20));
     }
 
@@ -1126,5 +1310,312 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_paste(state(&objects), &copied, PastePlacement::InPlace).unwrap();
         assert!(tool.selection_box().is_none());
         assert_eq!(tool.selected_zones, vec![1]);
+    }
+
+    /// Get the position of a point
+    fn position(objects: &ObjectBuffers, point_id: u16) -> Vec2 {
+        objects.get_point_info(point_id).unwrap().position()
+    }
+
+    /// Assert two positions are nearly the same, for transforms that aren't exact
+    fn assert_near(actual: Vec2, expected: Vec2) {
+        assert!(actual.distance(expected) < 1e-4, "{actual} is not {expected}");
+    }
+
+    /// Drag the transform box of a selected square from one position to another.
+    /// Zoomed in so the square is big enough on screen to have midpoint handles.
+    fn transform_square(start: Vec2, end: Vec2, modifiers: IM) -> ObjectBuffers {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let zoomed = |objects: &ObjectBuffers| state_scaled(objects, 0.25);
+        let mut tool = EditorToolZone::select(&[0], zoomed(&objects));
+        tool.handle_drag_start(zoomed(&objects), start, modifiers).unwrap();
+        let result = tool.handle_dragging_to(zoomed(&objects), end, modifiers).unwrap();
+        assert!(result.normals_stale.is_some());
+        tool.handle_drag_released(zoomed(&objects), modifiers).unwrap();
+        objects
+    }
+
+    /// Edges too short on screen don't have midpoint handles, so dragging there does what it would without the box
+    #[test]
+    fn small_box_has_no_midpoints() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 20.0);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        // Dragging the middle of the right edge moves the square instead of scaling it
+        tool.handle_drag_start(state(&objects), Vec2::new(20.0, 10.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(30.0, 10.0), IM::none()).unwrap();
+        assert_eq!(position(&objects, 0), Vec2::new(10.0, 0.0));
+        assert_eq!(position(&objects, 2), Vec2::new(30.0, 20.0));
+        tool.handle_drag_released(state(&objects), IM::none()).unwrap();
+
+        // Corners still scale
+        tool.handle_drag_start(state(&objects), Vec2::new(30.0, 20.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(40.0, 30.0), IM::none()).unwrap();
+        assert_eq!(position(&objects, 0), Vec2::new(10.0, 0.0));
+        assert_eq!(position(&objects, 2), Vec2::new(40.0, 30.0));
+    }
+
+    /// The transform box isn't shown or used while dragging out a selection box
+    #[test]
+    fn no_transform_box_while_box_selecting() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+        assert!(tool.transform_box(&objects).is_some());
+
+        tool.handle_drag_start(state(&objects), Vec2::new(-30.0, -30.0), IM::shift()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(-20.0, -20.0), IM::shift()).unwrap();
+        assert!(tool.selection_box().is_some());
+        assert_eq!(tool.transform_box(&objects), None);
+
+        tool.handle_drag_released(state(&objects), IM::shift()).unwrap();
+        assert!(tool.transform_box(&objects).is_some());
+    }
+
+    /// The transform box is around the control points of the selected zones, and only exists if zones are selected
+    #[test]
+    fn transform_box_bounds() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 4.0)]);
+
+        let tool = EditorToolZone::init();
+        assert_eq!(tool.transform_box(&objects), None);
+
+        let tool = EditorToolZone::select(&[0, 4], state(&objects));
+        let transform_box = tool.transform_box(&objects).unwrap();
+        assert_eq!(transform_box.center, Vec2::new(15.0, 5.0));
+        assert_eq!(transform_box.half_size, Vec2::new(15.0, 5.0));
+        assert_eq!(transform_box.angle, 0.0);
+    }
+
+    /// Dragging an edge scales only that axis, keeping the opposite edge in place
+    #[test]
+    fn scale_edge() {
+        let objects = transform_square(Vec2::new(10.0, 5.0), Vec2::new(20.0, 5.0), IM::none());
+        assert_eq!(position(&objects, 0), Vec2::new(0.0, 0.0));
+        assert_eq!(position(&objects, 1), Vec2::new(20.0, 0.0));
+        assert_eq!(position(&objects, 2), Vec2::new(20.0, 10.0));
+        assert_eq!(position(&objects, 3), Vec2::new(0.0, 10.0));
+
+        // The top edge, past the bottom edge, flips the square
+        let objects = transform_square(Vec2::new(5.0, 0.0), Vec2::new(5.0, 15.0), IM::none());
+        assert_eq!(position(&objects, 0), Vec2::new(0.0, 15.0));
+        assert_eq!(position(&objects, 3), Vec2::new(0.0, 10.0));
+    }
+
+    /// Dragging a corner scales both axes, keeping the opposite corner in place
+    #[test]
+    fn scale_corner() {
+        let objects = transform_square(Vec2::new(10.0, 10.0), Vec2::new(20.0, 30.0), IM::none());
+        assert_eq!(position(&objects, 0), Vec2::new(0.0, 0.0));
+        assert_eq!(position(&objects, 1), Vec2::new(20.0, 0.0));
+        assert_eq!(position(&objects, 2), Vec2::new(20.0, 30.0));
+
+        // Grabbing the handle off center keeps the same offset from the mouse
+        let objects = transform_square(Vec2::new(-1.0, -1.0), Vec2::new(4.0, 4.0), IM::none());
+        assert_eq!(position(&objects, 0), Vec2::new(5.0, 5.0));
+        assert_eq!(position(&objects, 2), Vec2::new(10.0, 10.0));
+    }
+
+    /// Shift scales uniformly, to the largest size that fits where the handle was dragged
+    #[test]
+    fn scale_uniform() {
+        let objects = transform_square(Vec2::new(10.0, 10.0), Vec2::new(20.0, 30.0), IM::shift());
+        assert_eq!(position(&objects, 0), Vec2::new(0.0, 0.0));
+        assert_eq!(position(&objects, 2), Vec2::new(20.0, 20.0));
+
+        // Dragging into another quadrant flips the square that way
+        let objects = transform_square(Vec2::new(10.0, 10.0), Vec2::new(-20.0, 5.0), IM::shift());
+        assert_eq!(position(&objects, 2), Vec2::new(-5.0, 5.0));
+
+        // Edges scale the other axis around the center
+        let objects = transform_square(Vec2::new(10.0, 5.0), Vec2::new(20.0, 5.0), IM::shift());
+        assert_eq!(position(&objects, 1), Vec2::new(20.0, -5.0));
+        assert_eq!(position(&objects, 2), Vec2::new(20.0, 15.0));
+    }
+
+    /// Alt keeps the center in place, moving the opposite side or corner instead
+    #[test]
+    fn scale_from_center() {
+        let objects = transform_square(Vec2::new(10.0, 10.0), Vec2::new(15.0, 20.0), IM::alt());
+        assert_eq!(position(&objects, 0), Vec2::new(-5.0, -10.0));
+        assert_eq!(position(&objects, 2), Vec2::new(15.0, 20.0));
+
+        let objects = transform_square(Vec2::new(0.0, 5.0), Vec2::new(-5.0, 5.0), IM::alt());
+        assert_eq!(position(&objects, 0), Vec2::new(-5.0, 0.0));
+        assert_eq!(position(&objects, 1), Vec2::new(15.0, 0.0));
+    }
+
+    /// Ctrl snaps the dragged handle to the grid
+    #[test]
+    fn scale_snapped() {
+        let objects = transform_square(Vec2::new(10.0, 10.0), Vec2::new(14.6, 12.2), IM::ctrl());
+        assert_eq!(position(&objects, 0), Vec2::new(0.0, 0.0));
+        assert_eq!(position(&objects, 2), Vec2::new(15.0, 12.0));
+    }
+
+    /// The scaling modifiers all work together
+    #[test]
+    fn scale_combined_modifiers() {
+        let objects = transform_square(Vec2::new(10.0, 10.0), Vec2::new(14.6, 20.2), IM::all());
+        assert_eq!(position(&objects, 0), Vec2::new(-5.0, -5.0));
+        assert_eq!(position(&objects, 2), Vec2::new(15.0, 15.0));
+
+        let objects = transform_square(Vec2::new(10.0, 10.0), Vec2::new(14.6, 20.2), IM::shift_ctrl());
+        assert_eq!(position(&objects, 0), Vec2::new(0.0, 0.0));
+        assert_eq!(position(&objects, 2), Vec2::new(15.0, 15.0));
+    }
+
+    /// Handles are scaled along with their points
+    #[test]
+    fn scale_handles() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(1, None, Some(crate::ControlPointMode::Broken), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(0.0, 3.0))).unwrap();
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(20.0, 30.0), IM::none()).unwrap();
+        let point = objects.get_point_info(1).unwrap();
+        assert_eq!(point.position(), Vec2::new(20.0, 0.0));
+        assert_eq!(point.left_handle(), Vec2::new(16.0, 0.0));
+        assert_eq!(point.right_handle(), Vec2::new(20.0, 9.0));
+    }
+
+    /// Siblings in other zones move along with the transformed points
+    #[test]
+    fn transform_moves_siblings() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (branch_zone, branch_id) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(branch_zone, Vec2::new(20.0, 5.0)).unwrap();
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+        assert_eq!(tool.selected_zones, vec![0]);
+
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(20.0, 20.0), IM::none()).unwrap();
+        assert_eq!(position(&objects, 1), Vec2::new(20.0, 0.0));
+        assert_eq!(position(&objects, branch_id), Vec2::new(20.0, 0.0));
+        assert_eq!(position(&objects, branch_id + 1), Vec2::new(20.0, 5.0));
+    }
+
+    /// Dragging just outside a corner rotates around the center, and the box rotates along with it until released
+    #[test]
+    fn rotate() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        // Start outside the top right corner, and go a quarter turn around to the bottom right
+        tool.handle_drag_start(state(&objects), Vec2::new(17.0, -7.0), IM::none()).unwrap();
+        assert!(tool.selection_box().is_none());
+        tool.handle_dragging_to(state(&objects), Vec2::new(17.0, 17.0), IM::none()).unwrap();
+        assert_near(position(&objects, 0), Vec2::new(10.0, 0.0));
+        assert_near(position(&objects, 1), Vec2::new(10.0, 10.0));
+        assert_near(position(&objects, 2), Vec2::new(0.0, 10.0));
+
+        let transform_box = tool.transform_box(&objects).unwrap();
+        assert_eq!(transform_box.center, Vec2::new(5.0, 5.0));
+        assert_eq!(transform_box.half_size, Vec2::new(5.0, 5.0));
+        assert!((transform_box.angle - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+
+        tool.handle_drag_released(state(&objects), IM::none()).unwrap();
+        assert_eq!(tool.transform_box(&objects).unwrap().angle, 0.0);
+    }
+
+    /// Ctrl snaps rotation to increments of 5 degrees
+    #[test]
+    fn rotate_snapped() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        // Starting at -45 degrees from the center and going to 2 degrees turns 47 degrees, which snaps to 45
+        let angle = 2f32.to_radians();
+        tool.handle_drag_start(state(&objects), Vec2::new(17.0, -7.0), IM::ctrl()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(5.0, 5.0) + Vec2::new(angle.cos(), angle.sin()) * 12.0, IM::ctrl()).unwrap();
+        assert!((tool.transform_box(&objects).unwrap().angle - 45f32.to_radians()).abs() < 1e-5);
+        assert_near(position(&objects, 0), Vec2::new(5.0, 5.0 - 50f32.sqrt()));
+    }
+
+    /// Transforming takes priority over dragging other zones or a selection box
+    #[test]
+    fn transform_priority() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(10.0, 5.0), (20.0, 5.0), (20.0, 15.0)]);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        // The other zone's point is under the right edge handle, which only exists zoomed in
+        let zoomed = state_scaled(&objects, 0.25);
+        tool.handle_drag_start(zoomed, Vec2::new(10.0, 5.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(20.0, 5.0), IM::none()).unwrap();
+        assert_eq!(tool.selected_zones, vec![0]);
+        assert_eq!(position(&objects, 1), Vec2::new(20.0, 0.0));
+        assert_eq!(position(&objects, 4), Vec2::new(10.0, 5.0));
+        tool.handle_drag_released(state(&objects), IM::none()).unwrap();
+
+        // Empty space outside a corner rotates rather than starting a selection box
+        tool.handle_drag_start(state(&objects), Vec2::new(-7.0, -7.0), IM::none()).unwrap();
+        assert!(tool.selection_box().is_none());
+        assert_eq!(tool.selected_zones, vec![0]);
+    }
+
+    /// Clicking a transform box handle doesn't change the selection, but clicking outside a corner does
+    #[test]
+    fn click_transform_box() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(17.0, -7.0), (30.0, -7.0), (30.0, -20.0)]);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        // Even if a zone is under the handle
+        tool.handle_click(state(&objects), Vec2::new(10.0, 10.0), IM::alt()).unwrap();
+        assert_eq!(tool.selected_zones, vec![0]);
+        tool.handle_click(state(&objects), Vec2::new(-2.0, -2.0), IM::none()).unwrap();
+        assert_eq!(tool.selected_zones, vec![0]);
+
+        // Outside a corner selects a zone there, or deselects if there is none
+        tool.handle_click(state(&objects), Vec2::new(17.0, -7.0), IM::none()).unwrap();
+        assert_eq!(tool.selected_zones, vec![1]);
+        tool.handle_click(state(&objects), Vec2::new(-7.0, -7.0), IM::none()).unwrap();
+        assert!(tool.selected_zones.is_empty());
+    }
+
+    /// Cancelling a transform puts everything back and keeps the selection
+    #[test]
+    fn cancel_transform() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        objects.update_point(1, None, Some(crate::ControlPointMode::Broken), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(0.0, 3.0))).unwrap();
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        tool.handle_drag_start(state(&objects), Vec2::new(17.0, -7.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(17.0, 17.0), IM::none()).unwrap();
+        let result = tool.handle_cancel(state(&objects)).unwrap();
+        assert!(result.normals_stale.is_some());
+        assert_eq!(position(&objects, 1), Vec2::new(10.0, 0.0));
+        assert_eq!(objects.get_point_info(1).unwrap().right_handle(), Vec2::new(10.0, 3.0));
+        assert_eq!(tool.selected_zones, vec![0]);
+        assert_eq!(tool.transform_box(&objects).unwrap().angle, 0.0);
+
+        // The drag is over
+        tool.handle_dragging_to(state(&objects), Vec2::new(50.0, 50.0), IM::none()).unwrap();
+        assert_eq!(position(&objects, 1), Vec2::new(10.0, 0.0));
+    }
+
+    /// Paste centers on the center of the bounding box, not the average of the points
+    #[test]
+    fn paste_uses_bounds_center() {
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (9.0, 10.0)]);
+        let copied = objects.copy_zones(&[0]).unwrap();
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_paste(state(&objects), &copied, PastePlacement::At(Vec2::new(50.0, 50.0))).unwrap();
+        assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(45.0, 45.0));
     }
 }

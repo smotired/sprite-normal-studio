@@ -41,6 +41,19 @@ pub struct ControllerStateInput {
 
 pub type SelectionType<'a> = &'a [u16]; // slice of vector of selected points
 
+/// A box that can be dragged to transform the selection, drawn with handles at its corners and edge midpoints
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct TransformBox {
+    /// World space center of the box
+    pub center: Vec2,
+
+    /// Half the width and height of the box, before it is rotated
+    pub half_size: Vec2,
+
+    /// Rotation of the box around its center in radians, from +x towards +y
+    pub angle: f32,
+}
+
 /// Actions from the UI that the selected tool handles in its own way. Tools ignore the ones they don't support.
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum SpecialAction {
@@ -165,6 +178,9 @@ pub trait EditorTool: EditorToolClone {
     /// Get two coordinates of the bounding box we are currently dragging out
     fn selection_box(&self) -> Option<(Vec2, Vec2)> { None }
 
+    /// Get the box that can be dragged to transform the selection, if this tool has one
+    fn transform_box(&self, _objects: &ObjectBuffers) -> Option<TransformBox> { None }
+
     /// If this tool is creating a path, returns whether the latest point is the first point of that path
     /// (i.e. the path is about to be closed). The path being created is always the last zone.
     fn creating_path(&self) -> Option<bool> { None }
@@ -255,7 +271,7 @@ impl Controller {
     pub fn paste(&mut self, objects: &SavedObjects, placement: PastePlacement) -> Option<Vec2> {
         if !self.run_tool(DragStep::None, |tool, state| tool.handle_paste(state, objects, placement)) { return None; }
         if self.tool.kind() != EditorToolKind::Zone { return None; }
-        self.objects.points_center(self.tool.selection()).ok().flatten()
+        self.objects.zones_center(&self.selected_zones()).ok().flatten()
     }
 
     /// Run an action from the UI that the selected tool handles in its own way, with the same rollback and error handling as other tool actions.

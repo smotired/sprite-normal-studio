@@ -11,6 +11,7 @@ mod bounds;
 mod diff;
 mod save;
 mod clipboard;
+mod transform;
 
 use studio_math::Vec2;
 use wgpu::{Buffer, Device};
@@ -22,6 +23,7 @@ use buffers::{VecWithBuffer, ObjectList};
 pub use diff::ObjectDiff;
 pub use bounds::{Bounds, merge_bounds};
 pub use save::{SavedObjects, LoadedObjects};
+pub use transform::PointsSnapshot;
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
@@ -101,22 +103,10 @@ impl ObjectBuffers {
 
     pub fn object_counts(&self) -> (usize, usize) { (self.zone_count() as usize, self.point_count() as usize) }
 
-    /// Get the average position of a list of points. Siblings share a position, so each set of siblings only counts once
-    /// no matter how many of them are in the list. Returns None if the list is empty.
-    pub fn points_center(&self, point_ids: &[u16]) -> anyhow::Result<Option<Vec2>> {
-        // Siblings of points that don't exist would never loop back around
-        if let Some(&point_id) = point_ids.iter().find(|&&point_id| point_id >= self.point_count()) {
-            anyhow::bail!("Point {} does not exist!", point_id);
-        }
-
-        let targets = one_per_sibling_ring(point_ids, &self.point_siblings.borrow().items);
-        if targets.is_empty() { return Ok(None); }
-
-        let mut sum = Vec2::ZERO;
-        for &point_id in &targets {
-            sum += self.get_point_info(point_id)?.position();
-        }
-        Ok(Some(sum * (1.0 / targets.len() as f32)))
+    /// Get the center of the bounding box around several zones, which covers the control points of all their path segments.
+    /// Returns None if none of them have points.
+    pub fn zones_center(&self, zone_ids: &[u16]) -> anyhow::Result<Option<Vec2>> {
+        Ok(self.zones_bounds(zone_ids)?.map(|(min, max)| (min + max) * 0.5))
     }
 }
 
@@ -209,23 +199,16 @@ mod tests {
         assert_eq!(objects.sibling_in_zone(0, zone_id), None);
     }
 
-    /// The center of a zone's points is their average position
+    /// The center of zones is the center of the bounding box of their control points
     #[test]
-    fn points_center() {
+    fn zones_center() {
         let mut objects = ObjectBuffers::headless();
         add_square(&mut objects, 10.0);
-        assert_eq!(objects.points_center(&[0, 1, 2, 3]).unwrap(), Some(Vec2::new(5.0, 5.0)));
-        assert_eq!(objects.points_center(&[1, 2]).unwrap(), Some(Vec2::new(10.0, 5.0)));
-        assert_eq!(objects.points_center(&[]).unwrap(), None);
-        assert!(objects.points_center(&[4]).is_err());
-    }
-
-    /// Siblings only count once towards the center
-    #[test]
-    fn points_center_siblings_once() {
-        let mut objects = ObjectBuffers::headless();
-        add_square(&mut objects, 10.0);
-        let (_, point_id) = objects.create_branching_zone(1).unwrap();
-        assert_eq!(objects.points_center(&[0, 1, point_id]).unwrap(), Some(Vec2::new(5.0, 0.0)));
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 4.0)]);
+        assert_eq!(objects.zones_center(&[0]).unwrap(), Some(Vec2::new(5.0, 5.0)));
+        assert_eq!(objects.zones_center(&[1]).unwrap(), Some(Vec2::new(25.0, 2.0)));
+        assert_eq!(objects.zones_center(&[0, 1]).unwrap(), Some(Vec2::new(15.0, 5.0)));
+        assert_eq!(objects.zones_center(&[]).unwrap(), None);
+        assert!(objects.zones_center(&[2]).is_err());
     }
 }

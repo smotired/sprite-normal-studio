@@ -29,6 +29,7 @@ impl Controller {
             self.cursor_pos,
             self.objects.object_counts(),
             self.tool.as_ref(),
+            self.tool.transform_box(&self.objects),
         )
     }
 }
