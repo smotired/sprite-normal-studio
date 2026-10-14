@@ -1,9 +1,9 @@
 use studio_math::Vec2;
 
-use crate::InputModifiers;
+use crate::{InputModifiers, SavedObjects};
 use crate::objects::merge_bounds;
 
-use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, SpecialAction, utils};
+use super::{EditorTool, EditorToolKind, ControllerStateInput, PastePlacement, SelectionType, SpecialAction, utils};
 use super::result::{ToolResult, DefaultResults};
 
 /// The Zone tool allows mananging entire zones at once.
@@ -233,13 +233,24 @@ impl EditorTool for EditorToolZone {
 
     fn handle_select_all(&mut self, state: ControllerStateInput) -> ToolResult {
         // Abandon any drag, then select every zone
-        self.tentative_selection = None;
-        self.reference_delta = None;
-        self.drag_origin = None;
-        self.selection_origin = None;
-        self.selection_box_end = None;
+        self.abandon_drag();
         self.set_selection((0..state.objects.zone_count()).collect(), &state)?;
         self.ok()
+    }
+
+    fn handle_paste(&mut self, mut state: ControllerStateInput, objects: &SavedObjects, placement: PastePlacement) -> ToolResult {
+        // Abandon any drag, then add the zones where they were copied from
+        self.abandon_drag();
+        let zones = state.objects.paste_zones(objects)?;
+        let points = points_from_zone_selection(&zones, &state)?;
+
+        // Move them into place, and select them
+        if let Some(center) = state.objects.points_center(&points)? {
+            let target = placement.target(center, state.camera_inv_scale);
+            state.objects.move_points(&points, target - center)?;
+        }
+        self.set_selection(zones, &state)?;
+        self.stale_in(state.objects.zones_bounds(&self.selected_zones)?)
     }
 
     fn handle_special_action(&mut self, mut state: ControllerStateInput, action: SpecialAction) -> ToolResult {
@@ -259,6 +270,15 @@ impl EditorTool for EditorToolZone {
 }
 
 impl EditorToolZone {
+    /// Stop dragging zones or a selection box, keeping the committed selection
+    fn abandon_drag(&mut self) {
+        self.tentative_selection = None;
+        self.reference_delta = None;
+        self.drag_origin = None;
+        self.selection_origin = None;
+        self.selection_box_end = None;
+    }
+
     /// Move the first point of the selected zones to a position, marking normals stale where the zones were and where they are now.
     /// Siblings move along with the zones, so their zones are included.
     fn move_selected_zones(&self, state: &mut ControllerStateInput, first_point_position: Vec2) -> ToolResult {
@@ -425,7 +445,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     use crate::objects::test_utils::{add_square, add_zone};
 
     use super::*;
-    use super::super::test_utils::state;
+    use super::super::test_utils::{state, state_scaled};
 
     /// A tool with nothing selected
     #[test]
@@ -1061,5 +1081,50 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         let mut tool = EditorToolZone::select(&[0], state(&objects));
         tool.handle_select_all(state(&objects)).unwrap();
         assert_eq!(tool.selected_zones, vec![0, 1]);
+    }
+
+    /// Pasting adds the zones after the others and selects them, with their center where the placement says
+    #[test]
+    fn paste_placements() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let copied = objects.copy_zones(&[0]).unwrap();
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        // In place
+        let result = tool.handle_paste(state(&objects), &copied, PastePlacement::InPlace).unwrap();
+        assert_eq!(result.normals_stale, Some((Vec2::ZERO, Vec2::new(10.0, 10.0))));
+        assert_eq!(tool.selected_zones, vec![1]);
+        assert_eq!(tool.selection(), &[4, 5, 6, 7]);
+        assert_eq!(objects.points_center(tool.selection()).unwrap(), Some(Vec2::new(5.0, 5.0)));
+
+        // At the mouse
+        tool.handle_paste(state(&objects), &copied, PastePlacement::At(Vec2::new(50.0, 20.0))).unwrap();
+        assert_eq!(tool.selected_zones, vec![2]);
+        assert_eq!(objects.get_point_info(8).unwrap().position(), Vec2::new(45.0, 15.0));
+
+        // Offset from where they were copied, scaled to the camera
+        tool.handle_paste(state_scaled(&objects, 0.5), &copied, PastePlacement::Offset(None)).unwrap();
+        assert_eq!(objects.points_center(tool.selection()).unwrap(), Some(Vec2::new(10.0, 10.0)));
+
+        // Offset from somewhere else, i.e. the last paste
+        tool.handle_paste(state(&objects), &copied, PastePlacement::Offset(Some(Vec2::new(50.0, 20.0)))).unwrap();
+        assert_eq!(objects.points_center(tool.selection()).unwrap(), Some(Vec2::new(60.0, 30.0)));
+        assert_eq!(objects.object_counts(), (5, 20));
+    }
+
+    /// Pasting stops a drag in progress
+    #[test]
+    fn paste_abandons_drag() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let copied = objects.copy_zones(&[0]).unwrap();
+        let mut tool = EditorToolZone::init();
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 50.0), IM::none()).unwrap();
+        assert!(tool.selection_box().is_some());
+
+        tool.handle_paste(state(&objects), &copied, PastePlacement::InPlace).unwrap();
+        assert!(tool.selection_box().is_none());
+        assert_eq!(tool.selected_zones, vec![1]);
     }
 }

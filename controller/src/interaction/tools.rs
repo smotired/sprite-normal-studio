@@ -10,7 +10,7 @@ pub(super) use result::ToolResult;
 use result::{EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
-use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, Status};
+use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, SavedObjects, Status};
 use super::history::{History, DragStep};
 
 /// Options for which tool we are using in the editor.
@@ -77,6 +77,34 @@ impl SpecialAction {
     /// How this action relates to a drag. Continuing to set a normal continues the drag, everything else starts something new.
     pub fn drag_step(&self) -> DragStep {
         if matches!(self, Self::NormalSet(_, true)) { DragStep::Continue } else { DragStep::None }
+    }
+}
+
+/// Where pasted zones go
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum PastePlacement {
+    /// Exactly where they were copied from
+    InPlace,
+
+    /// With their center 10 screen pixels down and to the right of a world space position,
+    /// or of where they were copied from if there is none
+    Offset(Option<Vec2>),
+
+    /// With their center at a world space position, i.e. the mouse
+    At(Vec2),
+}
+
+/// How far pasted zones are offset from where they were copied from, in screen pixels
+const PASTE_OFFSET: Vec2 = Vec2 { x: 10.0, y: 10.0 };
+
+impl PastePlacement {
+    /// Get where the center of pasted zones should go, given where it was copied from and the inverse camera scale
+    pub(super) fn target(&self, center: Vec2, camera_inv_scale: f32) -> Vec2 {
+        match *self {
+            Self::InPlace => center,
+            Self::Offset(base) => base.unwrap_or(center) + PASTE_OFFSET * camera_inv_scale,
+            Self::At(pos) => pos,
+        }
     }
 }
 
@@ -162,6 +190,9 @@ pub trait EditorTool: EditorToolClone {
     /// Handle selecting everything. Ignored by default.
     fn handle_select_all(&mut self, _state: ControllerStateInput) -> ToolResult { self.ok() }
 
+    /// Handle pasting copied zones, selecting them. Ignored by default.
+    fn handle_paste(&mut self, _state: ControllerStateInput, _objects: &SavedObjects, _placement: PastePlacement) -> ToolResult { self.ok() }
+
     /// Handle an action from the UI that only some tools support. Ignored by default.
     fn handle_special_action(&mut self, _state: ControllerStateInput, _action: SpecialAction) -> ToolResult { self.ok() }
 
@@ -183,11 +214,14 @@ impl Controller {
 
     /// Run a tool action, restoring the objects and tool state if it fails, and recording its changes for undo.
     /// The step decides how errors are kept and how the changes are grouped with other actions in a drag.
-    pub(crate) fn run_tool(&mut self, step: DragStep, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
+    /// Returns true if the action succeeded.
+    pub(crate) fn run_tool(&mut self, step: DragStep, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) -> bool {
         if step == DragStep::None { self.history.close(&self.objects, self.tool.as_ref()); }
 
         let state = self.create_state();
-        if let Some((EditorToolActionResult { new_tool, normals_stale }, change)) = run_tool_action(&mut self.tool, state, &mut self.status, step == DragStep::Continue, action) {
+        let result = run_tool_action(&mut self.tool, state, &mut self.status, step == DragStep::Continue, action);
+        let succeeded = result.is_some();
+        if let Some((EditorToolActionResult { new_tool, normals_stale }, change)) = result {
             self.history.record(change, normals_stale);
             self.mark_normals_stale(normals_stale);
 
@@ -197,6 +231,31 @@ impl Controller {
         }
 
         if step == DragStep::Release { self.history.close(&self.objects, self.tool.as_ref()); }
+        succeeded
+    }
+
+    /// Get the selected zones in a form that can be pasted later. Only the zone tool can copy, and only if zones are selected.
+    /// If copying fails, the status shows why.
+    pub fn copy_selection(&mut self) -> Option<SavedObjects> {
+        if self.tool.kind() != EditorToolKind::Zone { return None; }
+        let zones = self.selected_zones();
+        if zones.is_empty() { return None; }
+
+        match self.objects.copy_zones(&zones) {
+            Ok(objects) => Some(objects),
+            Err(e) => {
+                self.status = Status::Error(format!("{e:#}"));
+                None
+            },
+        }
+    }
+
+    /// Paste copied zones with the selected tool, which selects them. Changes are recorded for undo.
+    /// Returns where the center of the pasted zones ended up, or None if nothing was pasted.
+    pub fn paste(&mut self, objects: &SavedObjects, placement: PastePlacement) -> Option<Vec2> {
+        if !self.run_tool(DragStep::None, |tool, state| tool.handle_paste(state, objects, placement)) { return None; }
+        if self.tool.kind() != EditorToolKind::Zone { return None; }
+        self.objects.points_center(self.tool.selection()).ok().flatten()
     }
 
     /// Run an action from the UI that the selected tool handles in its own way, with the same rollback and error handling as other tool actions.

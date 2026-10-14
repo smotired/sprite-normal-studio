@@ -10,7 +10,9 @@ mod merge;
 mod bounds;
 mod diff;
 mod save;
+mod clipboard;
 
+use studio_math::Vec2;
 use wgpu::{Buffer, Device};
 
 use zone::Zone;
@@ -98,6 +100,38 @@ impl ObjectBuffers {
     }
 
     pub fn object_counts(&self) -> (usize, usize) { (self.zone_count() as usize, self.point_count() as usize) }
+
+    /// Get the average position of a list of points. Siblings share a position, so each set of siblings only counts once
+    /// no matter how many of them are in the list. Returns None if the list is empty.
+    pub fn points_center(&self, point_ids: &[u16]) -> anyhow::Result<Option<Vec2>> {
+        // Siblings of points that don't exist would never loop back around
+        if let Some(&point_id) = point_ids.iter().find(|&&point_id| point_id >= self.point_count()) {
+            anyhow::bail!("Point {} does not exist!", point_id);
+        }
+
+        let targets = one_per_sibling_ring(point_ids, &self.point_siblings.borrow().items);
+        if targets.is_empty() { return Ok(None); }
+
+        let mut sum = Vec2::ZERO;
+        for &point_id in &targets {
+            sum += self.get_point_info(point_id)?.position();
+        }
+        Ok(Some(sum * (1.0 / targets.len() as f32)))
+    }
+}
+
+/// Keep the first point of each set of siblings in a list, in order, dropping the rest of its siblings.
+fn one_per_sibling_ring(point_ids: &[u16], siblings: &Vec<u16>) -> Vec<u16> {
+    let mut targets = vec![];
+    let mut exhausted = std::collections::HashSet::new();
+    for &point_id in point_ids {
+        // If this isn't already in the exhausted list, add it and exhaust siblings
+        if exhausted.insert(point_id) {
+            targets.push(point_id);
+            exhausted.extend(ControlPoint::get_siblings(point_id, siblings));
+        }
+    }
+    targets
 }
 
 
@@ -126,8 +160,6 @@ pub(crate) mod test_utils {
 
 #[cfg(test)]
 mod tests {
-    use studio_math::Vec2;
-
     use super::*;
     use super::test_utils::{add_zone, add_square};
 
@@ -175,5 +207,25 @@ mod tests {
         assert_eq!(objects.sibling_in_zone(1, zone_id), Some(point_id));
         assert_eq!(objects.sibling_in_zone(point_id, 0), Some(1));
         assert_eq!(objects.sibling_in_zone(0, zone_id), None);
+    }
+
+    /// The center of a zone's points is their average position
+    #[test]
+    fn points_center() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        assert_eq!(objects.points_center(&[0, 1, 2, 3]).unwrap(), Some(Vec2::new(5.0, 5.0)));
+        assert_eq!(objects.points_center(&[1, 2]).unwrap(), Some(Vec2::new(10.0, 5.0)));
+        assert_eq!(objects.points_center(&[]).unwrap(), None);
+        assert!(objects.points_center(&[4]).is_err());
+    }
+
+    /// Siblings only count once towards the center
+    #[test]
+    fn points_center_siblings_once() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let (_, point_id) = objects.create_branching_zone(1).unwrap();
+        assert_eq!(objects.points_center(&[0, 1, point_id]).unwrap(), Some(Vec2::new(5.0, 0.0)));
     }
 }

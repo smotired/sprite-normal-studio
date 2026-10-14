@@ -1,6 +1,6 @@
 use studio_math::Vec2;
 
-use crate::{Controller, EditorToolKind, SpecialAction};
+use crate::{Controller, EditorToolKind, PastePlacement, SpecialAction};
 use super::history::DragStep;
 
 pub enum Axis {
@@ -70,6 +70,9 @@ pub enum Action {
 
     /// Select everything the selected tool can select
     SelectAll,
+
+    /// Copy the selected zones and paste them, without using the clipboard
+    Duplicate(PastePlacement),
 
     /// Undo the latest action or drag
     Undo,
@@ -184,6 +187,12 @@ impl Controller {
 
             Action::SelectAll => {
                 self.run_tool(DragStep::None, |tool, state| tool.handle_select_all(state));
+            },
+
+            Action::Duplicate(placement) => {
+                if let Some(objects) = self.copy_selection() {
+                    self.paste(&objects, placement);
+                }
             },
 
             Action::Undo => {

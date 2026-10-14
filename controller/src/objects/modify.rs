@@ -1,6 +1,6 @@
 use studio_math::{Vec2, Vec3};
 
-use super::{ObjectBuffers, ControlPoint, ControlPointMode};
+use super::{ObjectBuffers, ControlPoint, ControlPointMode, one_per_sibling_ring};
 
 impl ObjectBuffers {
     pub fn update_point(&mut self, point_id: u16, position: Option<Vec2>, mode: Option<ControlPointMode>, left_handle: Option<Vec2>, right_handle: Option<Vec2>) -> anyhow::Result<()> {
@@ -61,15 +61,7 @@ impl ObjectBuffers {
         let siblings = &self.point_siblings.borrow().items;
 
         // Get one copy of each set of siblings
-        let mut targets = vec![];
-        let mut exhausted = std::collections::HashSet::new();
-        for &point_id in point_ids {
-            // If this isn't already in the exhausted list, add it and exhaust siblings
-            if exhausted.insert(point_id) {
-                targets.push(point_id);
-                exhausted.extend(ControlPoint::get_siblings(point_id, siblings));
-            }
-        }
+        let targets = one_per_sibling_ring(point_ids, siblings);
 
         // Update all the points, which also updates their siblings
         for point_id in targets {

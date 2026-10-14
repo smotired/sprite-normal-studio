@@ -83,7 +83,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 
 ```
 [x] Undo/redo with history. Use a stack like Unity's Undo class.
-[ ] Copy and paste selected zones.
+[x] Copy and paste selected zones.
 [ ] Rotate/scale selection
 [ ] Holding shift/alt/etc while rotate/scale to snap/keep ratio/etc. All the things.
 [x] Saving workspace files (with path to sprite and normal map, all shapes,
@@ -92,7 +92,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Exporting normal map (Ctrl+E exports to path with confirmation if it
     would overwrite. Ctrl+Shift+E opens dialog.)
 [x] Having multiple workspace files open
-[ ] Copy/pasting zones between workspace files
+[x] Copy/pasting zones between workspace files
 ```
 
 ### Phase V - The Whole Point

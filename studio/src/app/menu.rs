@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use controller::{Action, EditorToolKind, SpecialAction};
+use controller::{Action, EditorToolKind, PastePlacement, SpecialAction};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 use studio_math::Vec3;
 
@@ -12,6 +12,11 @@ const SELECT_ALL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key:
 const DESELECT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Escape);
 const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Z);
 const REDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Y);
+const CUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::X);
+const COPY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::C);
+const PASTE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::V);
+const DUPLICATE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::D);
+const DELETE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Delete);
 const ZOOM_IN: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Equals);
 const ZOOM_OUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Minus);
 const RECENTER: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Home);
@@ -30,6 +35,9 @@ enum MenuAction {
     LoadNormalMap,
     ResetBaseNormals,
     Controller(Action),
+
+    /// Cut, copy or paste, which is sent back as the same event as its shortcut
+    Clipboard(egui::ViewportCommand),
 }
 
 impl StudioApp {
@@ -57,6 +65,11 @@ impl StudioApp {
             MenuAction::ResetBaseNormals => self.reset_base_normals(),
             MenuAction::Controller(action) => if let Some(project) = self.project_mut() {
                 project.controller.handle_action(action);
+            },
+            MenuAction::Clipboard(command) => {
+                // The event arrives on the next frame, which shouldn't wait for more input
+                ui.ctx().send_viewport_cmd(command);
+                ui.ctx().request_repaint();
             },
         }
         None
@@ -101,22 +114,40 @@ impl StudioApp {
         }
     }
 
-    /// Edit menu: the selection, and undo history
+    /// Edit menu: the selection, undo history, and the clipboard
     fn edit_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
         let Some(project) = self.project() else { return; };
         let controller = &project.controller;
         let selecting_tool = matches!(controller.selected_tool(), EditorToolKind::Zone | EditorToolKind::Point);
+        let has_selection = !controller.selected_points().is_empty();
 
         let items = [
             ("Select All", SELECT_ALL, selecting_tool && controller.has_objects(), Action::SelectAll),
             // With nothing being dragged while the menu is open, cancelling just clears the selection
-            ("Deselect", DESELECT, selecting_tool && !controller.selected_points().is_empty(), Action::Cancel),
+            ("Deselect", DESELECT, selecting_tool && has_selection, Action::Cancel),
         ];
         controller_items(ui, items, clicked);
         ui.separator();
         controller_items(ui, [
             ("Undo", UNDO, controller.can_undo(), Action::Undo),
             ("Redo", REDO, controller.can_redo(), Action::Redo),
+        ], clicked);
+        ui.separator();
+
+        // Only zones can be copied. The mouse is over the menu, so pasting offsets from where the zones were copied.
+        let in_zone_tool = controller.selected_tool() == EditorToolKind::Zone;
+        for (label, shortcut, enabled, command) in [
+            ("Cut", CUT, in_zone_tool && has_selection, egui::ViewportCommand::RequestCut),
+            ("Copy", COPY, in_zone_tool && has_selection, egui::ViewportCommand::RequestCopy),
+            ("Paste", PASTE, in_zone_tool, egui::ViewportCommand::RequestPaste),
+        ] {
+            if menu_item(ui, label, Some(shortcut), enabled, None) {
+                *clicked = Some(MenuAction::Clipboard(command));
+            }
+        }
+        controller_items(ui, [
+            ("Duplicate", DUPLICATE, in_zone_tool && has_selection, Action::Duplicate(PastePlacement::Offset(None))),
+            ("Delete", DELETE, selecting_tool && has_selection, Action::Delete),
         ], clicked);
     }
 

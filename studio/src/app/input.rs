@@ -1,8 +1,9 @@
-use controller::{Axis, Action, Controller, InputModifiers, SpecialAction};
+use controller::{Axis, Action, Controller, InputModifiers, PastePlacement, SpecialAction};
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
 use studio_math::Vec2;
 
 use crate::app::StudioApp;
+use crate::app::clipboard::ClipboardEvent;
 use crate::app::workspace::WorkspaceCommand;
 
 trait IntoInputModifiers {
@@ -26,23 +27,31 @@ impl StudioApp {
     pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) {
         let Some(project) = self.projects.get_mut(self.current) else { return; };
         let controller = &mut project.controller;
-        ui.input_mut(|i| {
+        let clipboard_events = ui.input_mut(|i| {
             for event in handle_app_input(controller, i, viewport_rect) {
                 controller.handle_action(event);
             }
 
             // Set world space cursor position
-            let viewport_size = Vec2::from(viewport_rect.size());
-            if let Some(mouse_world) = i.pointer.latest_pos()
-                .filter(|pos| viewport_rect.contains(*pos))
-                .map(|pos| {
-                    let local = pos - viewport_rect.min; // egui::Vec2, points relative to the viewport origin
-                    controller.screen_to_world(Vec2::from(local), viewport_size)
-                })
-            {
+            let mouse_world = mouse_world(controller, i, viewport_rect);
+            if let Some(mouse_world) = mouse_world {
                 controller.set_cursor_pos(mouse_world);
             }
-        })
+
+            // Clipboard shortcuts come as their own events instead of key presses
+            let placement = paste_placement(i.modifiers.shift, mouse_world);
+            i.events.iter().filter_map(|event| match event {
+                Event::Cut => Some(ClipboardEvent::Cut),
+                Event::Copy => Some(ClipboardEvent::Copy),
+                Event::Paste(text) => Some(ClipboardEvent::Paste(text.clone(), placement)),
+                _ => None,
+            }).collect::<Vec<_>>()
+        });
+
+        let ctx = ui.ctx().clone();
+        for event in clipboard_events {
+            self.handle_clipboard_event(&ctx, event);
+        }
     }
 
     /// Forward input events on the editor image, i.e. click and drag, to the controller
@@ -54,6 +63,27 @@ impl StudioApp {
     }
 }
 
+/// Get the mouse position in world space, or None if the mouse is not over the viewport
+fn mouse_world(controller: &Controller, i: &InputState, viewport_rect: Rect) -> Option<Vec2> {
+    let viewport_size = Vec2::from(viewport_rect.size());
+    i.pointer.latest_pos()
+        .filter(|pos| viewport_rect.contains(*pos))
+        .map(|pos| {
+            let local = pos - viewport_rect.min; // egui::Vec2, points relative to the viewport origin
+            controller.screen_to_world(Vec2::from(local), viewport_size)
+        })
+}
+
+/// Decide where to paste or duplicate zones. With shift they go exactly where they were copied from,
+/// otherwise they go at the mouse, or offset from where they were copied if the mouse isn't over the viewport.
+fn paste_placement(shift: bool, mouse_world: Option<Vec2>) -> PastePlacement {
+    if shift { return PastePlacement::InPlace; }
+    match mouse_world {
+        Some(pos) => PastePlacement::At(pos),
+        None => PastePlacement::Offset(None),
+    }
+}
+
 // Convert egui inputs into something our controller can use.
 fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport_rect: Rect) -> Box<dyn Iterator<Item = Action> + 'a> {
     // Get movement constants
@@ -61,13 +91,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
     let scale = |shift: bool| { if shift { 2 } else { 1 } };
 
     // Get mouse position in world space over the image. None if mouse is not over image.
-    let viewport_size = Vec2::from(viewport_rect.size());
-    let mouse_world = i.pointer.latest_pos()
-        .filter(|pos| viewport_rect.contains(*pos))
-        .map(|pos| {
-            let local = pos - viewport_rect.min; // egui::Vec2, points relative to the viewport origin
-            controller.screen_to_world(Vec2::from(local), viewport_size)
-        });
+    let mouse_world = mouse_world(controller, i, viewport_rect);
 
     // Handle specific events
     Box::new(i.events.clone().into_iter().map(move |event| {
@@ -122,8 +146,11 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                             Action::CameraMove(Axis::Vertical, movement(modifiers.shift))
                         } else { Action::None }
                     },
+                    // Duplicate with ctrl, otherwise camera movement
                     Key::D => {
-                        if pressed {
+                        if pressed && modifiers.ctrl {
+                            if repeat { Action::None } else { Action::Duplicate(paste_placement(modifiers.shift, mouse_world)) }
+                        } else if pressed {
                             Action::CameraMove(Axis::Horizontal, movement(modifiers.shift))
                         } else { Action::None }
                     },

@@ -1,3 +1,4 @@
+mod clipboard;
 mod file;
 mod editor;
 mod input;
@@ -85,6 +86,9 @@ pub struct StudioApp {
 
     /// While closing the window, the next project to ask about saving its unsaved changes
     quitting: Option<usize>,
+
+    /// The last zones pasted from the clipboard, in any project
+    last_paste: Option<clipboard::LastPaste>,
 }
 
 /// Default initializer for application state
@@ -111,6 +115,7 @@ impl StudioApp {
             tool_sidebars: Default::default(),
             allow_close: false,
             quitting: None,
+            last_paste: None,
         }
     }
 
