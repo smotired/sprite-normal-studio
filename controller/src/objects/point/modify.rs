@@ -83,6 +83,13 @@ impl ControlPoint {
         }
     }
 
+    /// Shift the zone and point IDs this point refers to, for when it is added after other objects.
+    pub(crate) fn offset_ids(&mut self, point_offset: u16, zone_offset: u16) {
+        self.zone_id += zone_offset;
+        self.left_sync_id += point_offset;
+        self.right_sync_id += point_offset;
+    }
+
     /// Remove a point ID from the point list
     pub fn remove_point(point_id: u16, points: &mut Vec<ControlPoint>, siblings: &mut SiblingsList) -> anyhow::Result<()> {
         if (point_id as usize) >= points.len() { anyhow::bail!("Point {} does not exist!", point_id); }

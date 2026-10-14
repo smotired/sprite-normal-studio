@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use studio_math::{Vec2, Vec3};
@@ -49,12 +49,15 @@ pub struct SavedSync {
 
 /// Object lists built from saved objects, which have been checked and are ready to replace the current ones
 pub struct LoadedObjects {
-    zones: Vec<Zone>,
-    points: Vec<ControlPoint>,
-    point_siblings: Vec<u16>,
+    pub(super) zones: Vec<Zone>,
+    pub(super) points: Vec<ControlPoint>,
+    pub(super) point_siblings: Vec<u16>,
 }
 
 impl SavedObjects {
+    /// How many zones there are
+    pub fn zone_count(&self) -> usize { self.zones.len() }
+
     /// Check the saved objects and build the object lists from them, without touching any current objects.
     pub fn validate(&self) -> anyhow::Result<LoadedObjects> {
         let zone_count = self.zones.len();
@@ -100,47 +103,8 @@ impl SavedObjects {
 impl ObjectBuffers {
     /// Get every zone and control point in the form they are saved to a file
     pub fn save(&self) -> SavedObjects {
-        let zones = self.zones.borrow();
-        let points = self.points.borrow();
-        let siblings = self.point_siblings.borrow();
-
-        // Number points in zone order, in case the points list doesn't already follow it
-        let mut file_ids = HashMap::new();
-        for zone in &zones.items {
-            let (start, count) = zone.range();
-            for point_id in start..start + count {
-                file_ids.insert(point_id, file_ids.len() as u16);
-            }
-        }
-        let file_id = |point_id: u16| file_ids.get(&point_id).copied().unwrap_or(point_id);
-
-        let saved_zones = zones.items.iter().map(|zone| {
-            let (start, count) = zone.range();
-            SavedZone {
-                normal: zone.normal(),
-                points: (start..start + count)
-                    .map(|point_id| points.items[point_id as usize].saved(point_id, file_id))
-                    .collect(),
-            }
-        }).collect();
-
-        // Follow each sibling ring once, starting from its lowest point
-        let mut sibling_groups = vec![];
-        let mut visited = vec![false; points.items.len()];
-        for point_id in 0..points.items.len() as u16 {
-            if visited[point_id as usize] { continue; }
-            let mut group = vec![];
-            let mut id = point_id;
-            while !visited[id as usize] {
-                visited[id as usize] = true;
-                group.push(file_id(id));
-                id = siblings.items[id as usize];
-                if id as usize >= points.items.len() { break; }
-            }
-            if group.len() > 1 { sibling_groups.push(group); }
-        }
-
-        SavedObjects { zones: saved_zones, sibling_groups }
+        let zone_ids: Vec<u16> = (0..self.zone_count()).collect();
+        saved_zones(&zone_ids, &self.zones.borrow().items, &self.points.borrow().items, &self.point_siblings.borrow().items)
     }
 
     /// Replace every zone and control point with ones that have been loaded from a file
@@ -149,6 +113,48 @@ impl ObjectBuffers {
         self.points.borrow_mut().items = loaded.points;
         self.point_siblings.borrow_mut().items = loaded.point_siblings;
     }
+}
+
+/// Get some zones and their points in the form they are saved to a file, numbering points in order across the zones.
+/// Every handle sync and sibling of the zones' points should be in the zones too, or the saved objects won't load.
+pub(super) fn saved_zones(zone_ids: &[u16], zones: &[Zone], points: &[ControlPoint], siblings: &[u16]) -> SavedObjects {
+    // Number points in zone order, in case the points list doesn't already follow it
+    let mut file_ids = HashMap::new();
+    let mut point_ids = vec![];
+    for &zone_id in zone_ids {
+        let (start, count) = zones[zone_id as usize].range();
+        for point_id in start..start + count {
+            file_ids.insert(point_id, point_ids.len() as u16);
+            point_ids.push(point_id);
+        }
+    }
+    let file_id = |point_id: u16| file_ids.get(&point_id).copied().unwrap_or(point_id);
+
+    let saved_zones = zone_ids.iter().map(|&zone_id| {
+        let zone = zones[zone_id as usize];
+        let (start, count) = zone.range();
+        SavedZone {
+            normal: zone.normal(),
+            points: (start..start + count)
+                .map(|point_id| points[point_id as usize].saved(point_id, file_id))
+                .collect(),
+        }
+    }).collect();
+
+    // Follow each sibling ring once, starting from its first point
+    let mut sibling_groups = vec![];
+    let mut visited = HashSet::new();
+    for &point_id in &point_ids {
+        let mut group = vec![];
+        let mut id = point_id;
+        while file_ids.contains_key(&id) && visited.insert(id) {
+            group.push(file_id(id));
+            id = siblings[id as usize];
+        }
+        if group.len() > 1 { sibling_groups.push(group); }
+    }
+
+    SavedObjects { zones: saved_zones, sibling_groups }
 }
 
 #[cfg(test)]
