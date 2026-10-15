@@ -134,11 +134,13 @@ impl ObjectBuffers {
     /// Get references to the buffers and their sizes. Recreates the buffers if needed.
     /// The caller should keep track of the previous buffer sizes and recreate the bind group if they differ.
     pub fn get_buffers(&mut self, device: &Device) -> BufferStates {
-        (
-            self.zones.borrow_untracked().get_buffer(device),
-            self.points.borrow_untracked().get_buffer(device),
-            self.point_siblings.borrow_untracked().get_buffer(device),
-        )
+        BufferStates {
+            zones: self.zones.borrow_untracked().get_buffer(device),
+            points: self.points.borrow_untracked().get_buffer(device),
+            point_siblings: self.point_siblings.borrow_untracked().get_buffer(device),
+            shapes: self.shapes.borrow_untracked().get_buffer(device),
+            shape_vertices: self.shape_vertices.borrow_untracked().get_buffer(device),
+        }
     }
 
     /// Add a command to write the lists that changed to the buffers. Assumes the buffers have already been sized.
@@ -146,6 +148,8 @@ impl ObjectBuffers {
         self.zones.borrow_untracked().write(queue);
         self.points.borrow_untracked().write(queue);
         self.point_siblings.borrow_untracked().write(queue);
+        self.shapes.borrow_untracked().write(queue);
+        self.shape_vertices.borrow_untracked().write(queue);
     }
 }
 
@@ -155,6 +159,8 @@ impl ObjectBuffers {
         self.zones.borrow_untracked().begin_change();
         self.points.borrow_untracked().begin_change();
         self.point_siblings.borrow_untracked().begin_change();
+        self.shapes.borrow_untracked().begin_change();
+        self.shape_vertices.borrow_untracked().begin_change();
     }
 
     /// Stop recording a change, and get what changed
@@ -163,6 +169,8 @@ impl ObjectBuffers {
             zones: self.zones.borrow_untracked().finish_change(),
             points: self.points.borrow_untracked().finish_change(),
             point_siblings: self.point_siblings.borrow_untracked().finish_change(),
+            shapes: self.shapes.borrow_untracked().finish_change(),
+            shape_vertices: self.shape_vertices.borrow_untracked().finish_change(),
         }
     }
 
@@ -171,6 +179,8 @@ impl ObjectBuffers {
         self.zones.borrow_untracked().rollback_change();
         self.points.borrow_untracked().rollback_change();
         self.point_siblings.borrow_untracked().rollback_change();
+        self.shapes.borrow_untracked().rollback_change();
+        self.shape_vertices.borrow_untracked().rollback_change();
     }
 }
 

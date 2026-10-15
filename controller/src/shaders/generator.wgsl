@@ -41,6 +41,20 @@ struct ZonePacked {
     // --------
     // Amount of points in this path
     points_start_and_point_count: u32,
+
+    // Start index of this zone's shapes
+    // --------
+    // Amount of shapes in this zone
+    shapes_start_and_shape_count: u32,
+
+    // Start index of this zone's shape vertices
+    // --------
+    // Amount of shape vertices in this zone
+    vertices_start_and_vertex_count: u32,
+
+    // The struct is rounded up to the 16 byte alignment of the vec3 anyway. Must match Zone in zone.rs.
+    _padding0: u32,
+    _padding1: u32,
 }
 @group(1) @binding(0) var<storage, read> zones: array<ZonePacked>;
 

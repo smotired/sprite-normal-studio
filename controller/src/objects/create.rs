@@ -11,7 +11,8 @@ impl ObjectBuffers {
             anyhow::bail!("No room to create another zone!");
         }
 
-        self.zones.borrow_mut().items.push(Zone::new(self.point_count(), Vec3::FORWARD));
+        let zone = Zone::new(self.point_count(), self.shape_count(), self.vertex_count(), Vec3::FORWARD);
+        self.zones.borrow_mut().items.push(zone);
         Ok(zone_id)
     }
 
@@ -48,7 +49,7 @@ impl ObjectBuffers {
         let zones = &mut self.zones.borrow_mut().items;
         zones[zone_id as usize].add_point();
         for zone in &mut zones[(zone_id as usize + 1)..(zone_count as usize)] {
-            zone.add_offset(1);
+            zone.add_point_offset(1);
         }
 
         // Add the point
