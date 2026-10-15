@@ -32,7 +32,7 @@ struct RenderControl {
     objects_bind_group: BindGroup,
 
     /// The size of the object buffers
-    object_buffer_sizes: (usize, usize, usize),
+    object_buffer_sizes: [usize; 5],
 }
 
 /// Primary struct for rendering the viewport.
@@ -100,9 +100,8 @@ impl Renderer {
         );
 
         // Create object bind group
-        let (zones_buffer, points_buffer, siblings_buffer) = object_buffers;
-        let objects_bind_group = create_objects_bind_group(device, &pipeline, selection_buffer, zones_buffer.0, points_buffer.0, siblings_buffer.0);
-        let object_buffer_sizes = (zones_buffer.1, points_buffer.1, siblings_buffer.1);
+        let object_buffer_sizes = object_buffers.sizes();
+        let objects_bind_group = create_objects_bind_group(device, &pipeline, selection_buffer, object_buffers);
 
         // Set up
         let control = RenderControl {
@@ -149,10 +148,10 @@ impl Renderer {
         }
 
         // Recreate objects bind group if needed
-        let (zones_buffer, points_buffer, siblings_buffer) = controller.object_buffers(device);
-        let object_buffer_sizes = (zones_buffer.1, points_buffer.1, siblings_buffer.1);
+        let object_buffers = controller.object_buffers(device);
+        let object_buffer_sizes = object_buffers.sizes();
         if object_buffer_sizes != self.control.object_buffer_sizes {
-            self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, controller.selection_buffer(), zones_buffer.0, points_buffer.0, siblings_buffer.0);
+            self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, controller.selection_buffer(), object_buffers);
             self.control.object_buffer_sizes = object_buffer_sizes;
         }
 
@@ -187,9 +186,8 @@ impl Renderer {
 
     /// Draw a different controller's objects. Always rebinds, since its buffers may be the same size as the old ones.
     pub fn set_objects(&mut self, device: &Device, selection_buffer: Buffer, object_buffers: BufferStates) {
-        let (zones_buffer, points_buffer, siblings_buffer) = object_buffers;
-        self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, selection_buffer, zones_buffer.0, points_buffer.0, siblings_buffer.0);
-        self.control.object_buffer_sizes = (zones_buffer.1, points_buffer.1, siblings_buffer.1);
+        self.control.object_buffer_sizes = object_buffers.sizes();
+        self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, selection_buffer, object_buffers);
     }
 
     /// Set the input textures for the viewport
@@ -256,7 +254,7 @@ fn create_textures_bind_group(device: &Device, pipeline: &ComputePipeline, outpu
 }
 
 /// Create a new bind group for a pipeline. Should be called whenever the object buffers are recreated.
-fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, selection: Buffer, zones: Buffer, points: Buffer, siblings: Buffer) -> BindGroup {
+fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, selection: Buffer, object_buffers: BufferStates) -> BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipeline.get_bind_group_layout(1),
@@ -267,15 +265,15 @@ fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, select
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: zones.as_entire_binding(),
+                resource: object_buffers.zones.0.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: points.as_entire_binding(),
+                resource: object_buffers.points.0.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: siblings.as_entire_binding(),
+                resource: object_buffers.point_siblings.0.as_entire_binding(),
             },
         ]
     })

@@ -89,7 +89,7 @@ impl ObjectBuffers {
         
         // Pull the rest of the points and zones backwards
         for zone in &mut zones[(zone_id + 1)..zone_count] {
-            zone.add_offset(-1);
+            zone.add_point_offset(-1);
         }
 
         Ok(false)
@@ -104,10 +104,11 @@ impl ObjectBuffers {
         self.delete_point_with_threshold(point_id, 1)
     }
 
-    /// Remove a whole zone and all its points.
+    /// Remove a whole zone and all its points and shapes.
     pub fn delete_zone(&mut self, zone_id: u16) -> anyhow::Result<()> {
         let (start, count) = self.get_zone_info(zone_id)?.range();
-        
+        self.clear_zone_shapes(&[zone_id])?;
+
         // Remove points backwards to preserve indices
         for i in 0..count {
             let point_id = start + count - 1 - i;
@@ -118,12 +119,17 @@ impl ObjectBuffers {
         let new_zone_count = self.zone_count() as usize - 1;
         let zones = &mut self.zones.borrow_mut().items;
         let points = &mut self.points.borrow_mut().items;
+        let shapes = &mut self.shapes.borrow_mut().items;
         zones.remove(zone_id as usize);
         for (i, zone) in zones.iter().enumerate().take(new_zone_count).skip(zone_id as usize) {
-            // The zone should already have had its range updated
+            // The zone should already have had its ranges updated
             let (start, count) = zone.range();
             for j in 0..count {
                 points[(start + j) as usize].set_zone_id(i as u16);
+            }
+            let (start, count) = zone.shapes();
+            for j in 0..count {
+                shapes[(start + j) as usize].set_zone_id(i as u16);
             }
         }
 

@@ -25,7 +25,8 @@ const FORMAT: &str = "sprite-normal-studio";
 /// - Version 1: Spritesheet and base normal map paths, spritesheet size, light, and objects.
 /// - Version 2: Removed the light. It is ignored when reading version 1 files.
 /// - Version 3: Made the base normal map path optional (null for a flat normal map), and added the export path.
-const VERSION: u32 = 3;
+/// - Version 4: Added shapes and shape vertices to zones. Zones in older files have no shapes.
+const VERSION: u32 = 4;
 
 /// Extension of workspace files
 pub(super) const EXTENSION: &str = "sns";
@@ -614,6 +615,31 @@ mod tests {
         let file = read_workspace(&json).unwrap();
         assert_eq!(file.version, 1);
         assert!(file.scene.objects.validate().is_ok());
+    }
+
+    /// Version 3 files have no shapes, so their zones load without any, and none are written back
+    #[test]
+    fn read_version_3() {
+        let json = serde_json::json!({
+            "format": FORMAT,
+            "version": 3,
+            "spritesheet": "hero.png",
+            "normal_map": null,
+            "export_path": null,
+            "sprite_size": [64, 32],
+            "zones": [{
+                "normal": { "x": 0.0, "y": 0.0, "z": 1.0 },
+                "points": [
+                    { "position": { "x": 0.0, "y": 0.0 }, "left_handle": { "x": 0.0, "y": 0.0 }, "right_handle": { "x": 0.0, "y": 0.0 }, "mode": "linear" },
+                    { "position": { "x": 9.0, "y": 0.0 }, "left_handle": { "x": 0.0, "y": 0.0 }, "right_handle": { "x": 0.0, "y": 0.0 }, "mode": "linear" },
+                ],
+            }],
+        }).to_string();
+        let file = read_workspace(&json).unwrap();
+        assert_eq!(file.version, 3);
+        assert_eq!(file.scene.objects.zone_count(), 1);
+        assert!(file.scene.objects.validate().is_ok());
+        assert!(!serde_json::to_string(&file).unwrap().contains("shape"));
     }
 
     /// A file that is read and written back out is equal to itself when read again, so opening a file doesn't count as a change.

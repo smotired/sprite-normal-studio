@@ -47,7 +47,7 @@ impl Generator {
         });
 
         // Create object bind group
-        let (zones_buffer, _, _) = object_buffers;
+        let zones_buffer = object_buffers.zones;
         let objects_bind_group = create_objects_bind_group(device, &pipeline, zones_buffer.0);
         let object_buffer_sizes = (zones_buffer.1, ());
 
@@ -89,7 +89,7 @@ impl Generator {
         }));
 
         // Recreate objects bind group if needed
-        let (zones_buffer, _, _) = object_buffers;
+        let zones_buffer = object_buffers.zones;
         let object_buffer_sizes = (zones_buffer.1, ());
         if object_buffer_sizes != self.object_buffer_sizes {
             self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0);
@@ -105,7 +105,7 @@ impl Generator {
         let Some(bind_group) = &self.bind_group else { return };
 
         // Recreate objects bind group if needed
-        let (zones_buffer, _, _) = object_buffers;
+        let zones_buffer = object_buffers.zones;
         let object_buffer_sizes = (zones_buffer.1, ());
         if object_buffer_sizes != self.object_buffer_sizes {
             self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0);

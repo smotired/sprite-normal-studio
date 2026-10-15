@@ -1,4 +1,4 @@
-use super::{ObjectBuffers, ControlPoint};
+use super::{ObjectBuffers, ControlPoint, Shape, ShapeVertex};
 use super::zone::Zone;
 
 /// A run of items that changed. Spans before the end of the shorter list have equal old and new lengths,
@@ -73,12 +73,15 @@ pub struct ObjectDiff {
     pub(super) zones: Option<ListDiff<Zone>>,
     pub(super) points: Option<ListDiff<ControlPoint>>,
     pub(super) point_siblings: Option<ListDiff<u16>>,
+    pub(super) shapes: Option<ListDiff<Shape>>,
+    pub(super) shape_vertices: Option<ListDiff<ShapeVertex>>,
 }
 
 impl ObjectDiff {
     /// Returns true if nothing changed
     pub fn is_empty(&self) -> bool {
         self.zones.is_none() && self.points.is_none() && self.point_siblings.is_none()
+            && self.shapes.is_none() && self.shape_vertices.is_none()
     }
 
     /// Put the objects back the way they were before the changes
@@ -86,6 +89,8 @@ impl ObjectDiff {
         if let Some(diff) = &self.zones { diff.revert(&mut objects.zones.borrow_mut().items); }
         if let Some(diff) = &self.points { diff.revert(&mut objects.points.borrow_mut().items); }
         if let Some(diff) = &self.point_siblings { diff.revert(&mut objects.point_siblings.borrow_mut().items); }
+        if let Some(diff) = &self.shapes { diff.revert(&mut objects.shapes.borrow_mut().items); }
+        if let Some(diff) = &self.shape_vertices { diff.revert(&mut objects.shape_vertices.borrow_mut().items); }
     }
 
     /// Make the changes to the objects again
@@ -93,20 +98,27 @@ impl ObjectDiff {
         if let Some(diff) = &self.zones { diff.apply(&mut objects.zones.borrow_mut().items); }
         if let Some(diff) = &self.points { diff.apply(&mut objects.points.borrow_mut().items); }
         if let Some(diff) = &self.point_siblings { diff.apply(&mut objects.point_siblings.borrow_mut().items); }
+        if let Some(diff) = &self.shapes { diff.apply(&mut objects.shapes.borrow_mut().items); }
+        if let Some(diff) = &self.shape_vertices { diff.apply(&mut objects.shape_vertices.borrow_mut().items); }
     }
 
     /// Combine diffs that were made one after another into one diff, given the objects as they are after the last of them
     pub fn collapse(diffs: Vec<ObjectDiff>, objects: &ObjectBuffers) -> ObjectDiff {
         let (mut zones, mut points, mut point_siblings) = (vec![], vec![], vec![]);
+        let (mut shapes, mut shape_vertices) = (vec![], vec![]);
         for diff in diffs {
             zones.extend(diff.zones);
             points.extend(diff.points);
             point_siblings.extend(diff.point_siblings);
+            shapes.extend(diff.shapes);
+            shape_vertices.extend(diff.shape_vertices);
         }
         ObjectDiff {
             zones: ListDiff::collapse(zones, &objects.zones.borrow().items),
             points: ListDiff::collapse(points, &objects.points.borrow().items),
             point_siblings: ListDiff::collapse(point_siblings, &objects.point_siblings.borrow().items),
+            shapes: ListDiff::collapse(shapes, &objects.shapes.borrow().items),
+            shape_vertices: ListDiff::collapse(shape_vertices, &objects.shape_vertices.borrow().items),
         }
     }
 }
@@ -203,6 +215,8 @@ mod tests {
         assert!(diff.points.is_some());
         assert!(diff.zones.is_none());
         assert!(diff.point_siblings.is_none());
+        assert!(diff.shapes.is_none());
+        assert!(diff.shape_vertices.is_none());
 
         diff.revert(&objects);
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
