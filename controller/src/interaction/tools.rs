@@ -10,7 +10,7 @@ pub(super) use result::ToolResult;
 use result::{EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
-use crate::{Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, SavedObjects, Status};
+use crate::{Axis, Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, SavedObjects, Status};
 use super::history::{History, DragStep};
 
 /// Options for which tool we are using in the editor.
@@ -63,6 +63,12 @@ pub enum SpecialAction {
 
     /// Zone, Point: separate the selected points from their unselected siblings.
     SelectionSeparated,
+
+    /// Zone: mirror the selected zones across an axis through the center of their bounds. Flipping across the vertical axis flips horizontally.
+    SelectionFlipped(Axis),
+
+    /// Zone: turn the selected zones a quarter turn around the center of their bounds. True turns clockwise, false counterclockwise.
+    SelectionRotated(bool),
 
     /// Point: set the handle mode of the selected point.
     PointModeSet(ControlPointMode),

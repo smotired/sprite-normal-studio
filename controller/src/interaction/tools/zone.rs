@@ -1,7 +1,7 @@
 use studio_math::Vec2;
 use studio_math::transform::Affine2;
 
-use crate::{Bounds, InputModifiers, ObjectBuffers, SavedObjects};
+use crate::{Axis, Bounds, InputModifiers, ObjectBuffers, SavedObjects};
 use crate::objects::{merge_bounds, PointsSnapshot};
 
 use super::{EditorTool, EditorToolKind, ControllerStateInput, PastePlacement, SelectionType, SpecialAction, TransformBox, utils};
@@ -412,6 +412,18 @@ impl EditorTool for EditorToolZone {
                 state.objects.separate_points(&self.selected_points_reference)?;
                 self.ok()
             },
+            // World space has +y down, so turning from +x towards +y is clockwise
+            SpecialAction::SelectionFlipped(axis) => {
+                let factors = match axis {
+                    Axis::Vertical => Vec2::new(-1.0, 1.0),
+                    Axis::Horizontal => Vec2::new(1.0, -1.0),
+                };
+                self.transform_selected_zones(&mut state, |center| Affine2::scale_about(factors, center))
+            },
+            SpecialAction::SelectionRotated(clockwise) => {
+                let angle = if clockwise { std::f32::consts::FRAC_PI_2 } else { -std::f32::consts::FRAC_PI_2 };
+                self.transform_selected_zones(&mut state, |center| Affine2::rotate_about(angle, center))
+            },
             _ => self.ok(),
         }
     }
@@ -433,6 +445,18 @@ impl EditorToolZone {
     fn move_selected_zones(&self, state: &mut ControllerStateInput, first_point_position: Vec2) -> ToolResult {
         let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
         state.objects.move_zones(&self.selected_zones[..], first_point_position)?;
+        let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
+        self.stale_in(merge_bounds(before, after))
+    }
+
+    /// Transform the selected zones around the center of their bounds, marking normals stale where they were and where they are now.
+    /// Siblings move along with the zones, as when dragging the transform box.
+    fn transform_selected_zones(&mut self, state: &mut ControllerStateInput, transform: impl FnOnce(Vec2) -> Affine2) -> ToolResult {
+        self.abandon_drag();
+        let Some((min, max)) = state.objects.zones_bounds(&self.selected_zones)? else { return self.ok(); };
+        let snapshot = state.objects.snapshot_zone_points(&self.selected_zones)?;
+        let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
+        state.objects.apply_transform(&snapshot, &transform((min + max) * 0.5))?;
         let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
         self.stale_in(merge_bounds(before, after))
     }
@@ -1248,6 +1272,58 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         tool.handle_special_action(state(&objects), SpecialAction::SelectionSeparated).unwrap();
         assert!(objects.get_siblings(1).is_empty());
+    }
+
+    /// Flipping mirrors the selected zones around the center of their bounds, leaving other zones alone
+    #[test]
+    fn special_flip() {
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(20.0, 0.0), (40.0, 0.0), (40.0, 10.0)]);
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::SelectionFlipped(Axis::Vertical)).unwrap();
+        assert!(result.normals_stale.is_some());
+        assert_eq!(position(&objects, 0), Vec2::new(40.0, 0.0));
+        assert_eq!(position(&objects, 1), Vec2::new(20.0, 0.0));
+        assert_eq!(position(&objects, 2), Vec2::new(20.0, 10.0));
+        assert_eq!(position(&objects, 4), Vec2::new(10.0, 0.0));
+
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionFlipped(Axis::Horizontal)).unwrap();
+        assert_eq!(position(&objects, 0), Vec2::new(40.0, 10.0));
+        assert_eq!(position(&objects, 2), Vec2::new(20.0, 0.0));
+    }
+
+    /// Rotating turns the selected zones a quarter turn around the center of their bounds, and turning back undoes it
+    #[test]
+    fn special_rotate() {
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0)]);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        // Clockwise on screen, where +y is down: the right side goes to the bottom
+        let result = tool.handle_special_action(state(&objects), SpecialAction::SelectionRotated(true)).unwrap();
+        assert!(result.normals_stale.is_some());
+        assert_near(position(&objects, 0), Vec2::new(15.0, -5.0));
+        assert_near(position(&objects, 1), Vec2::new(15.0, 15.0));
+        assert_near(position(&objects, 2), Vec2::new(5.0, 15.0));
+
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionRotated(false)).unwrap();
+        assert_near(position(&objects, 0), Vec2::new(0.0, 0.0));
+        assert_near(position(&objects, 1), Vec2::new(20.0, 0.0));
+        assert_near(position(&objects, 2), Vec2::new(20.0, 10.0));
+    }
+
+    /// Flipping and rotating do nothing without a selection
+    #[test]
+    fn special_transform_unselected() {
+        let mut objects = ObjectBuffers::headless();
+        add_zone(&mut objects, &[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0)]);
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionFlipped(Axis::Vertical)).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionRotated(true)).unwrap();
+        assert_eq!(position(&objects, 1), Vec2::new(20.0, 0.0));
     }
 
     /// Selecting all selects every zone, whether or not anything was selected before

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use controller::{Action, EditorToolKind, PastePlacement, SpecialAction};
+use controller::{Action, Axis, EditorToolKind, PastePlacement, SpecialAction};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 use studio_math::Vec3;
 
@@ -202,6 +202,19 @@ impl StudioApp {
         ];
         for (label, shortcut, enabled, action) in items {
             if menu_item(ui, label, shortcut, enabled, None) {
+                *clicked = Some(MenuAction::Controller(Action::Special(action)));
+            }
+        }
+        ui.separator();
+
+        // Turning the selected zones around the center of their bounds
+        for (label, action) in [
+            ("Flip Horizontally", SpecialAction::SelectionFlipped(Axis::Vertical)),
+            ("Flip Vertically", SpecialAction::SelectionFlipped(Axis::Horizontal)),
+            ("Rotate Left", SpecialAction::SelectionRotated(false)),
+            ("Rotate Right", SpecialAction::SelectionRotated(true)),
+        ] {
+            if menu_item(ui, label, None, zones_selected, None) {
                 *clicked = Some(MenuAction::Controller(Action::Special(action)));
             }
         }
