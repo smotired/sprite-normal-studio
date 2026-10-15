@@ -3,6 +3,7 @@ use studio_math::Vec2;
 use crate::{Controller, EditorToolKind, PastePlacement, SpecialAction};
 use super::history::DragStep;
 
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Axis {
     Vertical,
     Horizontal,
