@@ -96,6 +96,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 
 ### Phase V - The Whole Point
+*10/15/26 - 10/15/26*
 
 ```
 [x] Shape trait, and basic Point shape that acts like the top of a cone
