@@ -53,18 +53,9 @@ impl Renderer {
     /// Creates our compute pipeline, texture, and buffers.
     pub fn new(device: &Device, selection_buffer: Buffer, object_buffers: BufferStates) -> Self {
         // Load the shader
-        let source = format!(
-            "{}\n{}\n{}\n{}\n{}",                       // Concatenate each source file into one big one
-            include_str!("shader/bindings.wgsl"),       // Contains the actual bindings, including a description of each overlay flag
-            include_str!("shader/helpers.wgsl"),        // Common helper functions
-            include_str!("shader/spritesheet.wgsl"),    // Logic for drawing the lit spritesheet
-            include_str!("shader/overlay.wgsl"),        // Logic for drawing overlay with lights, paths, shapes, etc.
-            include_str!("shader/main.wgsl"),           // Main shader function which calls other stuff
-        );
-
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(source.into()),
+            source: wgpu::ShaderSource::Wgsl(shader_source().into()),
         });
 
         // Create the pipeline for the shader
@@ -209,6 +200,18 @@ impl Renderer {
     }
 }
     
+/// Get the viewport shader's source, which is each of its files concatenated into one big one
+fn shader_source() -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}",
+        include_str!("shader/bindings.wgsl"),       // Contains the actual bindings, including a description of each overlay flag
+        include_str!("shader/helpers.wgsl"),        // Common helper functions
+        include_str!("shader/spritesheet.wgsl"),    // Logic for drawing the lit spritesheet
+        include_str!("shader/overlay.wgsl"),        // Logic for drawing overlay with lights, paths, shapes, etc.
+        include_str!("shader/main.wgsl"),           // Main shader function which calls other stuff
+    )
+}
+
 /// Create a texture and view bindgroup for a pipeline. Should be called when the target render size changes.
 fn create_texture(device: &Device, size: Vec2) -> TextureView {
     // Create a new texture and texture view when resizing
@@ -277,4 +280,19 @@ fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, select
             },
         ]
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The concatenated shader parses and validates. Nothing else checks it without a GPU.
+    #[test]
+    fn shader_validates() {
+        let source = shader_source();
+        let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+    }
 }

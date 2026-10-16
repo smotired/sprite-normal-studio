@@ -98,13 +98,13 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ### Phase V - The Whole Point
 
 ```
-[ ] Shape trait, and basic Point shape that acts like the top of a cone
+[x] Shape trait, and basic Point shape that acts like the top of a cone
 [x] Shapes assigned to zones
 [ ] Render shapes themselves in viewport
 [ ] Controls to show and hide shapes (hiding zone paths always hides shapes)
 [ ] Shape management tools
-[ ] Render shape normals in compute shader
-[ ] Blend normals between multiple shapes based on distance
+[x] Render shape normals in compute shader
+[x] Blend normals between multiple shapes based on distance
 [ ] Line shape with an outer radius
 [ ] Circle shape with an inner (flat) and outer (dome) radius
 [ ] Triangle shape with an outer radius

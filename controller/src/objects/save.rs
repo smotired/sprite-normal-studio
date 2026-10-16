@@ -45,6 +45,9 @@ pub struct SavedShape {
     pub(crate) outer_radius: f32,
     pub(crate) steepness: f32,
     pub(crate) blend: f32,
+
+    #[serde(default)]
+    pub(crate) group: Option<u16>,
 }
 
 fn is_zero(value: &f32) -> bool { *value == 0.0 }
@@ -132,11 +135,21 @@ impl SavedObjects {
                 zone.add_vertex();
                 shape_vertices.push(ShapeVertex::new(position));
             }
+            // Shapes without a group each get one nobody else in the zone has
+            let mut next_group = saved_zone.shapes.iter().filter_map(|shape| shape.group).max().map_or(0, |max| max as u32 + 1);
             for (i, saved_shape) in saved_zone.shapes.iter().enumerate() {
                 if let Some(&vertex) = saved_shape.vertices.iter().find(|&&vertex| vertex as usize >= saved_zone.shape_vertices.len()) {
                     anyhow::bail!("Shape {} in zone {} uses vertex {}, which does not exist!", i, zone_id, vertex);
                 }
-                let shape = Shape::new(zone_id as u16, &saved_shape.vertices, saved_shape.params(), 0)
+                let group = match saved_shape.group {
+                    Some(group) => group,
+                    None => {
+                        let group = u16::try_from(next_group).map_err(|_| anyhow::anyhow!("Zone {} has too many shape groups!", zone_id))?;
+                        next_group += 1;
+                        group
+                    },
+                };
+                let shape = Shape::new(zone_id as u16, &saved_shape.vertices, saved_shape.params(), group, 0)
                     .with_context(|| format!("Shape {} in zone {} is invalid", i, zone_id))?;
                 zone.add_shape();
                 shapes.push(shape);
@@ -211,6 +224,7 @@ fn saved_shapes(zone: &Zone, shapes: &[Shape], vertices: &[ShapeVertex]) -> (Vec
             outer_radius: params.outer_radius,
             steepness: params.steepness,
             blend: params.blend,
+            group: Some(shape.group()),
         }
     }).collect();
     (saved_vertices, saved_shapes)
@@ -432,10 +446,27 @@ mod tests {
         assert_eq!(objects.save(), sample().save());
     }
 
+    /// Groups are saved, and shapes from before groups each get a group nobody else has
+    #[test]
+    fn shape_groups() {
+        let mut objects = sample();
+        objects.create_shape_in_group(0, &[0], 0, 0).unwrap();
+        let saved = objects.save();
+        assert_eq!(saved.zones[0].shapes.iter().map(|shape| shape.group).collect::<Vec<_>>(), vec![Some(0), Some(0), Some(1)]);
+
+        let mut old = saved.clone();
+        old.zones[0].shapes[0].group = None;
+        old.zones[0].shapes[2].group = None;
+        let loaded = ObjectBuffers::headless();
+        loaded.load(old.validate().unwrap());
+        let groups: Vec<u16> = (0..3).map(|shape_id| loaded.get_shape_info(shape_id).unwrap().group()).collect();
+        assert_eq!(groups, vec![1, 0, 2]);
+    }
+
     /// Shapes need 1 to 3 different vertices that exist in their zone, and values in range
     #[test]
     fn invalid_shapes() {
-        let shape = |vertices: Vec<u16>| SavedShape { vertices, profile: ShapeProfile::Cone, inner_radius: 0.0, outer_radius: 5.0, steepness: 1.0, blend: 1.0 };
+        let shape = |vertices: Vec<u16>| SavedShape { vertices, profile: ShapeProfile::Cone, inner_radius: 0.0, outer_radius: 5.0, steepness: 1.0, blend: 1.0, group: None };
         let with_shape = |shape: SavedShape| {
             let mut saved = with_groups(3, vec![]);
             saved.zones[0].shape_vertices = vec![Vec2::ZERO, Vec2::ONE];

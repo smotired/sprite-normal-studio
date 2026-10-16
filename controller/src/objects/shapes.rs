@@ -140,8 +140,56 @@ impl ObjectBuffers {
         Ok(vertex_id)
     }
 
-    /// Add a shape to the end of a zone's shapes from 1 to 3 different vertices in that zone, and return its ID.
+    /// Add a shape in a new group of its own to the end of a zone's shapes, from 1 to 3 different vertices in that zone, and return its ID.
     pub fn create_shape(&mut self, zone_id: u16, vertex_ids: &[u16], params: ShapeParams, flags: u8) -> anyhow::Result<u16> {
+        let group = self.unused_group(zone_id)?;
+        let (start, count) = self.get_zone_info(zone_id)?.shapes();
+        self.insert_shape(zone_id, start + count, vertex_ids, params, group, flags)
+    }
+
+    /// Add a shape to an existing group in a zone, right after the group's other shapes, from 1 to 3 different vertices in that zone.
+    /// It takes the params of the group, so the group stays one surface. Returns its ID.
+    pub fn create_shape_in_group(&mut self, zone_id: u16, vertex_ids: &[u16], group: u16, flags: u8) -> anyhow::Result<u16> {
+        let mut last = None;
+        for shape_id in self.zone_shape_ids(zone_id)? {
+            let shape = self.get_shape_info(shape_id)?;
+            if shape.group() == group { last = Some((shape_id, shape.params())); }
+        }
+        let Some((last_id, params)) = last else { anyhow::bail!("Zone {} has no shape group {}!", zone_id, group); };
+        self.insert_shape(zone_id, last_id + 1, vertex_ids, params, group, flags)
+    }
+
+    /// Get the IDs of every shape in the same group as any of the listed shapes, sorted
+    pub fn shape_groups(&self, shape_ids: &[u16]) -> anyhow::Result<Vec<u16>> {
+        let mut grouped = vec![];
+        for &shape_id in shape_ids {
+            let shape = self.get_shape_info(shape_id)?;
+            for other_id in self.zone_shape_ids(shape.zone_id())? {
+                if self.get_shape_info(other_id)?.group() == shape.group() { grouped.push(other_id); }
+            }
+        }
+        grouped.sort();
+        grouped.dedup();
+        Ok(grouped)
+    }
+
+    /// Get a group ID that no shape in a zone has
+    fn unused_group(&self, zone_id: u16) -> anyhow::Result<u16> {
+        let mut groups = vec![];
+        for shape_id in self.zone_shape_ids(zone_id)? {
+            groups.push(self.get_shape_info(shape_id)?.group());
+        }
+
+        // Usually one past the highest, but the lowest unused if that would overflow
+        match groups.iter().max() {
+            None => Ok(0),
+            Some(&max) if max < u16::MAX => Ok(max + 1),
+            Some(_) => (0..=u16::MAX).find(|group| !groups.contains(group)).ok_or_else(|| anyhow::anyhow!("No room for another shape group!")),
+        }
+    }
+
+    /// Insert a shape into the shapes list at an ID within its zone's range, and return the ID
+    fn insert_shape(&mut self, zone_id: u16, shape_id: u16, vertex_ids: &[u16], params: ShapeParams, group: u16, flags: u8) -> anyhow::Result<u16> {
         if self.shape_count() == MAX_OBJECT_ID { anyhow::bail!("No room to create another shape!"); }
 
         // Shapes refer to their vertices by their index in the zone
@@ -151,10 +199,10 @@ impl ObjectBuffers {
             if vertex_id < start || vertex_id >= start + count { anyhow::bail!("Shape vertex {} is not in zone {}!", vertex_id, zone_id); }
             local_vertices.push(vertex_id - start);
         }
-        let shape = Shape::new(zone_id, &local_vertices, params, flags)?;
+        let shape = Shape::new(zone_id, &local_vertices, params, group, flags)?;
 
         let zones = &mut self.zones.borrow_mut().items;
-        let shape_id = zones[zone_id as usize].add_shape();
+        zones[zone_id as usize].add_shape();
         for zone in &mut zones[zone_id as usize + 1..] {
             zone.add_shape_offset(1);
         }
@@ -184,12 +232,11 @@ impl ObjectBuffers {
         Ok(())
     }
 
-    /// Change one param of every listed shape
+    /// Change one param of every listed shape, and the rest of their groups so each group stays one surface
     pub fn set_shape_params(&mut self, shape_ids: &[u16], change: ShapeParamChange) -> anyhow::Result<()> {
-        for &shape_id in shape_ids { self.get_shape_info(shape_id)?; }
-
+        let shape_ids = self.shape_groups(shape_ids)?;
         let shapes = &mut self.shapes.borrow_mut().items;
-        for &shape_id in shape_ids {
+        for shape_id in shape_ids {
             let shape = &mut shapes[shape_id as usize];
             shape.set_params(shape.params().with(change));
         }
@@ -494,6 +541,40 @@ mod tests {
         assert_eq!(objects.get_shape_info(1).unwrap().params().profile, ShapeProfile::Cone);
         assert_eq!(objects.get_shape_info(0).unwrap().params().outer_radius, super::super::shape::MIN_OUTER_RADIUS);
         assert!(objects.set_shape_params(&[9], ShapeParamChange::Blend(1.0)).is_err());
+    }
+
+    /// New shapes get a group of their own, and shapes added to a group go right after it with its params
+    #[test]
+    fn groups() {
+        let mut objects = sample();
+        assert_eq!((objects.get_shape_info(0).unwrap().group(), objects.get_shape_info(1).unwrap().group()), (0, 1));
+        assert_eq!(objects.get_shape_info(2).unwrap().group(), 0); // groups are per zone
+
+        // Joining the point's group puts the new shape between the point and the line
+        let vertex = objects.add_shape_vertex(0, Vec2::new(0.0, 9.0)).unwrap();
+        let joined = objects.create_shape_in_group(0, &[0, vertex], 0, 0).unwrap();
+        assert_eq!(joined, 1);
+        assert_eq!(objects.get_shape_info(1).unwrap().group(), 0);
+        assert_eq!(objects.get_shape_info(1).unwrap().params(), objects.get_shape_info(0).unwrap().params());
+        assert_eq!(objects.shape_positions(2).unwrap(), vec![Vec2::new(2.0, 2.0), Vec2::new(8.0, 2.0)]);
+        assert_eq!(objects.get_zone_info(1).unwrap().shapes(), (3, 1));
+        assert_eq!(objects.shape_groups(&[1]).unwrap(), vec![0, 1]);
+
+        // A shape made later still gets a group nobody has
+        let created = objects.create_shape(0, &[vertex], ShapeParams::default(), 0).unwrap();
+        assert_eq!(objects.get_shape_info(created).unwrap().group(), 2);
+        assert!(objects.create_shape_in_group(0, &[vertex], 9, 0).is_err());
+    }
+
+    /// Changing a shape's params changes the rest of its group too
+    #[test]
+    fn params_follow_group() {
+        let mut objects = sample();
+        let vertex = objects.add_shape_vertex(0, Vec2::new(0.0, 9.0)).unwrap();
+        objects.create_shape_in_group(0, &[vertex], 0, 0).unwrap();
+        objects.set_shape_params(&[1], ShapeParamChange::Steepness(3.0)).unwrap();
+        assert_eq!(objects.get_shape_info(0).unwrap().params().steepness, 3.0);
+        assert_eq!(objects.get_shape_info(2).unwrap().params().steepness, 1.0);
     }
 
     /// Reach bounds cover the vertices out to the shape's reach

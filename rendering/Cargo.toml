@@ -10,3 +10,6 @@ description = "Library crate for rendering the sprite, normal map, and UI tools"
 studio_math = { workspace = true }
 controller = { workspace = true }
 wgpu = { workspace = true }
+
+[dev-dependencies]
+naga = { version = "30.0.1", features = ["wgsl-in"] }
