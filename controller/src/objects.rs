@@ -24,6 +24,7 @@ use shape::hull_distance;
 pub use point::ControlPoint;
 pub use point::ControlPointMode;
 use buffers::{VecWithBuffer, ObjectList};
+pub(crate) use buffers::{SELECTION_WIDTH, SELECTION_HEIGHT};
 pub use diff::ObjectDiff;
 pub use bounds::{Bounds, merge_bounds};
 pub use save::{SavedObjects, LoadedObjects};

@@ -84,6 +84,12 @@ pub enum Action {
     /// Overlay is toggled on or off. Maybe later I will add an enum for OverlayComponentKind which is passed here.
     OverlayToggled,
 
+    /// Zone paths in the overlay are toggled on or off, which also hides shapes
+    PathsToggled,
+
+    /// Shapes in the overlay are toggled on or off. The shape tools always show them.
+    ShapesToggled,
+
     /// A specific editor tool is selected.
     ToolSelected(EditorToolKind),
 
@@ -109,6 +115,12 @@ impl Controller {
 
     /// If the overlay is shown
     pub fn overlay_on(&self) -> bool { self.overlay_state.overlay_on() }
+
+    /// If zone paths are shown in the overlay
+    pub fn paths_on(&self) -> bool { self.overlay_state.paths_on() }
+
+    /// If shapes are shown in the overlay outside the shape tools
+    pub fn shapes_on(&self) -> bool { self.overlay_state.shapes_on() }
 
     // Handle different actions from the UI
     pub fn handle_action(&mut self, action: Action) {
@@ -215,6 +227,14 @@ impl Controller {
 
             Action::OverlayToggled => {
                 self.overlay_state.toggle_overlay();
+            },
+
+            Action::PathsToggled => {
+                self.overlay_state.toggle_paths();
+            },
+
+            Action::ShapesToggled => {
+                self.overlay_state.toggle_shapes();
             },
 
             Action::ToolSelected(tool) => {

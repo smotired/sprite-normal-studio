@@ -280,23 +280,211 @@ fn overlay_transform_box(
 }
 
 /***********************************/
+/*         SHAPES OVERLAY          */
+/***********************************/
+
+const SHAPE_COLOR = vec3<f32>(0.0, 0.55, 0.55);           // Dark cyan for shapes in the current zone
+const SELECTED_SHAPE_COLOR = vec3<f32>(0.45, 1.0, 1.0);   // Lighter cyan for selected shapes
+const SHAPE_OPACITY = 0.5;                                // Opacity of fills, and of outlines other than a selected shape's
+const OTHER_ZONE_SHAPE_OPACITY = 0.25;                    // Opacity of the outlines of shapes in other zones, which aren't filled
+const SHAPE_STRIPE_WIDTH = 10.0;                          // Width in screen points of each stripe of a fill, and of each gap between them
+const SHAPE_VERTEX_RADIUS = 3.0;                          // Radius of the knobs on shape vertices
+const SHAPE_RADIUS_HANDLE_HALF_WIDTH = 3.0;               // Half width of the knobs for a shape's radii
+
+// Returns true if a zone is the current zone, whose shapes are filled and drawn brighter.
+// That's the active zone of a shape tool, or any zone with a selected point in other tools.
+fn is_current_zone(zone_id: u32, zone: Zone) -> bool {
+    if (flag(10)) {
+        return zone_id == params.active_zone;
+    }
+    for (var j = 0u; j < zone.point_count; j += 1u) {
+        if (is_selected(zone.points_start + j)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Get the opacity of the diagonal stripes that fill shapes at a screen position, feathered at their edges.
+// Every other stripe is transparent.
+fn stripe_opacity(screen: vec2<f32>) -> f32 {
+    let period = SHAPE_STRIPE_WIDTH * 2.0;
+    let across = (screen.x + screen.y) * 0.70710678;               // Distance across the stripes
+    let phase = across - floor(across / period) * period;          // Opaque from 0 to the stripe width, then transparent
+
+    // Distance to the nearest edge of an opaque stripe, positive inside one
+    var edge = min(phase, SHAPE_STRIPE_WIDTH - phase);
+    if (phase >= SHAPE_STRIPE_WIDTH) {
+        edge = -min(phase - SHAPE_STRIPE_WIDTH, period - phase);
+    }
+    return clamp(0.5 + edge / FEATHER, 0.0, 1.0);
+}
+
+// Fill the cores of the shapes in the current zone with stripes
+fn fill_shapes(
+    color: vec3<f32>,   // Base color below this part of the overlay
+    pos: vec2<f32>,     // World-space position of this pixel
+    screen: vec2<f32>,  // Screen-space position of this pixel, in points
+) -> vec3<f32> {        // Returns new color after adding overlay
+    // Pixels in the gaps between stripes are never filled, so they don't need to look at any shapes
+    let stripe = stripe_opacity(screen);
+    if (stripe <= 0.0) {
+        return color;
+    }
+
+    var col = color;
+    for (var i = 0u; i < params.zone_count; i += 1u) {
+        let zone = get_zone(i);
+        if (zone.shape_count == 0u || !is_current_zone(i, zone)) {
+            continue;
+        }
+
+        for (var j = 0u; j < zone.shape_count; j += 1u) {
+            let shape = get_shape(zone.shape_start + j, zone.vertex_start);
+            if (shape.pending) {
+                continue;
+            }
+
+            // Skip shapes nowhere near this pixel
+            let lower = min(min(shape.a, shape.b), shape.c) - shape.inner_radius;
+            let upper = max(max(shape.a, shape.b), shape.c) + shape.inner_radius;
+            if (!check_bbox(pos, lower, upper) || !in_shape_core(shape, pos)) {
+                continue;
+            }
+
+            var fill_color = SHAPE_COLOR;
+            if (is_shape_selected(shape)) {
+                fill_color = SELECTED_SHAPE_COLOR;
+            }
+            col = mix(col, fill_color, SHAPE_OPACITY * stripe);
+        }
+    }
+    return col;
+}
+
+// Outline the core of every shape, and the outer radius where it meets the ground
+fn outline_shapes(
+    color: vec3<f32>,   // Base color below this part of the overlay
+    pos: vec2<f32>,     // World-space position of this pixel
+) -> vec3<f32> {        // Returns new color after adding overlay
+    var col = color;
+    let margin = FEATHER * params.inv_scale;
+    for (var i = 0u; i < params.zone_count; i += 1u) {
+        let zone = get_zone(i);
+        if (zone.shape_count == 0u) {
+            continue;
+        }
+        let current = is_current_zone(i, zone);
+
+        for (var j = 0u; j < zone.shape_count; j += 1u) {
+            let shape = get_shape(zone.shape_start + j, zone.vertex_start);
+
+            // Skip shapes nowhere near this pixel
+            let reach = shape.inner_radius + shape.outer_radius + margin;
+            let lower = min(min(shape.a, shape.b), shape.c) - reach;
+            let upper = max(max(shape.a, shape.b), shape.c) + reach;
+            if (!check_bbox(pos, lower, upper)) {
+                continue;
+            }
+            let core = hull_distance(shape, pos).distance - shape.inner_radius;
+
+            // Shapes in a path still being drawn are plain outlines, like the path the pen is drawing
+            if (shape.pending) {
+                let feathered = feather_color(vec4<f32>(1, 1, 1, 0.5), core, PATH_HALF_WIDTH * params.inv_scale);
+                col = mix(col, feathered.rgb, feathered.a);
+                continue;
+            }
+
+            var outline_color = vec4<f32>(SHAPE_COLOR, OTHER_ZONE_SHAPE_OPACITY);
+            if (current) {
+                outline_color.a = SHAPE_OPACITY;
+                if (is_shape_selected(shape)) {
+                    outline_color = vec4<f32>(SELECTED_SHAPE_COLOR, 1.0);
+                }
+            }
+
+            // The core's outline, and a fainter one where the surface meets the ground
+            let feathered_core = feather_color(outline_color, core, PATH_HALF_WIDTH * params.inv_scale);
+            col = mix(col, feathered_core.rgb, feathered_core.a);
+            let feathered_outer = feather_color(vec4<f32>(outline_color.rgb, outline_color.a * 0.5), core - shape.outer_radius, 0.0);
+            col = mix(col, feathered_outer.rgb, feathered_outer.a);
+        }
+    }
+    return col;
+}
+
+// Draw the knobs for editing shapes: one on each of the active zone's shape vertices, and the selected shape's radius knobs.
+// Also draw the ghost line from the path of shapes being drawn to the cursor.
+fn overlay_shape_handles(
+    color: vec3<f32>,   // Base color below this part of the overlay
+    pos: vec2<f32>,     // World-space position of this pixel
+) -> vec3<f32> {        // Returns new color after adding overlay
+    var col = color;
+    let selected_color = vec4<f32>(1, 0.5, 0, 1);
+    let vertex_color = vec4<f32>(1, 1, 1, 0.9);
+
+    // The ghost line, under the knobs
+    if (flag(11)) {
+        col = draw_line(col, pos, vec4<f32>(1, 1, 1, 0.5), params.ghost_start, params.cursor_pos, PATH_HALF_WIDTH * 0.5);
+    }
+
+    // The selected shape's radius knobs, as diamonds
+    if (params.selected_shape != NO_OBJECT) {
+        let packed = shapes[params.selected_shape];
+        let zone = get_zone(unpack_fst(packed.zone_profile_flags));
+        let shape = get_shape(params.selected_shape, zone.vertex_start);
+        let frame = radius_handle_frame(shape);
+        let diamond = vec2<f32>(0.70710678, 0.70710678);
+        let inner = frame.anchor + frame.direction * shape.inner_radius;
+        let outer = frame.anchor + frame.direction * (shape.inner_radius + shape.outer_radius);
+        col = draw_rotated_box(col, pos, vec4<f32>(SELECTED_SHAPE_COLOR, 1.0), inner, SHAPE_RADIUS_HANDLE_HALF_WIDTH, diamond);
+        col = draw_rotated_box(col, pos, vec4<f32>(SELECTED_SHAPE_COLOR, 1.0), outer, SHAPE_RADIUS_HANDLE_HALF_WIDTH, diamond);
+    }
+
+    // Knobs on the active zone's vertices, on top
+    if (params.active_zone < params.zone_count) {
+        let zone = get_zone(params.active_zone);
+        for (var j = 0u; j < zone.vertex_count; j += 1u) {
+            let vertex_id = zone.vertex_start + j;
+            var knob_color = vertex_color;
+            if (is_vertex_selected(vertex_id)) {
+                knob_color = selected_color;
+            }
+            col = draw_circle(col, pos, knob_color, shape_vertices[vertex_id], SHAPE_VERTEX_RADIUS, 0.0, true);
+        }
+    }
+
+    return col;
+}
+
+/***********************************/
 /*      MAIN OVERLAY METHOD        */
 /***********************************/
 
 fn overlay_color(
     start_color: vec3<f32>,   // Base color before overlay
     pos: vec2<f32>,           // World-space position of this pixel
+    screen: vec2<f32>,        // Screen-space position of this pixel, in points
 ) -> vec3<f32> {              // Returns pixel color from overlay
     // Render the overlay layer by layer.
     var color = start_color;
 
-    // Shapes
+    // Shapes, below the zone paths
+    if (flag(9)) {
+        color = fill_shapes(color, pos, screen);
+        color = outline_shapes(color, pos);
+    }
 
     // Zone Interiors
 
     // Zone paths/points if paths are enabled
     if (flag(4)) {
         color = overlay_zone_paths(color, pos);
+    }
+
+    // Knobs for editing shapes, above the zone paths
+    if (flag(9) && flag(10)) {
+        color = overlay_shape_handles(color, pos);
     }
 
     // Transform box around the selection, below the light

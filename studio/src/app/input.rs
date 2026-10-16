@@ -278,6 +278,20 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                         } else { Action::None }
                     },
 
+                    // Toggling zone paths, which also hides shapes
+                    Key::H => {
+                        if pressed && !repeat && !modifiers.any() {
+                            Action::PathsToggled
+                        } else { Action::None }
+                    },
+
+                    // Toggling shapes outside the shape tools
+                    Key::J => {
+                        if pressed && !repeat && !modifiers.any() {
+                            Action::ShapesToggled
+                        } else { Action::None }
+                    },
+
                     // Everything else
                     _ => Action::None,
                 }

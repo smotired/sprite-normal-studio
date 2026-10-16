@@ -264,3 +264,112 @@ fn draw_bezier(
     let feathered = feather_color(min_color, min_dist, h);
     return mix(base_color, feathered.rgb, feathered.a);
 }
+/***********************************/
+/*         SHAPE GEOMETRY          */
+/***********************************/
+
+// A distance and the direction it is measured in
+struct Distance {
+    distance: f32,
+    direction: vec2<f32>,
+}
+
+// Get the distance from a point to a position, and the direction from the point to the position, or zero if they are the same
+fn away_from(point: vec2<f32>, pos: vec2<f32>) -> Distance {
+    let offset = pos - point;
+    let distance = length(offset);
+    if (distance > 1e-6) {
+        return Distance(distance, offset / distance);
+    }
+    return Distance(distance, vec2<f32>(0.0));
+}
+
+// Get the closest point to a position on a line segment
+fn closest_on_segment(start: vec2<f32>, end: vec2<f32>, pos: vec2<f32>) -> vec2<f32> {
+    return start + (end - start) * get_line_segment_t(pos, start, end);
+}
+
+// 2D cross product
+fn cross2(a: vec2<f32>, b: vec2<f32>) -> f32 {
+    return a.x * b.y - a.y * b.x;
+}
+
+// Get the signed distance from a position to the hull of a shape's vertices, and the direction away from the hull.
+// Inside a triangle the distance to its edges is negative, and the direction is zero.
+// Must match hull_distance in shape.rs and generator.wgsl.
+fn hull_distance(shape: Shape, pos: vec2<f32>) -> Distance {
+    if (shape.vertex_count == 1u) {
+        return away_from(shape.a, pos);
+    }
+    if (shape.vertex_count == 2u) {
+        return away_from(closest_on_segment(shape.a, shape.b, pos), pos);
+    }
+
+    // Distance to the closest edge
+    var closest = away_from(closest_on_segment(shape.a, shape.b, pos), pos);
+    let to_bc = away_from(closest_on_segment(shape.b, shape.c, pos), pos);
+    if (to_bc.distance < closest.distance) { closest = to_bc; }
+    let to_ca = away_from(closest_on_segment(shape.c, shape.a, pos), pos);
+    if (to_ca.distance < closest.distance) { closest = to_ca; }
+
+    // Inside if the position is on the same side of every edge, whichever way the triangle winds
+    let side_ab = cross2(shape.b - shape.a, pos - shape.a);
+    let side_bc = cross2(shape.c - shape.b, pos - shape.b);
+    let side_ca = cross2(shape.a - shape.c, pos - shape.c);
+    let inside = (side_ab >= 0.0 && side_bc >= 0.0 && side_ca >= 0.0) || (side_ab <= 0.0 && side_bc <= 0.0 && side_ca <= 0.0);
+    if (inside) {
+        return Distance(-closest.distance, vec2<f32>(0.0));
+    }
+    return closest;
+}
+
+// Returns true if a ray going straight down from a position crosses a line segment.
+// Each end only counts on one side, so a ray through a shared end is only counted once.
+fn ray_down_crosses(pos: vec2<f32>, start: vec2<f32>, end: vec2<f32>) -> bool {
+    if ((start.x <= pos.x) == (end.x <= pos.x)) {
+        return false;
+    }
+    let y = start.y + (pos.x - start.x) * (end.y - start.y) / (end.x - start.x);
+    return y >= pos.y;
+}
+
+// Returns true if a position is in a shape's flat core: inside its triangle by ray crossings, as zones are assigned,
+// or within its inner radius of its hull.
+fn in_shape_core(shape: Shape, pos: vec2<f32>) -> bool {
+    if (shape.vertex_count == 3u) {
+        var crossings = 0u;
+        if (ray_down_crosses(pos, shape.a, shape.b)) { crossings += 1u; }
+        if (ray_down_crosses(pos, shape.b, shape.c)) { crossings += 1u; }
+        if (ray_down_crosses(pos, shape.c, shape.a)) { crossings += 1u; }
+        if (crossings % 2u == 1u) {
+            return true;
+        }
+    }
+    if (shape.inner_radius <= 0.0) {
+        return false;
+    }
+    return hull_distance(shape, pos).distance <= shape.inner_radius;
+}
+
+// Get where the knobs for a shape's radii start from, on the edge of its hull, and the direction they go out from it.
+// Points go right, lines go to the left of their first edge, and triangles go out from their first edge.
+// Must match radius_handle_frame in shape.rs.
+struct RadiusHandleFrame {
+    anchor: vec2<f32>,
+    direction: vec2<f32>,
+}
+
+fn radius_handle_frame(shape: Shape) -> RadiusHandleFrame {
+    if (shape.vertex_count == 1u || all(shape.a == shape.b)) {
+        return RadiusHandleFrame(shape.a, vec2<f32>(1.0, 0.0));
+    }
+    let anchor = (shape.a + shape.b) * 0.5;
+    let edge = shape.b - shape.a;
+    var direction = normalize(vec2<f32>(-edge.y, edge.x));
+
+    // Triangles go away from their third vertex
+    if (shape.vertex_count == 3u && dot(direction, shape.c - anchor) > 0.0) {
+        direction = -direction;
+    }
+    return RadiusHandleFrame(anchor, direction);
+}

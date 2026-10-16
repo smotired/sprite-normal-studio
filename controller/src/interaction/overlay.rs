@@ -1,4 +1,4 @@
-use crate::EditorToolKind;
+use crate::{EditorToolKind, SpecialQuery};
 use crate::interaction::tools::EditorTool;
 
 /// Tracks the state of the overlay
@@ -8,12 +8,19 @@ pub struct OverlayState {
     pub normals_on: bool,
     overlay_on: bool,
 
+    /// If zone paths are drawn. Shapes are only drawn along with them.
+    paths_on: bool,
+
+    /// If shapes are drawn outside the shape tools, which always draw them
+    shapes_on: bool,
 }
 
 impl OverlayState {
     // Packs flags into a uint
     pub fn get_flags(&self, tool: &dyn EditorTool) -> u32 {
         let creating = tool.creating_path();
+        let edits_shapes = tool.handle_special_query(SpecialQuery::ActiveZone).is_some();
+        let drawing_shapes = tool.handle_special_query(SpecialQuery::ShapeGhost).is_some();
         let tool = tool.kind();
         let mut flags: u32 = 0;
 
@@ -35,7 +42,15 @@ impl OverlayState {
             }
 
             // 04: Overlay paths
-            flags |= 1 << 4;
+            // 09: Shapes, which are only drawn with the paths. The shape tools always draw them.
+            // 10: A shape tool is selected, so the active zone's shape vertices get knobs
+            // 11: A ghost line from the latest vertex of the path of shapes being drawn to the cursor
+            if self.paths_on {
+                flags |= 1 << 4;
+                if self.shapes_on || edits_shapes { flags |= 1 << 9; }
+                if edits_shapes { flags |= 1 << 10; }
+                if drawing_shapes { flags |= 1 << 11; }
+            }
 
             // 05: If the currently selected zone path should have its points drawn
             match tool {
@@ -62,6 +77,14 @@ impl OverlayState {
 
     pub fn normals_on(&self) -> bool { self.normals_on }
 
+    pub fn paths_on(&self) -> bool { self.paths_on }
+
+    pub fn shapes_on(&self) -> bool { self.shapes_on }
+
+    pub fn toggle_paths(&mut self) { self.paths_on = !self.paths_on; }
+
+    pub fn toggle_shapes(&mut self) { self.shapes_on = !self.shapes_on; }
+
     pub fn toggle_overlay(&mut self) -> bool {
         if self.overlay_on {
             self.dragging_light = false;
@@ -81,6 +104,8 @@ impl Default for OverlayState {
             normals_on: true,
             dragging_light: false,
             overlay_on: true,
+            paths_on: true,
+            shapes_on: false,
         }
     }
 }
@@ -127,6 +152,24 @@ mod tests {
 
         state.dragging_light = true;
         assert_eq!(state.get_flags(tool.as_ref()), 0b1_1100);
+    }
+
+    /// Shapes are off by default, and only drawn along with the paths
+    #[test]
+    fn path_and_shape_flags() {
+        let tool = EditorToolZone::init();
+        let mut state = OverlayState::default();
+        assert!(state.paths_on() && !state.shapes_on());
+
+        state.toggle_shapes();
+        assert_eq!(state.get_flags(tool.as_ref()), 0b10_0001_0111);
+
+        state.toggle_paths();
+        assert_eq!(state.get_flags(tool.as_ref()), 0b0111);
+
+        state.toggle_overlay();
+        state.toggle_paths();
+        assert_eq!(state.get_flags(tool.as_ref()), 0b11);
     }
 
     /// Toggling reports the new state, and turning the overlay off stops dragging the light

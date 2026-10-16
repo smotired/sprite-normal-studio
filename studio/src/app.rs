@@ -96,7 +96,7 @@ impl StudioApp {
     pub fn new(render_state: eframe::egui_wgpu::RenderState) -> Self {
         // The renderer needs buffers to start with. Each project's controller is bound to it when its tab is selected.
         let mut controller = Controller::new(&render_state.device);
-        let renderer = Renderer::new(&render_state.device, controller.selection_buffer(), controller.object_buffers(&render_state.device));
+        let renderer = Renderer::new(&render_state.device, &controller.selection_texture(), controller.object_buffers(&render_state.device));
         let viewport_texture_id = render_state.renderer.write()
             .register_native_texture(&render_state.device, renderer.view(), FilterMode::Nearest);
 
@@ -152,7 +152,7 @@ impl StudioApp {
         let Some(project) = self.projects.get_mut(index) else { return; };
         let device = &self.render_state.device;
         self.renderer.set_inputs(device, project.sprite.texture(), project.controller.output());
-        self.renderer.set_objects(device, project.controller.selection_buffer(), project.controller.object_buffers(device));
+        self.renderer.set_objects(device, &project.controller.selection_texture(), project.controller.object_buffers(device));
 
         self.current = index;
         self.scroll_to_current = true;

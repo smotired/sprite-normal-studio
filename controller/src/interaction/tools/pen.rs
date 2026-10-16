@@ -226,6 +226,7 @@ impl EditorTool for EditorToolPen {
             SpecialQuery::Normal => Some(SpecialValue::Normal(self.normal)),
             SpecialQuery::InheritNormal => Some(SpecialValue::Flag(self.inherit_normal)),
             SpecialQuery::StayActive => Some(SpecialValue::Flag(self.stay_active)),
+            _ => None,
         }
     }
 }

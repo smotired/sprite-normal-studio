@@ -23,6 +23,8 @@ const RECENTER: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::H
 const LIGHTING: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::L);
 const NORMAL_MAP: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::L);
 const OVERLAY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::O);
+const PATHS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::H);
+const SHAPES: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::J);
 const RESET_NORMAL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::Z);
 const MERGE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::M);
 const DETACH: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::K);
@@ -180,8 +182,17 @@ impl StudioApp {
         if menu_item(ui, "Overlay", Some(OVERLAY), true, Some(overlay_on)) {
             *clicked = Some(MenuAction::Controller(Action::OverlayToggled));
         }
-        // Toggles for parts of the overlay go here, disabled while the whole overlay is off:
-        // ui.add_enabled_ui(overlay_on, |ui| { ... });
+
+        // Parts of the overlay, disabled while what they're drawn with is off. Shapes are drawn with the paths.
+        let paths_on = controller.paths_on();
+        for (label, shortcut, enabled, checked, action) in [
+            ("Paths", PATHS, overlay_on, paths_on, Action::PathsToggled),
+            ("Shapes", SHAPES, overlay_on && paths_on, controller.shapes_on(), Action::ShapesToggled),
+        ] {
+            if menu_item(ui, label, Some(shortcut), enabled, Some(checked)) {
+                *clicked = Some(MenuAction::Controller(action));
+            }
+        }
     }
 
     /// Path menu: changes to the selected zones or points. Each item is only enabled if it would do something.

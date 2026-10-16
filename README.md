@@ -100,8 +100,8 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 [x] Shape trait, and basic Point shape that acts like the top of a cone
 [x] Shapes assigned to zones
-[ ] Render shapes themselves in viewport
-[ ] Controls to show and hide shapes (hiding zone paths always hides shapes)
+[x] Render shapes themselves in viewport
+[x] Controls to show and hide shapes (hiding zone paths always hides shapes)
 [ ] Shape management tools
 [x] Render shape normals in compute shader
 [x] Blend normals between multiple shapes based on distance
