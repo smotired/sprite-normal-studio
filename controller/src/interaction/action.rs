@@ -81,6 +81,9 @@ pub enum Action {
     /// Redo the latest undone action or drag
     Redo,
 
+    /// Reassign every pixel to zones and regenerate the whole normal map
+    RegenerateNormals,
+
     /// Overlay is toggled on or off. Maybe later I will add an enum for OverlayComponentKind which is passed here.
     OverlayToggled,
 
@@ -214,6 +217,10 @@ impl Controller {
 
             Action::Redo => {
                 self.redo();
+            },
+
+            Action::RegenerateNormals => {
+                self.mark_normals_stale(Some((Vec2::ZERO, self.assigner.size())));
             },
 
             Action::Altitude(up) => {

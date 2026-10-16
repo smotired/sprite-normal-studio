@@ -12,6 +12,7 @@ const SELECT_ALL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key:
 const DESELECT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Escape);
 const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Z);
 const REDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Y);
+const REGENERATE_NORMALS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::G);
 const CUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::X);
 const COPY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::C);
 const PASTE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::V);
@@ -134,6 +135,10 @@ impl StudioApp {
         controller_items(ui, [
             ("Undo", UNDO, controller.can_undo(), Action::Undo),
             ("Redo", REDO, controller.can_redo(), Action::Redo),
+        ], clicked);
+        ui.separator();
+        controller_items(ui, [
+            ("Regenerate Normals", REGENERATE_NORMALS, true, Action::RegenerateNormals),
         ], clicked);
         ui.separator();
 
