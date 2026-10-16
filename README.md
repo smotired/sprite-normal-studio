@@ -110,7 +110,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Triangle shape with an outer radius
 [x] Allow lines to share control points
 [x] Allow triangles to share control points
-[ ] Manipulating a zone should also manipulate its shapes
+[x] Manipulating a zone should also manipulate its shapes
 ```
 
 ### Phase VI - Extra Features

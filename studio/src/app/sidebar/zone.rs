@@ -41,7 +41,9 @@ impl ToolSidebar for ZoneSidebar {
             controller.handle_action(Action::Delete);
         }
 
-        // TODO: Clear shapes once they exist
-        ui.add(egui::Button::new("Clear shapes").min_size(button_size));
+        let clear = egui::Button::new("Clear shapes").min_size(button_size);
+        if ui.add_enabled(controller.selected_zones_have_shapes(), clear).clicked() {
+            controller.handle_action(Action::Special(SpecialAction::ShapesCleared));
+        }
     }
 }

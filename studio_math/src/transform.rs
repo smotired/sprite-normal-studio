@@ -27,6 +27,12 @@ impl Affine2 {
         Self::about(Vec2::new(cos, sin), Vec2::new(-sin, cos), center)
     }
 
+    /// Move everything by an offset
+    pub fn translate(offset: Vec2) -> Self { Self { translation: offset, ..Self::IDENTITY } }
+
+    /// How much the transform scales areas by. Negative if it mirrors.
+    pub fn determinant(&self) -> f32 { self.x_axis.cross(self.y_axis) }
+
     /// A linear map that keeps a fixed point in place
     fn about(x_axis: Vec2, y_axis: Vec2, fixed: Vec2) -> Self {
         let linear = Self { x_axis, y_axis, translation: Vec2::ZERO };
@@ -60,6 +66,22 @@ mod tests {
         assert!(transform.point(Vec2::new(5.0, 5.0)).distance(Vec2::new(5.0, 5.0)) < 1e-5);
         assert!(transform.point(Vec2::new(10.0, 5.0)).distance(Vec2::new(5.0, 10.0)) < 1e-5);
         assert!(transform.vector(Vec2::new(0.0, 2.0)).distance(Vec2::new(-2.0, 0.0)) < 1e-5);
+    }
+
+    /// Translating moves points but not vectors
+    #[test]
+    fn translate() {
+        let transform = Affine2::translate(Vec2::new(2.0, -1.0));
+        assert_eq!(transform.point(Vec2::new(1.0, 1.0)), Vec2::new(3.0, 0.0));
+        assert_eq!(transform.vector(Vec2::new(1.0, 1.0)), Vec2::new(1.0, 1.0));
+    }
+
+    /// The determinant scales areas, and is negative for mirroring
+    #[test]
+    fn determinant() {
+        assert_eq!(Affine2::scale_about(Vec2::new(2.0, 3.0), Vec2::ONE).determinant(), 6.0);
+        assert_eq!(Affine2::scale_about(Vec2::new(-1.0, 1.0), Vec2::ONE).determinant(), -1.0);
+        assert!((Affine2::rotate_about(1.0, Vec2::ONE).determinant() - 1.0).abs() < 1e-6);
     }
 
     /// The identity changes nothing
