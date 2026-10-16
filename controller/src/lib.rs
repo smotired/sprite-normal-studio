@@ -145,6 +145,15 @@ fn correct_stale_bounds(stale: Option<Bounds>, size: Vec2) -> Option<Bounds> {
     Some((min, max))
 }
 
+/// Parse and validate a shader, panicking with its errors. Nothing else checks shaders without a GPU.
+#[cfg(test)]
+pub(crate) fn validate_wgsl(source: &str) {
+    let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

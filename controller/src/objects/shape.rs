@@ -1,5 +1,7 @@
 use studio_math::Vec2;
 
+mod evaluate;
+
 /// Most vertices a shape can have. One makes a point, two a line, and three a triangle.
 pub const MAX_SHAPE_VERTICES: usize = 3;
 
@@ -132,7 +134,9 @@ pub struct Shape {
     /// The first slot is always used, and used slots always come before unused ones.
     vertices: [u16; MAX_SHAPE_VERTICES],
 
-    _padding: u16,
+    /// Shapes next to each other in their zone's shapes with the same group are one surface, like the triangles of one drawn path.
+    /// Their cores join exactly, using the first one's params, instead of blending like separate shapes.
+    group: u16,
 
     inner_radius: f32,
     outer_radius: f32,
@@ -142,14 +146,14 @@ pub struct Shape {
 
 impl Shape {
     /// Create a shape from the local indices of its vertices in its zone, which must be 1 to 3 different vertices.
-    pub fn new(zone_id: u16, local_vertices: &[u16], params: ShapeParams, flags: u8) -> anyhow::Result<Self> {
+    pub fn new(zone_id: u16, local_vertices: &[u16], params: ShapeParams, group: u16, flags: u8) -> anyhow::Result<Self> {
         params.validate()?;
         let mut shape = Self {
             zone_id,
             profile: 0,
             flags,
             vertices: [0; MAX_SHAPE_VERTICES],
-            _padding: 0,
+            group,
             inner_radius: 0.0,
             outer_radius: 0.0,
             steepness: 0.0,
@@ -187,6 +191,9 @@ impl Shape {
         }
         Ok(())
     }
+
+    /// Get the group of this shape within its zone
+    pub fn group(&self) -> u16 { self.group }
 
     /// Returns true if this shape uses a vertex, by its index in the zone's vertex range
     pub fn uses_local(&self, local_vertex: u16) -> bool { self.local_vertices().contains(&local_vertex) }
@@ -296,7 +303,7 @@ mod tests {
     /// Vertices are stored one higher than their index, so 0 means no vertex
     #[test]
     fn local_vertices() {
-        let shape = Shape::new(2, &[0, 4], ShapeParams::default(), 0).unwrap();
+        let shape = Shape::new(2, &[0, 4], ShapeParams::default(), 0, 0).unwrap();
         assert_eq!(shape.vertices, [1, 5, 0]);
         assert_eq!(shape.local_vertices(), vec![0, 4]);
         assert!(shape.uses_local(4) && !shape.uses_local(1));
@@ -307,23 +314,23 @@ mod tests {
     #[test]
     fn invalid_vertices() {
         let params = ShapeParams::default();
-        assert!(Shape::new(0, &[], params, 0).is_err());
-        assert!(Shape::new(0, &[0, 1, 2, 3], params, 0).is_err());
-        assert!(Shape::new(0, &[1, 1], params, 0).is_err());
-        assert!(Shape::new(0, &[0, 1, 2], params, 0).is_ok());
+        assert!(Shape::new(0, &[], params, 0, 0).is_err());
+        assert!(Shape::new(0, &[0, 1, 2, 3], params, 0, 0).is_err());
+        assert!(Shape::new(0, &[1, 1], params, 0, 0).is_err());
+        assert!(Shape::new(0, &[0, 1, 2], params, 0, 0).is_ok());
     }
 
     /// Params read back what was set, and must be in range
     #[test]
     fn params() {
         let params = ShapeParams { profile: ShapeProfile::Dome, inner_radius: 3.0, outer_radius: 7.0, steepness: 0.5, blend: 1.0 };
-        let shape = Shape::new(0, &[0], params, 0).unwrap();
+        let shape = Shape::new(0, &[0], params, 0, 0).unwrap();
         assert_eq!(shape.params(), params);
 
-        assert!(Shape::new(0, &[0], ShapeParams { outer_radius: 0.0, ..params }, 0).is_err());
-        assert!(Shape::new(0, &[0], ShapeParams { inner_radius: -1.0, ..params }, 0).is_err());
-        assert!(Shape::new(0, &[0], ShapeParams { steepness: f32::NAN, ..params }, 0).is_err());
-        assert!(Shape::new(0, &[0], ShapeParams { blend: 0.0, ..params }, 0).is_err());
+        assert!(Shape::new(0, &[0], ShapeParams { outer_radius: 0.0, ..params }, 0, 0).is_err());
+        assert!(Shape::new(0, &[0], ShapeParams { inner_radius: -1.0, ..params }, 0, 0).is_err());
+        assert!(Shape::new(0, &[0], ShapeParams { steepness: f32::NAN, ..params }, 0, 0).is_err());
+        assert!(Shape::new(0, &[0], ShapeParams { blend: 0.0, ..params }, 0, 0).is_err());
     }
 
     /// Changing a param clamps it into its range
@@ -348,7 +355,7 @@ mod tests {
     /// Pending flag can be set and cleared
     #[test]
     fn pending() {
-        let mut shape = Shape::new(0, &[0], ShapeParams::default(), SHAPE_PENDING).unwrap();
+        let mut shape = Shape::new(0, &[0], ShapeParams::default(), 0, SHAPE_PENDING).unwrap();
         assert!(shape.is_pending());
         shape.set_pending(false);
         assert!(!shape.is_pending());

@@ -164,3 +164,12 @@ impl Controller {
     /// Get a reference to the assignment texture
     pub fn assignment(&self) -> &Texture { self.assigner.output() }
 }
+
+#[cfg(test)]
+mod tests {
+    /// The shader parses and validates
+    #[test]
+    fn shader_validates() {
+        crate::validate_wgsl(include_str!("shaders/assignment.wgsl"));
+    }
+}

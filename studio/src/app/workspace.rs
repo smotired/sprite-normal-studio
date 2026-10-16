@@ -26,7 +26,8 @@ const FORMAT: &str = "sprite-normal-studio";
 /// - Version 2: Removed the light. It is ignored when reading version 1 files.
 /// - Version 3: Made the base normal map path optional (null for a flat normal map), and added the export path.
 /// - Version 4: Added shapes and shape vertices to zones. Zones in older files have no shapes.
-const VERSION: u32 = 4;
+/// - Version 5: Added a group to each shape. Shapes in version 4 files each get a group of their own.
+const VERSION: u32 = 5;
 
 /// Extension of workspace files
 pub(super) const EXTENSION: &str = "sns";
