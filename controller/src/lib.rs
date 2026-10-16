@@ -7,7 +7,7 @@ mod status;
 
 use studio_math::Vec2;
 use studio_math::bounds::{bounds_clamp, bounds_correct};
-use wgpu::{Buffer, Device, Queue, Texture};
+use wgpu::{Device, Queue, Texture};
 
 use crate::generator::Generator;
 use crate::assignment::ZoneAssigner;
@@ -51,8 +51,8 @@ pub struct Controller {
     /// The tool we currently have selected
     tool: Box<dyn EditorTool>,
 
-    /// Selection buffer which gets contents from the selected tool
-    selection_buffer: Buffer,
+    /// Texture the selected tool's selection is packed into for the viewport
+    selection: Texture,
 
     /// What the status bar shows: the result of the latest tool action, or feedback from the app
     status: Status,
@@ -67,11 +67,16 @@ impl Controller {
         let mut objects = ObjectBuffers::new(device);
         let objects_buffers = objects.get_buffers(device);
     
-        let selection_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Points Selection Buffer"),
-            size: 8192, // 65536 max points packed into 8 values per byte
-            mapped_at_creation: false,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        // A texture rather than a storage buffer, since only 4 storage buffers can be bound at once
+        let selection = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Selection texture"),
+            size: wgpu::Extent3d { width: objects::SELECTION_WIDTH, height: objects::SELECTION_HEIGHT, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         });
 
         Self {
@@ -84,7 +89,7 @@ impl Controller {
             objects,
             cursor_pos: Default::default(),
             tool: EditorToolZone::init(),
-            selection_buffer,
+            selection,
             status: Status::Ok,
             history: History::default(),
         }
@@ -131,7 +136,8 @@ impl Controller {
         correct_stale_bounds(stale, self.assigner.size())
     }
 
-    pub fn selection_buffer(&self) -> Buffer { self.selection_buffer.clone() }
+    /// Get the texture the selection is packed into for the viewport. See pack_selection in buffers.rs.
+    pub fn selection_texture(&self) -> Texture { self.selection.clone() }
 }
 
 /// Clamp a stale region to a texture of the given size, and correct it to the top left and bottom right corners of the pixels it touches.
@@ -145,13 +151,31 @@ fn correct_stale_bounds(stale: Option<Bounds>, size: Vec2) -> Option<Bounds> {
     Some((min, max))
 }
 
-/// Parse and validate a shader, panicking with its errors. Nothing else checks shaders without a GPU.
+/// Parse and validate a shader, and check it fits in the device's limits, panicking with its errors. Nothing else checks shaders without a GPU.
 #[cfg(test)]
 pub(crate) fn validate_wgsl(source: &str) {
     let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
         .validate(&module)
         .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
+    check_binding_limits(&module);
+}
+
+/// Panic if a shader binds more storage buffers or storage textures than the device allows.
+/// The app asks for wgpu's downlevel limits, so it runs on as many devices as possible.
+#[cfg(test)]
+pub(crate) fn check_binding_limits(module: &naga::Module) {
+    let limits = wgpu::Limits::downlevel_defaults();
+    let storage_buffers = module.global_variables.iter()
+        .filter(|(_, global)| matches!(global.space, naga::AddressSpace::Storage { .. }))
+        .count();
+    let storage_textures = module.global_variables.iter()
+        .filter(|(_, global)| matches!(module.types[global.ty].inner, naga::TypeInner::Image { class: naga::ImageClass::Storage { .. }, .. }))
+        .count();
+    assert!(storage_buffers <= limits.max_storage_buffers_per_shader_stage as usize,
+        "{storage_buffers} storage buffers, but only {} are allowed", limits.max_storage_buffers_per_shader_stage);
+    assert!(storage_textures <= limits.max_storage_textures_per_shader_stage as usize,
+        "{storage_textures} storage textures, but only {} are allowed", limits.max_storage_textures_per_shader_stage);
 }
 
 #[cfg(test)]

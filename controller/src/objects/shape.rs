@@ -269,6 +269,26 @@ pub fn hull_distance(vertices: &[Vec2], pos: Vec2) -> (f32, Vec2) {
     }
 }
 
+/// Get where the knobs for a shape's radii start from, on the edge of its hull, and the direction they go out from it.
+/// Points go right, lines go to the left of their first edge, and triangles go out from their first edge.
+/// The inner radius knob is that far out from the start, and the outer radius knob is the inner plus outer radius out.
+/// Must match radius_handle_frame in helpers.wgsl.
+pub fn radius_handle_frame(vertices: &[Vec2]) -> (Vec2, Vec2) {
+    let (a, b) = match *vertices {
+        [a, b, ..] if a != b => (a, b),
+        [a, ..] => return (a, Vec2::RIGHT),
+        [] => return (Vec2::ZERO, Vec2::RIGHT),
+    };
+    let anchor = (a + b) * 0.5;
+    let mut direction = (b - a).left().normalized();
+
+    // Triangles go away from their third vertex
+    if let Some(&c) = vertices.get(2) && direction.dot(c - anchor) > 0.0 {
+        direction = -direction;
+    }
+    (anchor, direction)
+}
+
 /// Get the closest point to a position on a line segment
 fn closest_on_segment(start: Vec2, end: Vec2, pos: Vec2) -> Vec2 {
     let segment = end - start;
@@ -371,6 +391,20 @@ mod tests {
         assert_near(hull_distance(&[a, b], Vec2::new(5.0, -2.0)), (2.0, Vec2::new(0.0, -1.0)));
         assert_near(hull_distance(&[a, b], Vec2::new(13.0, 4.0)), (5.0, Vec2::new(0.6, 0.8)));
         assert_near(hull_distance(&[a, b], Vec2::new(5.0, 0.0)), (0.0, Vec2::ZERO));
+    }
+
+    /// Radius knobs go right from points, sideways from lines, and out from a triangle's first edge
+    #[test]
+    fn radius_handles() {
+        let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(5.0, 8.0));
+        assert_eq!(radius_handle_frame(&[a]), (a, Vec2::RIGHT));
+        assert_eq!(radius_handle_frame(&[a, b]), (Vec2::new(5.0, 0.0), Vec2::new(0.0, 1.0)));
+        assert_eq!(radius_handle_frame(&[a, b, c]), (Vec2::new(5.0, 0.0), Vec2::new(0.0, -1.0)));
+        assert_eq!(radius_handle_frame(&[b, a, c]), (Vec2::new(5.0, 0.0), Vec2::new(0.0, -1.0)));
+
+        // The outward direction is straight out from the hull, so knobs sit on the shape's outlines
+        let (anchor, direction) = radius_handle_frame(&[a, b, c]);
+        assert!((hull_distance(&[a, b, c], anchor + direction * 4.0).0 - 4.0).abs() < 1e-5);
     }
 
     /// Distance inside a triangle is negative whichever way it winds, and outside points away from the closest edge

@@ -2,6 +2,7 @@ use studio_math::Vec2;
 use studio_math::bounds::bounds_of;
 
 use super::{ObjectBuffers, Bounds, Shape, ShapeVertex, ShapeParams, ShapeParamChange, MAX_OBJECT_ID, hull_distance, merge_bounds};
+use super::shape::radius_handle_frame;
 
 impl ObjectBuffers {
     /// Get a clone of a shape by its ID. Returns an error if the shape does not exist.
@@ -66,6 +67,24 @@ impl ObjectBuffers {
         shape_ids.sort();
         shape_ids.dedup();
         Ok(shape_ids)
+    }
+
+    /// Get the IDs of every shape whose vertices are all listed, sorted
+    pub fn shapes_with_all_vertices(&self, vertex_ids: &[u16]) -> anyhow::Result<Vec<u16>> {
+        let mut shape_ids = vec![];
+        for shape_id in self.shapes_using_vertices(vertex_ids)? {
+            if self.shape_vertex_ids(shape_id)?.iter().all(|vertex_id| vertex_ids.contains(vertex_id)) {
+                shape_ids.push(shape_id);
+            }
+        }
+        Ok(shape_ids)
+    }
+
+    /// Get the positions of the knobs for a shape's inner radius and outer radius
+    pub fn shape_radius_handles(&self, shape_id: u16) -> anyhow::Result<(Vec2, Vec2)> {
+        let params = self.get_shape_info(shape_id)?.params();
+        let (anchor, direction) = radius_handle_frame(&self.shape_positions(shape_id)?);
+        Ok((anchor + direction * params.inner_radius, anchor + direction * (params.inner_radius + params.outer_radius)))
     }
 
     /// Get the bounding box of everything a shape affects: its vertices, out to its reach
@@ -575,6 +594,24 @@ mod tests {
         objects.set_shape_params(&[1], ShapeParamChange::Steepness(3.0)).unwrap();
         assert_eq!(objects.get_shape_info(0).unwrap().params().steepness, 3.0);
         assert_eq!(objects.get_shape_info(2).unwrap().params().steepness, 1.0);
+    }
+
+    /// Only shapes whose vertices are all listed count as fully selected
+    #[test]
+    fn with_all_vertices() {
+        let objects = sample();
+        assert_eq!(objects.shapes_with_all_vertices(&[0, 1]).unwrap(), vec![0]);
+        assert_eq!(objects.shapes_with_all_vertices(&[1, 2, 3]).unwrap(), vec![1, 2]);
+        assert_eq!(objects.shapes_with_all_vertices(&[]).unwrap(), Vec::<u16>::new());
+    }
+
+    /// Radius knobs are the inner radius and then the outer radius out from the hull
+    #[test]
+    fn radius_handles() {
+        let mut objects = sample();
+        objects.set_shape_params(&[0], ShapeParamChange::InnerRadius(2.0)).unwrap();
+        assert_eq!(objects.shape_radius_handles(0).unwrap(), (Vec2::new(7.0, 5.0), Vec2::new(17.0, 5.0)));
+        assert_eq!(objects.shape_radius_handles(1).unwrap(), (Vec2::new(5.0, 2.0), Vec2::new(5.0, 12.0)));
     }
 
     /// Reach bounds cover the vertices out to the shape's reach

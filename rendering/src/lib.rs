@@ -51,7 +51,7 @@ impl Renderer {
 
     /// Use egui's render state to initialize our renderer.
     /// Creates our compute pipeline, texture, and buffers.
-    pub fn new(device: &Device, selection_buffer: Buffer, object_buffers: BufferStates) -> Self {
+    pub fn new(device: &Device, selection: &Texture, object_buffers: BufferStates) -> Self {
         // Load the shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport.wgsl"),
@@ -92,7 +92,7 @@ impl Renderer {
 
         // Create object bind group
         let object_buffer_sizes = object_buffers.sizes();
-        let objects_bind_group = create_objects_bind_group(device, &pipeline, selection_buffer, object_buffers);
+        let objects_bind_group = create_objects_bind_group(device, &pipeline, selection, object_buffers);
 
         // Set up
         let control = RenderControl {
@@ -142,7 +142,7 @@ impl Renderer {
         let object_buffers = controller.object_buffers(device);
         let object_buffer_sizes = object_buffers.sizes();
         if object_buffer_sizes != self.control.object_buffer_sizes {
-            self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, controller.selection_buffer(), object_buffers);
+            self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, &controller.selection_texture(), object_buffers);
             self.control.object_buffer_sizes = object_buffer_sizes;
         }
 
@@ -176,9 +176,9 @@ impl Renderer {
     }
 
     /// Draw a different controller's objects. Always rebinds, since its buffers may be the same size as the old ones.
-    pub fn set_objects(&mut self, device: &Device, selection_buffer: Buffer, object_buffers: BufferStates) {
+    pub fn set_objects(&mut self, device: &Device, selection: &Texture, object_buffers: BufferStates) {
         self.control.object_buffer_sizes = object_buffers.sizes();
-        self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, selection_buffer, object_buffers);
+        self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, selection, object_buffers);
     }
 
     /// Set the input textures for the viewport
@@ -257,14 +257,15 @@ fn create_textures_bind_group(device: &Device, pipeline: &ComputePipeline, outpu
 }
 
 /// Create a new bind group for a pipeline. Should be called whenever the object buffers are recreated.
-fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, selection: Buffer, object_buffers: BufferStates) -> BindGroup {
+fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, selection: &Texture, object_buffers: BufferStates) -> BindGroup {
+    let selection_view = selection.create_view(&Default::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipeline.get_bind_group_layout(1),
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: selection.as_entire_binding(),
+                resource: wgpu::BindingResource::TextureView(&selection_view),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -276,7 +277,11 @@ fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, select
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: object_buffers.point_siblings.0.as_entire_binding(),
+                resource: object_buffers.shapes.0.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: object_buffers.shape_vertices.0.as_entire_binding(),
             },
         ]
     })
@@ -286,7 +291,7 @@ fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, select
 mod tests {
     use super::*;
 
-    /// The concatenated shader parses and validates. Nothing else checks it without a GPU.
+    /// The concatenated shader parses, validates, and fits in the device's limits. Nothing else checks it without a GPU.
     #[test]
     fn shader_validates() {
         let source = shader_source();
@@ -294,5 +299,18 @@ mod tests {
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
             .validate(&module)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+
+        // The app asks for wgpu's downlevel limits, so it runs on as many devices as possible
+        let limits = wgpu::Limits::downlevel_defaults();
+        let storage_buffers = module.global_variables.iter()
+            .filter(|(_, global)| matches!(global.space, naga::AddressSpace::Storage { .. }))
+            .count();
+        let storage_textures = module.global_variables.iter()
+            .filter(|(_, global)| matches!(module.types[global.ty].inner, naga::TypeInner::Image { class: naga::ImageClass::Storage { .. }, .. }))
+            .count();
+        assert!(storage_buffers <= limits.max_storage_buffers_per_shader_stage as usize,
+            "{storage_buffers} storage buffers, but only {} are allowed", limits.max_storage_buffers_per_shader_stage);
+        assert!(storage_textures <= limits.max_storage_textures_per_shader_stage as usize,
+            "{storage_textures} storage textures, but only {} are allowed", limits.max_storage_textures_per_shader_stage);
     }
 }

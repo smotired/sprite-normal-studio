@@ -138,6 +138,14 @@ pub enum SpecialQuery {
 
     /// Pen: if the pen stays active after finishing a zone.
     StayActive,
+
+    /// Shape tools: the zone whose shapes are being edited, if any. Only tools that edit shapes answer,
+    /// so the overlay always shows shapes for them, with knobs on the active zone's vertices.
+    ActiveZone,
+
+    /// Shape pen: the latest vertex of the path of shapes being drawn, which a ghost line joins to the cursor.
+    /// Only answered while a path is being drawn.
+    ShapeGhost,
 }
 
 /// Answers to special queries
@@ -145,6 +153,8 @@ pub enum SpecialQuery {
 pub enum SpecialValue {
     Normal(Vec3),
     Flag(bool),
+    Zone(Option<u16>),
+    Position(Vec2),
 }
 
 /// Allows boxed editor tools to be cloned, so their state can be snapshotted.
@@ -180,6 +190,9 @@ pub trait EditorTool: EditorToolClone {
 
     /// Get the points that are currently selected
     fn selection(&self) -> SelectionType<'_>;
+
+    /// Get the shape vertices that are currently selected. Only the shape tools select them.
+    fn shape_selection(&self) -> SelectionType<'_> { &[] }
 
     /// Get two coordinates of the bounding box we are currently dragging out
     fn selection_box(&self) -> Option<(Vec2, Vec2)> { None }
@@ -329,6 +342,11 @@ impl Controller {
         zones.sort();
         zones.dedup();
         zones
+    }
+
+    /// Get the IDs of the shapes whose vertices are all selected, sorted
+    pub fn selected_shapes(&self) -> Vec<u16> {
+        self.objects.shapes_with_all_vertices(self.tool.shape_selection()).unwrap_or_default()
     }
 
     /// Get the normal vector shared by all selected zones, or None if nothing is selected or they don't all match.

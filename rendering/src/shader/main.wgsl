@@ -30,7 +30,8 @@ fn main(
     var color = spritesheet_color(pos);
 
     // Add in the overlay
-    color = overlay_color(color, pos);
+    let screen = vec2<f32>(id.xy) / params.pixels_per_point;
+    color = overlay_color(color, pos, screen);
 
     // Add the selection box on top regardless of overlay flags
     color = overlay_selection_box(color, pos);
