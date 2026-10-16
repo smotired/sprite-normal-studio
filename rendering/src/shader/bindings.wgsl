@@ -34,7 +34,7 @@ struct Params {
     // 09: If shapes are drawn. Only set along with 04.
     // 10: If a shape tool is selected, so the active zone's shape vertices get knobs
     // 11: If a path of shapes is being drawn, so a ghost line joins its latest vertex to the cursor
-    // 12: 
+    // 12: If the selected group of shapes has radius knobs, which only happens along with 10
     // 13: 
     // 14: 
     // 15: 
@@ -93,11 +93,17 @@ struct Params {
     // The zone a shape tool is editing, whose shape vertices get knobs. NO_OBJECT if there is none.
     active_zone: u32,
 
-    // The only selected shape, whose radius knobs are drawn. NO_OBJECT if no shape or several are selected.
-    selected_shape: u32,
+    // Aligns the ghost start to 8 bytes
+    _padding_2: u32,
 
     // Latest vertex of the path of shapes being drawn. Only drawn if flag 11 is set.
     ghost_start: vec2<f32>,
+
+    // The selected group's inner radius knob. Only drawn if flag 12 is set.
+    inner_knob: vec2<f32>,
+
+    // The selected group's outer radius knob. Only drawn if flag 12 is set.
+    outer_knob: vec2<f32>,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 

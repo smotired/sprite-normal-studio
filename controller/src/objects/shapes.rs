@@ -2,7 +2,30 @@ use studio_math::Vec2;
 use studio_math::bounds::bounds_of;
 
 use super::{ObjectBuffers, Bounds, Shape, ShapeVertex, ShapeParams, ShapeParamChange, MAX_OBJECT_ID, hull_distance, merge_bounds};
-use super::shape::{radius_handle_frame, SHAPE_PENDING};
+use super::shape::{radius_handle_frame, KNOB_OFFSET, SHAPE_PENDING};
+
+/// Where the knobs for a group of shapes' radii are, and the line they are dragged along
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct RadiusKnobs {
+    /// Where the line starts, on an outer edge of the group's hull
+    pub anchor: Vec2,
+
+    /// The direction the line goes out from the hull, which the outer radius knob is dragged along
+    pub direction: Vec2,
+
+    /// The direction a quarter turn from the line, which the inner radius knob is dragged along. Below the line for points.
+    pub side: Vec2,
+
+    /// How far the inner radius knob sits past the inner radius along the side, in world space,
+    /// so it never sits on the anchor or the outer knob, even when the inner radius is 0
+    pub offset: f32,
+
+    /// The inner radius knob, the inner radius plus the offset along the side
+    pub inner: Vec2,
+
+    /// The outer radius knob, the inner radius plus the outer radius along the line
+    pub outer: Vec2,
+}
 
 impl ObjectBuffers {
     /// Get a clone of a shape by its ID. Returns an error if the shape does not exist.
@@ -80,16 +103,163 @@ impl ObjectBuffers {
         Ok(shape_ids)
     }
 
-    /// Get where the knobs for a shape's radii start from on the edge of its hull, and the direction they go out from it
-    pub fn shape_radius_frame(&self, shape_id: u16) -> anyhow::Result<(Vec2, Vec2)> {
-        Ok(radius_handle_frame(&self.shape_positions(shape_id)?))
+    /// Get the radius knobs of a group of shapes, given every shape in it. Returns None unless the shapes are exactly one whole group.
+    /// The knobs go out from an outer edge of the group, which only one of its shapes uses, so they aren't inside a mesh.
+    pub fn radius_knobs(&self, shape_ids: &[u16], camera_inv_scale: f32) -> anyhow::Result<Option<RadiusKnobs>> {
+        let mut shape_ids = shape_ids.to_vec();
+        shape_ids.sort();
+        shape_ids.dedup();
+        let Some(&first) = shape_ids.first() else { return Ok(None); };
+        if self.shape_groups(&[first])? != shape_ids { return Ok(None); }
+
+        // Count how many shapes use each edge
+        let edges_of = |vertex_ids: &[u16]| -> Vec<(u16, u16)> {
+            match *vertex_ids {
+                [a, b] => vec![(a, b)],
+                [a, b, c] => vec![(a, b), (b, c), (c, a)],
+                _ => vec![],
+            }
+        };
+        let key = |(a, b): (u16, u16)| (a.min(b), a.max(b));
+        let mut counts = std::collections::HashMap::new();
+        for &shape_id in &shape_ids {
+            for edge in edges_of(&self.shape_vertex_ids(shape_id)?) {
+                *counts.entry(key(edge)).or_insert(0) += 1;
+            }
+        }
+
+        // Use the first edge that only one shape uses, putting it first so the frame goes out from it
+        let mut frame = None;
+        'shapes: for &shape_id in &shape_ids {
+            let vertex_ids = self.shape_vertex_ids(shape_id)?;
+            for (i, edge) in edges_of(&vertex_ids).into_iter().enumerate() {
+                if counts[&key(edge)] != 1 { continue; }
+                let mut ordered = vertex_ids.clone();
+                ordered.rotate_left(i);
+                let positions = ordered.iter().map(|&vertex_id| Ok(self.get_vertex_info(vertex_id)?.position())).collect::<anyhow::Result<Vec<Vec2>>>()?;
+                frame = Some(radius_handle_frame(&positions));
+                break 'shapes;
+            }
+        }
+        let (anchor, direction) = match frame {
+            Some(frame) => frame,
+            None => radius_handle_frame(&self.shape_positions(first)?),
+        };
+
+        let params = self.get_shape_info(first)?.params();
+        let (side, offset) = (direction.left(), KNOB_OFFSET * camera_inv_scale);
+        Ok(Some(RadiusKnobs {
+            anchor,
+            direction,
+            side,
+            offset,
+            inner: anchor + side * (params.inner_radius + offset),
+            outer: anchor + direction * (params.inner_radius + params.outer_radius),
+        }))
     }
 
-    /// Get the positions of the knobs for a shape's inner radius and outer radius
-    pub fn shape_radius_handles(&self, shape_id: u16) -> anyhow::Result<(Vec2, Vec2)> {
-        let params = self.get_shape_info(shape_id)?.params();
-        let (anchor, direction) = self.shape_radius_frame(shape_id)?;
-        Ok((anchor + direction * params.inner_radius, anchor + direction * (params.inner_radius + params.outer_radius)))
+    /// Returns true if detaching the vertices from the shapes not in `keep` would change anything:
+    /// some vertex is used by more than one shape, and not all of them are kept.
+    pub fn can_detach_shape_vertices(&self, vertex_ids: &[u16], keep: &[u16]) -> bool {
+        vertex_ids.iter().any(|&vertex_id| {
+            let users = self.shapes_using_vertices(&[vertex_id]).unwrap_or_default();
+            users.len() > 1 && users.iter().any(|shape_id| !keep.contains(shape_id))
+        })
+    }
+
+    /// Give shapes their own copies of vertices they share, at the same positions.
+    /// The shapes in `keep` keep sharing the original, and every other shape using it gets a copy.
+    /// If no shape using a vertex is kept, the first shape using it keeps the original.
+    pub fn detach_shape_vertices(&mut self, vertex_ids: &[u16], keep: &[u16]) -> anyhow::Result<()> {
+        // New vertices go at the end of their zone, which moves the vertices of later zones along, so later zones go first
+        let mut vertex_ids = vertex_ids.to_vec();
+        vertex_ids.sort();
+        vertex_ids.dedup();
+        for &vertex_id in vertex_ids.iter().rev() {
+            let users = self.shapes_using_vertices(&[vertex_id])?;
+            if users.len() < 2 { continue; }
+            let keeper = users.iter().copied().find(|shape_id| keep.contains(shape_id)).unwrap_or(users[0]);
+
+            let zone_id = self.zone_of_vertex(vertex_id)?;
+            let position = self.get_vertex_info(vertex_id)?.position();
+            let vertex_start = self.get_zone_info(zone_id)?.vertices().0;
+            for shape_id in users {
+                if shape_id == keeper || keep.contains(&shape_id) { continue; }
+                let copy = self.add_shape_vertex(zone_id, position)?;
+                let shape = &mut self.shapes.borrow_mut().items[shape_id as usize];
+                let locals: Vec<u16> = shape.local_vertices().into_iter()
+                    .map(|local| if local == vertex_id - vertex_start { copy - vertex_start } else { local })
+                    .collect();
+                shape.set_local_vertices(&locals)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Join shapes in one zone into the group of the first of them, so they are one surface with its params.
+    /// The joined shapes move to right after the group's other shapes, keeping every group together in the zone.
+    pub fn join_shape_groups(&mut self, shape_ids: &[u16]) -> anyhow::Result<()> {
+        let mut shape_ids = shape_ids.to_vec();
+        shape_ids.sort();
+        shape_ids.dedup();
+        let Some(&first) = shape_ids.first() else { return Ok(()); };
+        let target = self.get_shape_info(first)?;
+        for &shape_id in &shape_ids {
+            if self.get_shape_info(shape_id)?.zone_id() != target.zone_id() { anyhow::bail!("Only shapes in the same zone can be grouped!"); }
+        }
+
+        let (start, count) = self.get_zone_info(target.zone_id())?.shapes();
+        let zone_shapes: Vec<Shape> = self.shapes.borrow().items[start as usize..(start + count) as usize].to_vec();
+        let joining: Vec<usize> = shape_ids.iter()
+            .map(|&shape_id| (shape_id - start) as usize)
+            .filter(|&i| zone_shapes[i].group() != target.group())
+            .collect();
+        if joining.is_empty() { anyhow::bail!("These shapes are already one group!"); }
+
+        // The target group's members never move, so the joined shapes go after its last one
+        let last = zone_shapes.iter().rposition(|shape| shape.group() == target.group()).expect("the first shape is in the group");
+        let mut reordered = Vec::with_capacity(zone_shapes.len());
+        for (i, shape) in zone_shapes.iter().enumerate() {
+            if joining.contains(&i) { continue; }
+            reordered.push(*shape);
+            if i == last {
+                for &j in &joining {
+                    let mut joined = zone_shapes[j];
+                    joined.set_group(target.group());
+                    joined.set_params(target.params());
+                    reordered.push(joined);
+                }
+            }
+        }
+        self.shapes.borrow_mut().items[start as usize..(start + count) as usize].copy_from_slice(&reordered);
+        Ok(())
+    }
+
+    /// Give each shape a group of its own. They move to the end of their zone, keeping the groups they leave together.
+    pub fn separate_shape_groups(&mut self, shape_ids: &[u16]) -> anyhow::Result<()> {
+        let mut zone_ids = vec![];
+        for &shape_id in shape_ids {
+            zone_ids.push(self.get_shape_info(shape_id)?.zone_id());
+        }
+        zone_ids.sort();
+        zone_ids.dedup();
+
+        for zone_id in zone_ids {
+            let (start, count) = self.get_zone_info(zone_id)?.shapes();
+            let zone_shapes: Vec<Shape> = self.shapes.borrow().items[start as usize..(start + count) as usize].to_vec();
+            let separating: Vec<usize> = (0..count as usize).filter(|&i| shape_ids.contains(&(start + i as u16))).collect();
+
+            let mut reordered: Vec<Shape> = (0..count as usize).filter(|i| !separating.contains(i)).map(|i| zone_shapes[i]).collect();
+            reordered.extend(separating.iter().map(|&i| zone_shapes[i]));
+            self.shapes.borrow_mut().items[start as usize..(start + count) as usize].copy_from_slice(&reordered);
+
+            // Each moved shape gets a group nobody else has, one at a time so they don't share one
+            for shape_id in start + count - separating.len() as u16..start + count {
+                let group = self.unused_group(zone_id)?;
+                self.shapes.borrow_mut().items[shape_id as usize].set_group(group);
+            }
+        }
+        Ok(())
     }
 
     /// Get the bounding box of everything a shape affects: its vertices, out to its reach
@@ -689,13 +859,92 @@ mod tests {
         assert_eq!(objects.shapes_with_all_vertices(&[]).unwrap(), Vec::<u16>::new());
     }
 
-    /// Radius knobs are the inner radius and then the outer radius out from the hull
+    /// Radius knobs go out from the hull: the outer knob along the line to the edge of the falloff, and the inner knob along the side, past the inner radius by a screen distance
     #[test]
-    fn radius_handles() {
+    fn radius_knobs() {
         let mut objects = sample();
         objects.set_shape_params(&[0], ShapeParamChange::InnerRadius(2.0)).unwrap();
-        assert_eq!(objects.shape_radius_handles(0).unwrap(), (Vec2::new(7.0, 5.0), Vec2::new(17.0, 5.0)));
-        assert_eq!(objects.shape_radius_handles(1).unwrap(), (Vec2::new(5.0, 2.0), Vec2::new(5.0, 12.0)));
+        let knobs = objects.radius_knobs(&[0], 0.5).unwrap().unwrap();
+        assert_eq!((knobs.anchor, knobs.direction, knobs.side, knobs.offset), (Vec2::new(5.0, 5.0), Vec2::RIGHT, Vec2::new(0.0, 1.0), 5.0));
+        assert_eq!((knobs.inner, knobs.outer), (Vec2::new(5.0, 12.0), Vec2::new(17.0, 5.0)));
+
+        // On a line, the inner knob goes along the line from its middle
+        let knobs = objects.radius_knobs(&[1], 1.0).unwrap().unwrap();
+        assert_eq!((knobs.anchor, knobs.direction), (Vec2::new(5.0, 2.0), Vec2::new(0.0, 1.0)));
+        assert_eq!((knobs.inner, knobs.outer), (Vec2::new(-5.0, 2.0), Vec2::new(5.0, 12.0)));
+        assert_eq!(objects.radius_knobs(&[], 1.0).unwrap(), None);
+        assert_eq!(objects.radius_knobs(&[0, 1], 1.0).unwrap(), None); // two groups
+    }
+
+    /// A mesh's knobs go out from an edge on its outside, not the edge its triangles share
+    #[test]
+    fn radius_knobs_mesh() {
+        let mut objects = sample();
+        let corners: Vec<u16> = [(0.0, 0.0), (8.0, 0.0), (8.0, 8.0), (0.0, 8.0)].into_iter().map(|pos| objects.add_shape_vertex(0, Vec2::from(pos)).unwrap()).collect();
+        // The first triangle's first edge is the diagonal both triangles share
+        let created = objects.replace_pending_shapes(0, &[vec![corners[0], corners[2], corners[1]], vec![corners[0], corners[2], corners[3]]], ShapeParams::default(), false).unwrap();
+        let knobs = objects.radius_knobs(&created, 1.0).unwrap().unwrap();
+        assert_eq!((knobs.anchor, knobs.direction), (Vec2::new(8.0, 4.0), Vec2::RIGHT));
+        assert_eq!(objects.radius_knobs(&created[..1], 1.0).unwrap(), None); // only part of the group
+    }
+
+    /// Detaching gives shapes that aren't kept their own copies of shared vertices
+    #[test]
+    fn detach_vertices() {
+        let mut objects = sample();
+        let third = objects.create_shape(0, &[0, 1], ShapeParams::default(), 0).unwrap();
+        let fourth = objects.create_shape(0, &[0], ShapeParams::default(), 0).unwrap();
+        assert_eq!(objects.shapes_using_vertices(&[0]).unwrap(), vec![0, third, fourth]);
+        assert!(objects.can_detach_shape_vertices(&[0], &[third]));
+        assert!(!objects.can_detach_shape_vertices(&[2], &[]));
+
+        // Keeping the new line, the point and the other point get copies
+        objects.detach_shape_vertices(&[0], &[third]).unwrap();
+        assert_eq!(objects.shapes_using_vertices(&[0]).unwrap(), vec![third]);
+        assert_eq!(objects.vertex_count(), 6);
+        for shape_id in [0, fourth] {
+            let vertex_ids = objects.shape_vertex_ids(shape_id).unwrap();
+            assert_ne!(vertex_ids, vec![0]);
+            assert_eq!(objects.shape_positions(shape_id).unwrap(), vec![Vec2::new(5.0, 5.0)]);
+        }
+        assert_eq!(objects.shape_positions(4).unwrap(), vec![Vec2::new(25.0, 2.0)]); // the other zone's shape keeps its vertex
+
+        // With nothing kept, the first shape keeps the original
+        objects.detach_shape_vertices(&[1], &[]).unwrap();
+        assert_eq!(objects.shapes_using_vertices(&[1]).unwrap(), vec![1]);
+    }
+
+    /// Joining puts shapes in the first one's group with its params, right after the group's other shapes
+    #[test]
+    fn join_groups() {
+        let mut objects = sample();
+        let extra = objects.create_shape(0, &[2], ShapeParams { steepness: 3.0, ..ShapeParams::default() }, 0).unwrap();
+        assert!(objects.join_shape_groups(&[0]).is_err());
+
+        objects.join_shape_groups(&[extra, 0]).unwrap();
+        assert_eq!(objects.get_shape_info(1).unwrap().group(), objects.get_shape_info(0).unwrap().group());
+        assert_eq!(objects.get_shape_info(1).unwrap().params().steepness, 1.0);
+        assert_eq!(objects.shape_vertex_ids(1).unwrap(), vec![2]);
+        assert_eq!(objects.shape_vertex_ids(2).unwrap(), vec![1, 2]); // the line moved back
+        assert_eq!(objects.shape_groups(&[0]).unwrap(), vec![0, 1]);
+        assert_eq!(objects.shape_positions(3).unwrap(), vec![Vec2::new(25.0, 2.0)]);
+        assert!(objects.join_shape_groups(&[0, 3]).is_err()); // different zones
+    }
+
+    /// Separating gives each shape its own group, moving it to the end of its zone
+    #[test]
+    fn separate_groups() {
+        let mut objects = sample();
+        let group = objects.get_shape_info(0).unwrap().group();
+        objects.create_shape_in_group(0, &[2], group, 0).unwrap();
+        assert_eq!(objects.shape_groups(&[0]).unwrap(), vec![0, 1]);
+
+        objects.separate_shape_groups(&[0]).unwrap();
+        assert_eq!(objects.shape_vertex_ids(0).unwrap(), vec![2]);
+        assert_eq!(objects.shape_vertex_ids(2).unwrap(), vec![0]);
+        let groups: Vec<u16> = (0..3).map(|id| objects.get_shape_info(id).unwrap().group()).collect();
+        assert!(groups[0] != groups[2] && groups[1] != groups[2] && groups[0] != groups[1]);
+        assert_eq!(objects.shape_positions(3).unwrap(), vec![Vec2::new(25.0, 2.0)]);
     }
 
     /// Reach bounds cover the vertices out to the shape's reach

@@ -38,6 +38,10 @@ pub struct EditorToolShapePen {
 
     /// If the shape pen stays active after finishing a path, instead of switching to the shape tool
     stay_active: bool,
+
+    /// The first shape made from the latest finished path and how many there are, until the next path starts.
+    /// The controller selects them in the shape tool when the pen switches to it.
+    created: Option<(u16, u16)>,
 }
 
 impl EditorTool for EditorToolShapePen {
@@ -123,6 +127,7 @@ impl EditorTool for EditorToolShapePen {
             SpecialQuery::ActiveZone => Some(SpecialValue::Zone(self.zone)),
             SpecialQuery::ShapeGhost => self.ghost.map(SpecialValue::Position),
             SpecialQuery::StayActive => Some(SpecialValue::Flag(self.stay_active)),
+            SpecialQuery::CreatedShapes => self.created.map(|(start, count)| SpecialValue::ShapeRange(start, count)),
             _ => None,
         }
     }
@@ -148,6 +153,7 @@ impl EditorToolShapePen {
     /// Add a vertex to the path at a position, starting a path if there isn't one, or finish the path if the first or latest vertex was clicked
     fn add_vertex(&mut self, mut state: ControllerStateInput, pos: Vec2, modifiers: InputModifiers) -> ToolResult {
         self.new_vertex = None;
+        self.created = None;
 
         // Start a path in the zone that was clicked, preferring the zone last drawn in
         let zone_id = match (self.zone, self.path.is_empty()) {
@@ -213,6 +219,7 @@ impl EditorToolShapePen {
 
         let created = state.objects.replace_pending_shapes(zone_id, &shapes, state.shape_defaults, false)?;
         let bounds = state.objects.shapes_reach_bounds(&created)?;
+        self.created = created.first().map(|&start| (start, created.len() as u16));
         self.clear_path();
 
         let next_tool = if self.stay_active { EditorToolKind::ShapePen } else { EditorToolKind::Shape };
@@ -286,6 +293,11 @@ mod tests {
         assert!(result.normals_stale.is_some());
         assert_eq!(shapes(&objects), (vec![1], 0));
         assert_eq!(tool.handle_special_query(SpecialQuery::ShapeGhost), None);
+        assert_eq!(tool.handle_special_query(SpecialQuery::CreatedShapes), Some(SpecialValue::ShapeRange(0, 1)));
+
+        // Starting another path forgets them
+        click_all(&mut tool, &objects, &[(50.0, 50.0)]).unwrap();
+        assert_eq!(tool.handle_special_query(SpecialQuery::CreatedShapes), None);
     }
 
     /// Two vertices make a line whether the path is closed or not

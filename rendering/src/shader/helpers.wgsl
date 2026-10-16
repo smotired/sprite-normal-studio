@@ -350,26 +350,3 @@ fn in_shape_core(shape: Shape, pos: vec2<f32>) -> bool {
     }
     return hull_distance(shape, pos).distance <= shape.inner_radius;
 }
-
-// Get where the knobs for a shape's radii start from, on the edge of its hull, and the direction they go out from it.
-// Points go right, lines go to the left of their first edge, and triangles go out from their first edge.
-// Must match radius_handle_frame in shape.rs.
-struct RadiusHandleFrame {
-    anchor: vec2<f32>,
-    direction: vec2<f32>,
-}
-
-fn radius_handle_frame(shape: Shape) -> RadiusHandleFrame {
-    if (shape.vertex_count == 1u || all(shape.a == shape.b)) {
-        return RadiusHandleFrame(shape.a, vec2<f32>(1.0, 0.0));
-    }
-    let anchor = (shape.a + shape.b) * 0.5;
-    let edge = shape.b - shape.a;
-    var direction = normalize(vec2<f32>(-edge.y, edge.x));
-
-    // Triangles go away from their third vertex
-    if (shape.vertex_count == 3u && dot(direction, shape.c - anchor) > 0.0) {
-        direction = -direction;
-    }
-    return RadiusHandleFrame(anchor, direction);
-}

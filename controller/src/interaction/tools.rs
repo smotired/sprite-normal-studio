@@ -15,7 +15,7 @@ use result::{EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
 use crate::{Axis, Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, SavedObjects, Status};
-use crate::objects::{ShapeParams, ShapeParamChange};
+use crate::objects::{ShapeParams, ShapeParamChange, ShapeProfile};
 use super::history::{History, DragStep};
 
 /// Options for which tool we are using in the editor.
@@ -77,6 +77,7 @@ pub enum SpecialAction {
     NormalSet(Vec3, bool),
 
     /// Zone, Point: separate the selected points from their unselected siblings.
+    /// Shape: give the shapes that aren't selected their own copies of the selected shape vertices they share.
     SelectionSeparated,
 
     /// Zone: mirror the selected zones across an axis through the center of their bounds. Flipping across the vertical axis flips horizontally.
@@ -98,7 +99,8 @@ pub enum SpecialAction {
     PathSplit,
 
     /// Point: merge the selected points into one group of siblings, and select them.
-    PointsMerged,
+    /// Shape: merge the selected shape vertices into one at their average position, and select it.
+    SelectionMerged,
 
     /// Pen: toggle if branching zones start with the normal of the zone they branch from.
     ToggleInherit,
@@ -111,8 +113,15 @@ pub enum SpecialAction {
     /// The bool is true if this continues a drag, like NormalSet.
     ShapeParamSet(ShapeParamChange, bool),
 
-    /// Shape: merge the selected shape vertices into one at their average position, and select it.
-    ShapeVerticesMerged,
+    /// Shape: join the selected shapes into the group of the first of them, so they are one surface.
+    ShapesGrouped,
+
+    /// Shape: give each selected shape a group of its own.
+    ShapesUngrouped,
+
+    /// Shape: select the vertices of a range of shapes, given as the first shape and how many there are.
+    /// Sent to the shape tool when the shape pen switches to it, to select the shapes it just made.
+    ShapesSelected(u16, u16),
 
     /// Zone: remove every shape from the selected zones.
     ShapesCleared,
@@ -172,6 +181,9 @@ pub enum SpecialQuery {
     /// Shape pen: the latest vertex of the path of shapes being drawn, which a ghost line joins to the cursor.
     /// Only answered while a path is being drawn.
     ShapeGhost,
+
+    /// Shape pen: the shapes made from the latest finished path, until the next path starts.
+    CreatedShapes,
 }
 
 /// Answers to special queries
@@ -181,6 +193,40 @@ pub enum SpecialValue {
     Flag(bool),
     Zone(Option<u16>),
     Position(Vec2),
+
+    /// A range of shapes, as the first shape and how many there are
+    ShapeRange(u16, u16),
+}
+
+/// The params of the selected shapes, or of new shapes if none are selected. Each is None if the selected shapes have different values.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct ShapeParamsSummary {
+    /// The params of the first selected shape, or of new shapes, to start from where the selected shapes differ
+    pub first: ShapeParams,
+
+    pub profile: Option<ShapeProfile>,
+    pub inner_radius: Option<f32>,
+    pub outer_radius: Option<f32>,
+    pub steepness: Option<f32>,
+    pub blend: Option<f32>,
+}
+
+impl ShapeParamsSummary {
+    /// Summarize several shapes' params, keeping only the values they all share. With no params, every value is the default.
+    pub fn of(params: &[ShapeParams], defaults: ShapeParams) -> Self {
+        fn shared<T: PartialEq + Copy>(params: &[ShapeParams], defaults: ShapeParams, value: impl Fn(&ShapeParams) -> T) -> Option<T> {
+            let Some(first) = params.first() else { return Some(value(&defaults)); };
+            params.iter().all(|other| value(other) == value(first)).then(|| value(first))
+        }
+        Self {
+            first: params.first().copied().unwrap_or(defaults),
+            profile: shared(params, defaults, |params| params.profile),
+            inner_radius: shared(params, defaults, |params| params.inner_radius),
+            outer_radius: shared(params, defaults, |params| params.outer_radius),
+            steepness: shared(params, defaults, |params| params.steepness),
+            blend: shared(params, defaults, |params| params.blend),
+        }
+    }
 }
 
 /// Allows boxed editor tools to be cloned, so their state can be snapshotted.
@@ -286,9 +332,18 @@ impl Controller {
             self.history.record(change, normals_stale);
             self.mark_normals_stale(normals_stale);
 
+            // Shapes the old tool just made are selected in the new one
+            let switching = new_tool != self.tool.kind();
+            let created = self.tool.handle_special_query(SpecialQuery::CreatedShapes);
+
             let (deselect_state, select_state) = (self.create_state(), self.create_state());
             let normals_stale = switch_tool(&mut self.tool, &mut self.history, new_tool, deselect_state, select_state);
             self.mark_normals_stale(normals_stale);
+
+            // Selecting doesn't change any objects, so it can't fail in a way worth showing
+            if switching && let Some(SpecialValue::ShapeRange(start, count)) = created {
+                let _ = self.tool.handle_special_action(self.create_state(), SpecialAction::ShapesSelected(start, count));
+            }
         }
 
         if step == DragStep::Release { self.history.close(&self.objects, self.tool.as_ref()); }
@@ -383,11 +438,34 @@ impl Controller {
     /// Get the IDs of the selected shape vertices
     pub fn selected_shape_vertices(&self) -> &[u16] { self.tool.shape_selection() }
 
-    /// Get the params of the first selected shape, or the params new shapes get if no shapes are selected
-    pub fn selected_shape_params(&self) -> ShapeParams {
-        self.selected_shapes().first()
-            .and_then(|&shape_id| self.objects.get_shape_info(shape_id).ok())
-            .map_or(self.shape_defaults, |shape| shape.params())
+    /// Get the params the selected shapes share, or the params new shapes get if no shapes are selected
+    pub fn selected_shape_params(&self) -> ShapeParamsSummary {
+        let params: Vec<ShapeParams> = self.selected_shapes().into_iter()
+            .filter_map(|shape_id| self.objects.get_shape_info(shape_id).ok())
+            .map(|shape| shape.params())
+            .collect();
+        ShapeParamsSummary::of(&params, self.shape_defaults)
+    }
+
+    /// Returns true if the selected shapes are from more than one group, so they can be joined into one
+    pub fn can_group_shapes(&self) -> bool {
+        let mut groups: Vec<u16> = self.selected_shapes().into_iter()
+            .filter_map(|shape_id| self.objects.get_shape_info(shape_id).ok())
+            .map(|shape| shape.group())
+            .collect();
+        groups.sort();
+        groups.dedup();
+        groups.len() > 1
+    }
+
+    /// Returns true if any selected shape shares its group with another shape, so it can be given its own
+    pub fn can_ungroup_shapes(&self) -> bool {
+        self.selected_shapes().into_iter().any(|shape_id| self.objects.shape_groups(&[shape_id]).is_ok_and(|group| group.len() > 1))
+    }
+
+    /// Returns true if detaching the selected shape vertices would give any shape its own copy of one
+    pub fn can_detach_shape_vertices(&self) -> bool {
+        self.objects.can_detach_shape_vertices(self.tool.shape_selection(), &self.selected_shapes())
     }
 
     /// Returns true if any selected zone has shapes
@@ -612,6 +690,21 @@ mod tests {
         let mut status = Status::Feedback("Saved".to_owned());
         run_tool_action(&mut tool, state(&objects), &mut status, false, ok_action);
         assert_eq!(status, Status::Ok);
+    }
+
+    /// Summaries keep the values every shape shares, and use the defaults when there are no shapes
+    #[test]
+    fn shape_params_summary() {
+        let defaults = ShapeParams::default();
+        let all_default = ShapeParamsSummary::of(&[], defaults);
+        assert_eq!(all_default.outer_radius, Some(defaults.outer_radius));
+        assert_eq!(all_default.profile, Some(ShapeProfile::Cone));
+
+        let dome = ShapeParams { profile: ShapeProfile::Dome, outer_radius: 4.0, ..defaults };
+        let mixed = ShapeParamsSummary::of(&[defaults, dome], ShapeParams { steepness: 9.0, ..defaults });
+        assert_eq!((mixed.profile, mixed.outer_radius), (None, None));
+        assert_eq!(mixed.first, defaults);
+        assert_eq!((mixed.inner_radius, mixed.steepness, mixed.blend), (Some(0.0), Some(1.0), Some(2.0)));
     }
 
     /// Tools ignore special actions and queries they don't support
