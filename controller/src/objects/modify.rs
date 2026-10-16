@@ -33,7 +33,7 @@ impl ObjectBuffers {
         Ok(())
     }
 
-    /// Updates the position of a list of zones, based on a new position for the very first point in that range.
+    /// Updates the position of a list of zones and their shapes, based on a new position for the very first point in that range.
     pub fn move_zones(&mut self, zone_ids: &[u16], first_point_position: Vec2) -> anyhow::Result<()> {
         if zone_ids.is_empty() { return Ok(()); }
 
@@ -46,13 +46,16 @@ impl ObjectBuffers {
         // Determine how much to move it
         let delta = first_point_position - self.get_point_info(first_id)?.position();
 
-        // Get all point IDs in all zones
+        // Get all point and shape vertex IDs in all zones
         let mut point_ids = vec![];
+        let mut vertex_ids = vec![];
         for &zone_id in zone_ids {
             let (start, count) = self.get_zone_info(zone_id)?.range();
             point_ids.extend(start..start+count);
+            vertex_ids.extend(self.zone_vertex_ids(zone_id)?);
         }
-        self.move_points(&point_ids[..], delta)
+        self.move_points(&point_ids[..], delta)?;
+        self.move_shape_vertices(&vertex_ids, delta)
     }
 
     /// Move a list of points by a delta. Siblings move together, so each set of siblings is only moved once
@@ -245,8 +248,12 @@ mod tests {
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
+        let vertex = objects.add_shape_vertex(0, Vec2::new(3.0, 4.0)).unwrap();
+        objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+
         objects.move_zones(&[0], Vec2::new(5.0, 5.0)).unwrap();
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 5.0));
+        assert_eq!(objects.get_vertex_info(vertex).unwrap().position(), Vec2::new(8.0, 9.0));
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 15.0));
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(20.0, 0.0));
     }

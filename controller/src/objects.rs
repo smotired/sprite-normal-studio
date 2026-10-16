@@ -14,6 +14,7 @@ mod diff;
 mod save;
 mod clipboard;
 mod transform;
+mod warp;
 
 use studio_math::Vec2;
 use wgpu::{Buffer, Device};
@@ -28,7 +29,8 @@ pub(crate) use buffers::{SELECTION_WIDTH, SELECTION_HEIGHT};
 pub use diff::ObjectDiff;
 pub use bounds::{Bounds, merge_bounds};
 pub use save::{SavedObjects, LoadedObjects};
-pub use transform::PointsSnapshot;
+pub use transform::ZonesSnapshot;
+pub use warp::ShapeWarp;
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;

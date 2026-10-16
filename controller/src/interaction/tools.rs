@@ -113,6 +113,9 @@ pub enum SpecialAction {
 
     /// Shape: merge the selected shape vertices into one at their average position, and select it.
     ShapeVerticesMerged,
+
+    /// Zone: remove every shape from the selected zones.
+    ShapesCleared,
 }
 
 impl SpecialAction {
@@ -385,6 +388,11 @@ impl Controller {
         self.selected_shapes().first()
             .and_then(|&shape_id| self.objects.get_shape_info(shape_id).ok())
             .map_or(self.shape_defaults, |shape| shape.params())
+    }
+
+    /// Returns true if any selected zone has shapes
+    pub fn selected_zones_have_shapes(&self) -> bool {
+        self.selected_zones().into_iter().any(|zone_id| self.objects.get_zone_info(zone_id).is_ok_and(|zone| zone.shapes().1 > 0))
     }
 
     /// Returns true if the selected shape vertices are at least two vertices in one zone, so they can be merged

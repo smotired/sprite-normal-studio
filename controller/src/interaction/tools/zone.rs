@@ -2,7 +2,7 @@ use studio_math::Vec2;
 use studio_math::transform::Affine2;
 
 use crate::{Axis, Bounds, InputModifiers, ObjectBuffers, SavedObjects};
-use crate::objects::{merge_bounds, PointsSnapshot};
+use crate::objects::{merge_bounds, ZonesSnapshot};
 
 use super::{EditorTool, EditorToolKind, ControllerStateInput, PastePlacement, SelectionType, SpecialAction, TransformBox, utils};
 use super::result::{ToolResult, DefaultResults};
@@ -63,6 +63,9 @@ pub struct EditorToolZone {
     /// The mouse position where we started dragging a zone.
     drag_origin: Option<Vec2>,
 
+    /// The selected zones from before we started dragging them, which every step of the drag moves from
+    drag_snapshot: Option<ZonesSnapshot>,
+
     /// The start point for our selection box if we are instead dragging out a box of zones
     selection_origin: Option<Vec2>,
 
@@ -98,8 +101,8 @@ struct TransformDrag {
     /// The current rotation in radians, if rotating
     angle: f32,
 
-    /// The points being transformed, from before the drag
-    snapshot: PointsSnapshot,
+    /// The zones being transformed, from before the drag
+    snapshot: ZonesSnapshot,
 }
 
 impl TransformDrag {
@@ -220,7 +223,7 @@ impl EditorTool for EditorToolZone {
         // Dragging the transform box takes priority over everything else
         if let Some((handle, bounds)) = self.transform_hit(&state, pos)? {
             self.abandon_drag();
-            let snapshot = state.objects.snapshot_zone_points(&self.selected_zones)?;
+            let snapshot = state.objects.snapshot_zones(&self.selected_zones)?;
             self.transform = Some(TransformDrag { handle, bounds, origin: pos, angle: 0.0, snapshot });
             return self.ok();
         }
@@ -275,6 +278,11 @@ impl EditorTool for EditorToolZone {
             self.selection_box_end = Some(pos);
             self.set_tentative_selection(&[], &state, modifiers)?;
         }
+
+        // Every step of dragging zones moves them from where they started
+        if self.reference_delta.is_some() && !self.selected_zones.is_empty() {
+            self.drag_snapshot = Some(state.objects.snapshot_zones(&self.selected_zones)?);
+        }
         self.ok()
     }
 
@@ -288,15 +296,11 @@ impl EditorTool for EditorToolZone {
             return self.stale_in(merge_bounds(before, after));
         }
 
-        // Drag selected zones if we are doing that
-        else if let Some(reference_delta) = self.reference_delta && !self.selected_zones.is_empty() {
-            let mut target = pos - reference_delta;
-            if let Some(origin) = self.drag_origin {
-                target = utils::snap_drag_target(target, origin - reference_delta, origin, pos, modifiers);
-            }
-
-            // Move the first point to the position across all the selected zones.
-            return self.move_selected_zones(&mut state, target);
+        // Drag selected zones if we are doing that, moving the first point of the first zone to the target
+        else if let (Some(reference_delta), Some(origin), Some(snapshot)) = (self.reference_delta, self.drag_origin, &self.drag_snapshot) {
+            let start = origin - reference_delta;
+            let target = utils::snap_drag_target(pos - reference_delta, start, origin, pos, modifiers);
+            return self.transform_from_snapshot(&mut state, snapshot, &Affine2::translate(target - start));
         }
         // Or if we are dragging a selection box, tentatively select the zones in the box
         else if let Some(selection_origin) = self.selection_origin {
@@ -318,6 +322,7 @@ impl EditorTool for EditorToolZone {
         self.transform = None;
         self.reference_delta = None;
         self.drag_origin = None;
+        self.drag_snapshot = None;
         self.selection_origin = None;
         self.selection_box_end = None;
         self.ok()
@@ -333,9 +338,12 @@ impl EditorTool for EditorToolZone {
         }
 
         // If dragging zones, put them back where they started
-        if let (Some(reference_delta), Some(origin)) = (self.reference_delta.take(), self.drag_origin.take()) {
-            if !self.selected_zones.is_empty() {
-                return self.move_selected_zones(&mut state, origin - reference_delta);
+        if let (Some(_), Some(_)) = (self.reference_delta.take(), self.drag_origin.take()) {
+            if let Some(snapshot) = self.drag_snapshot.take() {
+                let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
+                state.objects.restore_snapshot(&snapshot)?;
+                let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
+                return self.stale_in(merge_bounds(before, after));
             }
         }
         // If dragging a selection box, just abandon the box and keep the previous selection
@@ -390,12 +398,12 @@ impl EditorTool for EditorToolZone {
         // Abandon any drag, then add the zones where they were copied from
         self.abandon_drag();
         let zones = state.objects.paste_zones(objects)?;
-        let points = points_from_zone_selection(&zones, &state)?;
 
-        // Move them into place, and select them
+        // Move them into place along with their shapes, and select them
         if let Some(center) = state.objects.zones_center(&zones)? {
             let target = placement.target(center, state.camera_inv_scale);
-            state.objects.move_points(&points, target - center)?;
+            let snapshot = state.objects.snapshot_zones(&zones)?;
+            state.objects.apply_transform(&snapshot, &Affine2::translate(target - center))?;
         }
         self.set_selection(zones, &state)?;
         self.stale_in(state.objects.zones_bounds(&self.selected_zones)?)
@@ -424,6 +432,15 @@ impl EditorTool for EditorToolZone {
                 let angle = if clockwise { std::f32::consts::FRAC_PI_2 } else { -std::f32::consts::FRAC_PI_2 };
                 self.transform_selected_zones(&mut state, |center| Affine2::rotate_about(angle, center))
             },
+            SpecialAction::ShapesCleared => {
+                let mut shape_ids = vec![];
+                for &zone_id in &self.selected_zones {
+                    shape_ids.extend(state.objects.zone_shape_ids(zone_id)?);
+                }
+                let bounds = state.objects.shapes_reach_bounds(&shape_ids)?;
+                state.objects.clear_zone_shapes(&self.selected_zones)?;
+                self.stale_in(bounds)
+            },
             _ => self.ok(),
         }
     }
@@ -436,15 +453,16 @@ impl EditorToolZone {
         self.transform = None;
         self.reference_delta = None;
         self.drag_origin = None;
+        self.drag_snapshot = None;
         self.selection_origin = None;
         self.selection_box_end = None;
     }
 
-    /// Move the first point of the selected zones to a position, marking normals stale where the zones were and where they are now.
+    /// Transform the selected zones from a snapshot of them, marking normals stale where the zones were and where they are now.
     /// Siblings move along with the zones, so their zones are included.
-    fn move_selected_zones(&self, state: &mut ControllerStateInput, first_point_position: Vec2) -> ToolResult {
+    fn transform_from_snapshot(&self, state: &mut ControllerStateInput, snapshot: &ZonesSnapshot, transform: &Affine2) -> ToolResult {
         let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
-        state.objects.move_zones(&self.selected_zones[..], first_point_position)?;
+        state.objects.apply_transform(snapshot, transform)?;
         let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
         self.stale_in(merge_bounds(before, after))
     }
@@ -454,11 +472,8 @@ impl EditorToolZone {
     fn transform_selected_zones(&mut self, state: &mut ControllerStateInput, transform: impl FnOnce(Vec2) -> Affine2) -> ToolResult {
         self.abandon_drag();
         let Some((min, max)) = state.objects.zones_bounds(&self.selected_zones)? else { return self.ok(); };
-        let snapshot = state.objects.snapshot_zone_points(&self.selected_zones)?;
-        let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
-        state.objects.apply_transform(&snapshot, &transform((min + max) * 0.5))?;
-        let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
-        self.stale_in(merge_bounds(before, after))
+        let snapshot = state.objects.snapshot_zones(&self.selected_zones)?;
+        self.transform_from_snapshot(state, &snapshot, &transform((min + max) * 0.5))
     }
 
     /// Get the part of the transform box around the selected zones at a position, and the box itself, if any.
@@ -1681,6 +1696,76 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         // The drag is over
         tool.handle_dragging_to(state(&objects), Vec2::new(50.0, 50.0), IM::none()).unwrap();
         assert_eq!(position(&objects, 1), Vec2::new(10.0, 0.0));
+    }
+
+    /// A 10 pixel square with a point shape in it at (3, 4), returning the vertex
+    fn square_with_shape(objects: &mut ObjectBuffers) -> u16 {
+        add_square(objects, 10.0);
+        let vertex = objects.add_shape_vertex(0, Vec2::new(3.0, 4.0)).unwrap();
+        objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+        vertex
+    }
+
+    /// Dragging a zone moves its shapes along with it, and cancelling puts them back
+    #[test]
+    fn drag_moves_shapes() {
+        let mut objects = ObjectBuffers::headless();
+        let vertex = square_with_shape(&mut objects);
+        let mut tool = EditorToolZone::init();
+
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(15.0, 12.0), Default::default()).unwrap();
+        assert_eq!(objects.get_vertex_info(vertex).unwrap().position(), Vec2::new(8.0, 6.0));
+
+        tool.handle_cancel(state(&objects)).unwrap();
+        assert_eq!(objects.get_vertex_info(vertex).unwrap().position(), Vec2::new(3.0, 4.0));
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
+    }
+
+    /// Pasted zones bring their shapes to where they are placed
+    #[test]
+    fn paste_moves_shapes() {
+        let mut objects = ObjectBuffers::headless();
+        square_with_shape(&mut objects);
+        let copied = objects.copy_zones(&[0]).unwrap();
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        tool.handle_paste(state(&objects), &copied, PastePlacement::At(Vec2::new(50.0, 20.0))).unwrap();
+        assert_eq!(objects.shape_positions(1).unwrap(), vec![Vec2::new(48.0, 19.0)]);
+        assert_eq!(objects.shape_positions(0).unwrap(), vec![Vec2::new(3.0, 4.0)]);
+    }
+
+    /// Flipping and scaling zones transforms their shapes, scaling radii with the zones
+    #[test]
+    fn transform_moves_shapes() {
+        let mut objects = ObjectBuffers::headless();
+        let vertex = square_with_shape(&mut objects);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionFlipped(Axis::Vertical)).unwrap();
+        assert_eq!(objects.get_vertex_info(vertex).unwrap().position(), Vec2::new(7.0, 4.0));
+
+        // Dragging the bottom right corner out to (30, 30) triples the zone
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(30.0, 30.0), Default::default()).unwrap();
+        assert_near(objects.get_vertex_info(vertex).unwrap().position(), Vec2::new(21.0, 12.0));
+        assert!((objects.get_shape_info(0).unwrap().params().outer_radius - 30.0).abs() < 1e-4);
+    }
+
+    /// Clearing shapes removes them from the selected zones only
+    #[test]
+    fn clear_shapes() {
+        let mut objects = ObjectBuffers::headless();
+        square_with_shape(&mut objects);
+        add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
+        let vertex = objects.add_shape_vertex(1, Vec2::new(28.0, 2.0)).unwrap();
+        objects.create_shape(1, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+        let result = tool.handle_special_action(state(&objects), SpecialAction::ShapesCleared).unwrap();
+        assert!(result.normals_stale.is_some());
+        assert_eq!((objects.shape_count(), objects.vertex_count()), (1, 1));
+        assert_eq!(objects.get_shape_info(0).unwrap().zone_id(), 1);
     }
 
     /// Paste centers on the center of the bounding box, not the average of the points
