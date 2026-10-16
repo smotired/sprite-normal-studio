@@ -257,6 +257,15 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                             Action::ToolSelected(controller::EditorToolKind::Pen)
                         } else { Action::None }
                     },
+                    Key::U => {
+                        if pressed && !repeat && !modifiers.ctrl && !modifiers.alt {
+                            if modifiers.shift {
+                                Action::ToolSelected(controller::EditorToolKind::ShapePen)
+                            } else {
+                                Action::ToolSelected(controller::EditorToolKind::Shape)
+                            }
+                        } else { Action::None }
+                    },
 
                     // Toggling lighting
                     Key::L => {

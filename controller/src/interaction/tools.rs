@@ -2,15 +2,20 @@ mod utils;
 mod zone;
 mod pen;
 mod point;
+mod shape;
+mod shape_pen;
 mod result;
 pub use zone::EditorToolZone;
 pub use pen::EditorToolPen;
 pub use point::EditorToolPoint;
+pub use shape::EditorToolShape;
+pub use shape_pen::EditorToolShapePen;
 pub(super) use result::ToolResult;
 use result::{EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
 use crate::{Axis, Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, SavedObjects, Status};
+use crate::objects::{ShapeParams, ShapeParamChange};
 use super::history::{History, DragStep};
 
 /// Options for which tool we are using in the editor.
@@ -26,6 +31,13 @@ pub enum EditorToolKind {
     /// Allows clicking/dragging to create control points for a zone.
     /// If canceled or completed swaps back to Zone mode and selects the created path.
     Pen,
+
+    /// Allows selecting and manipulating the shapes in a zone by their vertices.
+    Shape,
+
+    /// Allows clicking to draw a path of shape vertices in a zone, which becomes shapes when it is finished.
+    /// If completed swaps back to Shape mode in the same zone.
+    ShapePen,
 }
 
 pub struct ControllerStateInput {
@@ -37,6 +49,9 @@ pub struct ControllerStateInput {
 
     // Inverse camera scale
     pub camera_inv_scale: f32,
+
+    // Params that new shapes get
+    pub shape_defaults: ShapeParams,
 }
 
 pub type SelectionType<'a> = &'a [u16]; // slice of vector of selected points
@@ -88,14 +103,22 @@ pub enum SpecialAction {
     /// Pen: toggle if branching zones start with the normal of the zone they branch from.
     ToggleInherit,
 
-    /// Pen: toggle if the pen stays active after finishing a zone.
+    /// Pen, Shape pen: toggle if the pen stays active after finishing a zone or a path of shapes.
     ToggleStayActive,
+
+    /// Shape: change one param of the selected shapes and the rest of their groups.
+    /// With no shapes selected, the controller changes the params new shapes get instead.
+    /// The bool is true if this continues a drag, like NormalSet.
+    ShapeParamSet(ShapeParamChange, bool),
+
+    /// Shape: merge the selected shape vertices into one at their average position, and select it.
+    ShapeVerticesMerged,
 }
 
 impl SpecialAction {
-    /// How this action relates to a drag. Continuing to set a normal continues the drag, everything else starts something new.
+    /// How this action relates to a drag. Continuing to set a value continues the drag, everything else starts something new.
     pub fn drag_step(&self) -> DragStep {
-        if matches!(self, Self::NormalSet(_, true)) { DragStep::Continue } else { DragStep::None }
+        if matches!(self, Self::NormalSet(_, true) | Self::ShapeParamSet(_, true)) { DragStep::Continue } else { DragStep::None }
     }
 }
 
@@ -295,6 +318,11 @@ impl Controller {
 
     /// Run an action from the UI that the selected tool handles in its own way, with the same rollback and error handling as other tool actions.
     pub(crate) fn run_special_action(&mut self, action: SpecialAction) {
+        // Shape params with no shapes selected are for new shapes, which the controller keeps so every shape tool uses them
+        if let SpecialAction::ShapeParamSet(change, _) = action && self.selected_shapes().is_empty() {
+            self.shape_defaults = self.shape_defaults.with(change);
+            return;
+        }
         self.run_tool(action.drag_step(), |tool, state| tool.handle_special_action(state, action));
     }
 
@@ -349,6 +377,23 @@ impl Controller {
         self.objects.shapes_with_all_vertices(self.tool.shape_selection()).unwrap_or_default()
     }
 
+    /// Get the IDs of the selected shape vertices
+    pub fn selected_shape_vertices(&self) -> &[u16] { self.tool.shape_selection() }
+
+    /// Get the params of the first selected shape, or the params new shapes get if no shapes are selected
+    pub fn selected_shape_params(&self) -> ShapeParams {
+        self.selected_shapes().first()
+            .and_then(|&shape_id| self.objects.get_shape_info(shape_id).ok())
+            .map_or(self.shape_defaults, |shape| shape.params())
+    }
+
+    /// Returns true if the selected shape vertices are at least two vertices in one zone, so they can be merged
+    pub fn can_merge_shape_vertices(&self) -> bool {
+        let vertices = self.tool.shape_selection();
+        let zones: Vec<Option<u16>> = vertices.iter().map(|&vertex_id| self.objects.zone_of_vertex(vertex_id).ok()).collect();
+        vertices.len() > 1 && zones[0].is_some() && zones.iter().all(|&zone| zone == zones[0])
+    }
+
     /// Get the normal vector shared by all selected zones, or None if nothing is selected or they don't all match.
     pub fn selected_zones_normal(&self) -> Option<Vec3> {
         let mut normals = self.selected_zones().into_iter()
@@ -368,6 +413,7 @@ impl Controller {
             mouse: self.cursor_pos,
             objects: self.objects.clone(),
             camera_inv_scale: self.camera.inv_scale(),
+            shape_defaults: self.shape_defaults,
         }
     }
 }
@@ -410,6 +456,8 @@ pub(super) fn switch_tool(
         EditorToolKind::Zone  => EditorToolZone::select(&selection, select_state),
         EditorToolKind::Point => EditorToolPoint::select(&selection, select_state),
         EditorToolKind::Pen   => EditorToolPen::select(&selection, select_state),
+        EditorToolKind::Shape => EditorToolShape::select(&selection, select_state),
+        EditorToolKind::ShapePen => EditorToolShapePen::select(&selection, select_state),
     };
     history.record(EditorChange { objects: objects.finish_change(), tool: tool_before }, normals_stale);
     normals_stale
@@ -457,7 +505,7 @@ pub(super) mod test_utils {
 
     /// Create the input state for a tool with a specific inverse camera scale
     pub(super) fn state_scaled(objects: &ObjectBuffers, camera_inv_scale: f32) -> ControllerStateInput {
-        ControllerStateInput { mouse: Vec2::ZERO, objects: objects.clone(), camera_inv_scale }
+        ControllerStateInput { mouse: Vec2::ZERO, objects: objects.clone(), camera_inv_scale, shape_defaults: crate::objects::ShapeParams::default() }
     }
 }
 

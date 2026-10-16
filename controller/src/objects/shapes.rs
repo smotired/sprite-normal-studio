@@ -2,7 +2,7 @@ use studio_math::Vec2;
 use studio_math::bounds::bounds_of;
 
 use super::{ObjectBuffers, Bounds, Shape, ShapeVertex, ShapeParams, ShapeParamChange, MAX_OBJECT_ID, hull_distance, merge_bounds};
-use super::shape::radius_handle_frame;
+use super::shape::{radius_handle_frame, SHAPE_PENDING};
 
 impl ObjectBuffers {
     /// Get a clone of a shape by its ID. Returns an error if the shape does not exist.
@@ -80,10 +80,15 @@ impl ObjectBuffers {
         Ok(shape_ids)
     }
 
+    /// Get where the knobs for a shape's radii start from on the edge of its hull, and the direction they go out from it
+    pub fn shape_radius_frame(&self, shape_id: u16) -> anyhow::Result<(Vec2, Vec2)> {
+        Ok(radius_handle_frame(&self.shape_positions(shape_id)?))
+    }
+
     /// Get the positions of the knobs for a shape's inner radius and outer radius
     pub fn shape_radius_handles(&self, shape_id: u16) -> anyhow::Result<(Vec2, Vec2)> {
         let params = self.get_shape_info(shape_id)?.params();
-        let (anchor, direction) = radius_handle_frame(&self.shape_positions(shape_id)?);
+        let (anchor, direction) = self.shape_radius_frame(shape_id)?;
         Ok((anchor + direction * params.inner_radius, anchor + direction * (params.inner_radius + params.outer_radius)))
     }
 
@@ -176,6 +181,49 @@ impl ObjectBuffers {
         }
         let Some((last_id, params)) = last else { anyhow::bail!("Zone {} has no shape group {}!", zone_id, group); };
         self.insert_shape(zone_id, last_id + 1, vertex_ids, params, group, flags)
+    }
+
+    /// Replace every shape still being drawn in a zone with new shapes, each made from 1 to 3 different vertices in the zone.
+    /// The new shapes are pending if `pending` is true, and otherwise they are one new group with the given params.
+    /// Vertices that only the old shapes used are removed, which moves later vertex IDs back. Returns the IDs of the new shapes.
+    pub fn replace_pending_shapes(&mut self, zone_id: u16, shapes: &[Vec<u16>], params: ShapeParams, pending: bool) -> anyhow::Result<Vec<u16>> {
+        let mut old = vec![];
+        for shape_id in self.zone_shape_ids(zone_id)? {
+            if self.get_shape_info(shape_id)?.is_pending() { old.push(shape_id); }
+        }
+
+        // New shapes go at the end of the zone, so the old ones keep their IDs until they are deleted
+        let flags = if pending { SHAPE_PENDING } else { 0 };
+        let mut group = None;
+        for vertex_ids in shapes {
+            let shape_id = match group {
+                Some(group) if !pending => self.create_shape_in_group(zone_id, vertex_ids, group, flags)?,
+                _ => self.create_shape(zone_id, vertex_ids, params, flags)?,
+            };
+            group = Some(self.get_shape_info(shape_id)?.group());
+        }
+
+        // Deleting the old shapes moves the new ones back, but they stay at the end of the zone
+        self.delete_shapes(&old)?;
+        let (start, count) = self.get_zone_info(zone_id)?.shapes();
+        Ok((start + count - shapes.len() as u16..start + count).collect())
+    }
+
+    /// Remove every shape still being drawn in a zone, and the vertices only they used
+    pub fn cancel_pending_shapes(&mut self, zone_id: u16) -> anyhow::Result<()> {
+        self.replace_pending_shapes(zone_id, &[], ShapeParams::default(), true)?;
+        Ok(())
+    }
+
+    /// Get the IDs of the shape vertices in a zone inside the rectangle between two corners
+    pub fn vertices_in_rect(&self, zone_id: u16, corner0: Vec2, corner1: Vec2) -> anyhow::Result<Vec<u16>> {
+        let (min, max) = (corner0.min(corner1), corner0.max(corner1));
+        let mut vertex_ids = vec![];
+        for vertex_id in self.zone_vertex_ids(zone_id)? {
+            let pos = self.get_vertex_info(vertex_id)?.position();
+            if pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y { vertex_ids.push(vertex_id); }
+        }
+        Ok(vertex_ids)
     }
 
     /// Get the IDs of every shape in the same group as any of the listed shapes, sorted
@@ -594,6 +642,42 @@ mod tests {
         objects.set_shape_params(&[1], ShapeParamChange::Steepness(3.0)).unwrap();
         assert_eq!(objects.get_shape_info(0).unwrap().params().steepness, 3.0);
         assert_eq!(objects.get_shape_info(2).unwrap().params().steepness, 1.0);
+    }
+
+    /// Pending shapes are replaced by a group of final shapes, keeping the vertices they share and removing the rest
+    #[test]
+    fn replace_pending() {
+        let mut objects = sample();
+        let path: Vec<u16> = [(1.0, 1.0), (9.0, 1.0), (9.0, 9.0), (1.0, 9.0)].into_iter().map(|pos| objects.add_shape_vertex(0, Vec2::from(pos)).unwrap()).collect();
+        assert_eq!(path, vec![3, 4, 5, 6]);
+        let pending = objects.replace_pending_shapes(0, &[vec![3, 4], vec![4, 5], vec![5, 6]], ShapeParams::default(), true).unwrap();
+        assert_eq!(pending, vec![2, 3, 4]);
+        assert!(objects.get_shape_info(3).unwrap().is_pending());
+        assert_ne!(objects.get_shape_info(3).unwrap().group(), objects.get_shape_info(4).unwrap().group());
+
+        // Two triangles over the first three corners and the last, dropping nothing
+        let params = ShapeParams { steepness: 2.0, ..ShapeParams::default() };
+        let created = objects.replace_pending_shapes(0, &[vec![3, 4, 5], vec![3, 5, 6]], params, false).unwrap();
+        assert_eq!(created, vec![2, 3]);
+        assert!(!objects.get_shape_info(2).unwrap().is_pending());
+        assert_eq!(objects.get_shape_info(2).unwrap().group(), objects.get_shape_info(3).unwrap().group());
+        assert_eq!(objects.get_shape_info(3).unwrap().params().steepness, 2.0);
+        assert_eq!(objects.get_zone_info(0).unwrap().shapes(), (0, 4));
+        assert_eq!(objects.shape_positions(4).unwrap(), vec![Vec2::new(25.0, 2.0)]);
+
+        // Cancelling removes pending shapes and the vertices only they used
+        let extra = objects.add_shape_vertex(0, Vec2::new(4.0, 4.0)).unwrap();
+        objects.replace_pending_shapes(0, &[vec![extra], vec![extra, 3]], ShapeParams::default(), true).unwrap();
+        objects.cancel_pending_shapes(0).unwrap();
+        assert_eq!((objects.shape_count(), objects.vertex_count()), (5, 8));
+    }
+
+    /// Only vertices in the zone and inside the rectangle are found
+    #[test]
+    fn in_rect() {
+        let objects = sample();
+        assert_eq!(objects.vertices_in_rect(0, Vec2::new(9.0, 0.0), Vec2::new(4.0, 6.0)).unwrap(), vec![0, 2]);
+        assert_eq!(objects.vertices_in_rect(1, Vec2::new(9.0, 0.0), Vec2::new(4.0, 6.0)).unwrap(), Vec::<u16>::new());
     }
 
     /// Only shapes whose vertices are all listed count as fully selected
