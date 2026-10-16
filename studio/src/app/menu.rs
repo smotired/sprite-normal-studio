@@ -120,8 +120,9 @@ impl StudioApp {
     fn edit_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
         let Some(project) = self.project() else { return; };
         let controller = &project.controller;
-        let selecting_tool = matches!(controller.selected_tool(), EditorToolKind::Zone | EditorToolKind::Point);
-        let has_selection = !controller.selected_points().is_empty();
+        let in_shape_tool = controller.selected_tool() == EditorToolKind::Shape;
+        let selecting_tool = in_shape_tool || matches!(controller.selected_tool(), EditorToolKind::Zone | EditorToolKind::Point);
+        let has_selection = if in_shape_tool { !controller.selected_shape_vertices().is_empty() } else { !controller.selected_points().is_empty() };
 
         let items = [
             ("Select All", SELECT_ALL, selecting_tool && controller.has_objects(), Action::SelectAll),

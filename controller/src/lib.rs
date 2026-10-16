@@ -17,7 +17,7 @@ use crate::interaction::tools::{EditorTool, EditorToolZone};
 use crate::interaction::history::History;
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorChange, PastePlacement, SpecialAction, SpecialQuery, SpecialValue};
-pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects};
+pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects, ShapeParams, ShapeParamChange, ShapeProfile};
 pub use crate::save::SavedScene;
 pub use crate::status::Status;
 use crate::objects::merge_bounds;
@@ -59,6 +59,9 @@ pub struct Controller {
 
     /// The changes that can be undone and redone
     history: History,
+
+    /// The params new shapes get. Kept here so every shape tool uses the same ones.
+    shape_defaults: ShapeParams,
 }
 
 impl Controller {
@@ -92,6 +95,7 @@ impl Controller {
             selection,
             status: Status::Ok,
             history: History::default(),
+            shape_defaults: ShapeParams::default(),
         }
     }
     

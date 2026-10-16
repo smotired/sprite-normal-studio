@@ -3,6 +3,7 @@ mod utils;
 mod zone;
 mod point;
 mod pen;
+mod shape;
 
 use controller::{Controller, EditorToolKind};
 use eframe::egui;
@@ -22,6 +23,7 @@ pub(super) struct ToolSidebars {
     zone: zone::ZoneSidebar,
     point: point::PointSidebar,
     pen: pen::PenSidebar,
+    shape: shape::ShapeSidebar,
 }
 
 impl ToolSidebars {
@@ -31,6 +33,7 @@ impl ToolSidebars {
             EditorToolKind::Zone  => &mut self.zone,
             EditorToolKind::Point => &mut self.point,
             EditorToolKind::Pen   => &mut self.pen,
+            EditorToolKind::Shape | EditorToolKind::ShapePen => &mut self.shape,
         }
     }
 }
