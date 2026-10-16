@@ -207,6 +207,13 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                         } else { Action::None }
                     },
 
+                    // Regenerate the whole normal map
+                    Key::G => {
+                        if pressed && !repeat && modifiers.ctrl {
+                            Action::RegenerateNormals
+                        } else { Action::None }
+                    },
+
                     // Toggle the selected point between linear and continuous
                     Key::B => {
                         if pressed && !repeat && modifiers.ctrl {
@@ -217,7 +224,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                     // Merge the selected points
                     Key::M => {
                         if pressed && !repeat && modifiers.ctrl {
-                            Action::Special(SpecialAction::PointsMerged)
+                            Action::Special(SpecialAction::SelectionMerged)
                         } else { Action::None }
                     },
 
@@ -257,6 +264,15 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                             Action::ToolSelected(controller::EditorToolKind::Pen)
                         } else { Action::None }
                     },
+                    Key::U => {
+                        if pressed && !repeat && !modifiers.ctrl && !modifiers.alt {
+                            if modifiers.shift {
+                                Action::ToolSelected(controller::EditorToolKind::ShapePen)
+                            } else {
+                                Action::ToolSelected(controller::EditorToolKind::Shape)
+                            }
+                        } else { Action::None }
+                    },
 
                     // Toggling lighting
                     Key::L => {
@@ -275,6 +291,20 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                     Key::O => {
                         if pressed && !repeat && !modifiers.command {
                             Action::OverlayToggled
+                        } else { Action::None }
+                    },
+
+                    // Toggling zone paths, which also hides shapes
+                    Key::H => {
+                        if pressed && !repeat && !modifiers.any() {
+                            Action::PathsToggled
+                        } else { Action::None }
+                    },
+
+                    // Toggling shapes outside the shape tools
+                    Key::J => {
+                        if pressed && !repeat && !modifiers.any() {
+                            Action::ShapesToggled
                         } else { Action::None }
                     },
 

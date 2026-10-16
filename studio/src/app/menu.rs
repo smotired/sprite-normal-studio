@@ -12,6 +12,7 @@ const SELECT_ALL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key:
 const DESELECT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Escape);
 const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Z);
 const REDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Y);
+const REGENERATE_NORMALS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::G);
 const CUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::X);
 const COPY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::C);
 const PASTE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::V);
@@ -23,6 +24,8 @@ const RECENTER: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::H
 const LIGHTING: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::L);
 const NORMAL_MAP: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::L);
 const OVERLAY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::O);
+const PATHS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::H);
+const SHAPES: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::J);
 const RESET_NORMAL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::Z);
 const MERGE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::M);
 const DETACH: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::K);
@@ -118,8 +121,9 @@ impl StudioApp {
     fn edit_menu(&self, ui: &mut egui::Ui, clicked: &mut Option<MenuAction>) {
         let Some(project) = self.project() else { return; };
         let controller = &project.controller;
-        let selecting_tool = matches!(controller.selected_tool(), EditorToolKind::Zone | EditorToolKind::Point);
-        let has_selection = !controller.selected_points().is_empty();
+        let in_shape_tool = controller.selected_tool() == EditorToolKind::Shape;
+        let selecting_tool = in_shape_tool || matches!(controller.selected_tool(), EditorToolKind::Zone | EditorToolKind::Point);
+        let has_selection = if in_shape_tool { !controller.selected_shape_vertices().is_empty() } else { !controller.selected_points().is_empty() };
 
         let items = [
             ("Select All", SELECT_ALL, selecting_tool && controller.has_objects(), Action::SelectAll),
@@ -131,6 +135,10 @@ impl StudioApp {
         controller_items(ui, [
             ("Undo", UNDO, controller.can_undo(), Action::Undo),
             ("Redo", REDO, controller.can_redo(), Action::Redo),
+        ], clicked);
+        ui.separator();
+        controller_items(ui, [
+            ("Regenerate Normals", REGENERATE_NORMALS, true, Action::RegenerateNormals),
         ], clicked);
         ui.separator();
 
@@ -180,8 +188,17 @@ impl StudioApp {
         if menu_item(ui, "Overlay", Some(OVERLAY), true, Some(overlay_on)) {
             *clicked = Some(MenuAction::Controller(Action::OverlayToggled));
         }
-        // Toggles for parts of the overlay go here, disabled while the whole overlay is off:
-        // ui.add_enabled_ui(overlay_on, |ui| { ... });
+
+        // Parts of the overlay, disabled while what they're drawn with is off. Shapes are drawn with the paths.
+        let paths_on = controller.paths_on();
+        for (label, shortcut, enabled, checked, action) in [
+            ("Paths", PATHS, overlay_on, paths_on, Action::PathsToggled),
+            ("Shapes", SHAPES, overlay_on && paths_on, controller.shapes_on(), Action::ShapesToggled),
+        ] {
+            if menu_item(ui, label, Some(shortcut), enabled, Some(checked)) {
+                *clicked = Some(MenuAction::Controller(action));
+            }
+        }
     }
 
     /// Path menu: changes to the selected zones or points. Each item is only enabled if it would do something.
@@ -192,13 +209,16 @@ impl StudioApp {
         let tool = controller.selected_tool();
         let zones_selected = tool == EditorToolKind::Zone && !controller.selected_points().is_empty();
         let in_point_tool = tool == EditorToolKind::Point;
+        let in_shape_tool = tool == EditorToolKind::Shape;
 
         let items = [
             // The pen sets the normal for new zones
             ("Reset Normal", Some(RESET_NORMAL), zones_selected || tool == EditorToolKind::Pen, SpecialAction::NormalSet(Vec3::FORWARD, false)),
-            ("Merge", Some(MERGE), in_point_tool && controller.can_merge_selection(), SpecialAction::PointsMerged),
-            ("Detach", Some(DETACH), (tool == EditorToolKind::Zone || in_point_tool) && controller.can_separate_selection(), SpecialAction::SelectionSeparated),
+            ("Merge", Some(MERGE), (in_point_tool && controller.can_merge_selection()) || (in_shape_tool && controller.can_merge_shape_vertices()), SpecialAction::SelectionMerged),
+            ("Detach", Some(DETACH), ((tool == EditorToolKind::Zone || in_point_tool) && controller.can_separate_selection()) || (in_shape_tool && controller.can_detach_shape_vertices()), SpecialAction::SelectionSeparated),
             ("Split", None, in_point_tool && controller.selected_path().is_some(), SpecialAction::PathSplit),
+            ("Group Shapes", None, in_shape_tool && controller.can_group_shapes(), SpecialAction::ShapesGrouped),
+            ("Ungroup Shapes", None, in_shape_tool && controller.can_ungroup_shapes(), SpecialAction::ShapesUngrouped),
         ];
         for (label, shortcut, enabled, action) in items {
             if menu_item(ui, label, shortcut, enabled, None) {

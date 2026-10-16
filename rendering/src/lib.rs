@@ -32,7 +32,7 @@ struct RenderControl {
     objects_bind_group: BindGroup,
 
     /// The size of the object buffers
-    object_buffer_sizes: (usize, usize, usize),
+    object_buffer_sizes: [usize; 5],
 }
 
 /// Primary struct for rendering the viewport.
@@ -51,20 +51,11 @@ impl Renderer {
 
     /// Use egui's render state to initialize our renderer.
     /// Creates our compute pipeline, texture, and buffers.
-    pub fn new(device: &Device, selection_buffer: Buffer, object_buffers: BufferStates) -> Self {
+    pub fn new(device: &Device, selection: &Texture, object_buffers: BufferStates) -> Self {
         // Load the shader
-        let source = format!(
-            "{}\n{}\n{}\n{}\n{}",                       // Concatenate each source file into one big one
-            include_str!("shader/bindings.wgsl"),       // Contains the actual bindings, including a description of each overlay flag
-            include_str!("shader/helpers.wgsl"),        // Common helper functions
-            include_str!("shader/spritesheet.wgsl"),    // Logic for drawing the lit spritesheet
-            include_str!("shader/overlay.wgsl"),        // Logic for drawing overlay with lights, paths, shapes, etc.
-            include_str!("shader/main.wgsl"),           // Main shader function which calls other stuff
-        );
-
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("viewport.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(source.into()),
+            source: wgpu::ShaderSource::Wgsl(shader_source().into()),
         });
 
         // Create the pipeline for the shader
@@ -100,9 +91,8 @@ impl Renderer {
         );
 
         // Create object bind group
-        let (zones_buffer, points_buffer, siblings_buffer) = object_buffers;
-        let objects_bind_group = create_objects_bind_group(device, &pipeline, selection_buffer, zones_buffer.0, points_buffer.0, siblings_buffer.0);
-        let object_buffer_sizes = (zones_buffer.1, points_buffer.1, siblings_buffer.1);
+        let object_buffer_sizes = object_buffers.sizes();
+        let objects_bind_group = create_objects_bind_group(device, &pipeline, selection, object_buffers);
 
         // Set up
         let control = RenderControl {
@@ -149,10 +139,10 @@ impl Renderer {
         }
 
         // Recreate objects bind group if needed
-        let (zones_buffer, points_buffer, siblings_buffer) = controller.object_buffers(device);
-        let object_buffer_sizes = (zones_buffer.1, points_buffer.1, siblings_buffer.1);
+        let object_buffers = controller.object_buffers(device);
+        let object_buffer_sizes = object_buffers.sizes();
         if object_buffer_sizes != self.control.object_buffer_sizes {
-            self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, controller.selection_buffer(), zones_buffer.0, points_buffer.0, siblings_buffer.0);
+            self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, &controller.selection_texture(), object_buffers);
             self.control.object_buffer_sizes = object_buffer_sizes;
         }
 
@@ -186,10 +176,9 @@ impl Renderer {
     }
 
     /// Draw a different controller's objects. Always rebinds, since its buffers may be the same size as the old ones.
-    pub fn set_objects(&mut self, device: &Device, selection_buffer: Buffer, object_buffers: BufferStates) {
-        let (zones_buffer, points_buffer, siblings_buffer) = object_buffers;
-        self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, selection_buffer, zones_buffer.0, points_buffer.0, siblings_buffer.0);
-        self.control.object_buffer_sizes = (zones_buffer.1, points_buffer.1, siblings_buffer.1);
+    pub fn set_objects(&mut self, device: &Device, selection: &Texture, object_buffers: BufferStates) {
+        self.control.object_buffer_sizes = object_buffers.sizes();
+        self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, selection, object_buffers);
     }
 
     /// Set the input textures for the viewport
@@ -211,6 +200,18 @@ impl Renderer {
     }
 }
     
+/// Get the viewport shader's source, which is each of its files concatenated into one big one
+fn shader_source() -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}",
+        include_str!("shader/bindings.wgsl"),       // Contains the actual bindings, including a description of each overlay flag
+        include_str!("shader/helpers.wgsl"),        // Common helper functions
+        include_str!("shader/spritesheet.wgsl"),    // Logic for drawing the lit spritesheet
+        include_str!("shader/overlay.wgsl"),        // Logic for drawing overlay with lights, paths, shapes, etc.
+        include_str!("shader/main.wgsl"),           // Main shader function which calls other stuff
+    )
+}
+
 /// Create a texture and view bindgroup for a pipeline. Should be called when the target render size changes.
 fn create_texture(device: &Device, size: Vec2) -> TextureView {
     // Create a new texture and texture view when resizing
@@ -256,27 +257,60 @@ fn create_textures_bind_group(device: &Device, pipeline: &ComputePipeline, outpu
 }
 
 /// Create a new bind group for a pipeline. Should be called whenever the object buffers are recreated.
-fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, selection: Buffer, zones: Buffer, points: Buffer, siblings: Buffer) -> BindGroup {
+fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, selection: &Texture, object_buffers: BufferStates) -> BindGroup {
+    let selection_view = selection.create_view(&Default::default());
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipeline.get_bind_group_layout(1),
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: selection.as_entire_binding(),
+                resource: wgpu::BindingResource::TextureView(&selection_view),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: zones.as_entire_binding(),
+                resource: object_buffers.zones.0.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: points.as_entire_binding(),
+                resource: object_buffers.points.0.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: siblings.as_entire_binding(),
+                resource: object_buffers.shapes.0.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: object_buffers.shape_vertices.0.as_entire_binding(),
             },
         ]
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The concatenated shader parses, validates, and fits in the device's limits. Nothing else checks it without a GPU.
+    #[test]
+    fn shader_validates() {
+        let source = shader_source();
+        let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+
+        // The app asks for wgpu's downlevel limits, so it runs on as many devices as possible
+        let limits = wgpu::Limits::downlevel_defaults();
+        let storage_buffers = module.global_variables.iter()
+            .filter(|(_, global)| matches!(global.space, naga::AddressSpace::Storage { .. }))
+            .count();
+        let storage_textures = module.global_variables.iter()
+            .filter(|(_, global)| matches!(module.types[global.ty].inner, naga::TypeInner::Image { class: naga::ImageClass::Storage { .. }, .. }))
+            .count();
+        assert!(storage_buffers <= limits.max_storage_buffers_per_shader_stage as usize,
+            "{storage_buffers} storage buffers, but only {} are allowed", limits.max_storage_buffers_per_shader_stage);
+        assert!(storage_textures <= limits.max_storage_textures_per_shader_stage as usize,
+            "{storage_textures} storage textures, but only {} are allowed", limits.max_storage_textures_per_shader_stage);
+    }
 }

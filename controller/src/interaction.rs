@@ -27,7 +27,7 @@ impl Controller {
             &self.camera,
             &self.overlay_state,
             self.cursor_pos,
-            self.objects.object_counts(),
+            &self.objects,
             self.tool.as_ref(),
             self.tool.transform_box(&self.objects),
         )

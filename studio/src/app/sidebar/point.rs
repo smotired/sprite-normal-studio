@@ -39,7 +39,7 @@ impl ToolSidebar for PointSidebar {
 
             let merge = egui::Button::new("Merge").min_size(button_size);
             if ui.add_enabled(controller.can_merge_selection(), merge).clicked() {
-                controller.handle_action(Action::Special(SpecialAction::PointsMerged));
+                controller.handle_action(Action::Special(SpecialAction::SelectionMerged));
             }
         }
 

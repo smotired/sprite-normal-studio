@@ -28,8 +28,8 @@ pub struct Generator {
     /// Current size of the spritesheet.
     size: Vec2,
 
-    /// Last size of the zones buffer, used to know if we need to rebind the buffers.
-    object_buffer_sizes: (usize, ()),
+    /// Last sizes of the zones, shapes and shape vertices buffers, used to know if we need to rebind the buffers.
+    object_buffer_sizes: [usize; 3],
 }
 
 impl Generator {
@@ -47,9 +47,8 @@ impl Generator {
         });
 
         // Create object bind group
-        let (zones_buffer, _, _) = object_buffers;
-        let objects_bind_group = create_objects_bind_group(device, &pipeline, zones_buffer.0);
-        let object_buffer_sizes = (zones_buffer.1, ());
+        let object_buffer_sizes = used_sizes(&object_buffers);
+        let objects_bind_group = create_objects_bind_group(device, &pipeline, object_buffers);
 
         // Create the output texture
         let size = Vec2::new(16.0, 16.0);
@@ -89,10 +88,9 @@ impl Generator {
         }));
 
         // Recreate objects bind group if needed
-        let (zones_buffer, _, _) = object_buffers;
-        let object_buffer_sizes = (zones_buffer.1, ());
+        let object_buffer_sizes = used_sizes(&object_buffers);
         if object_buffer_sizes != self.object_buffer_sizes {
-            self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0);
+            self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, object_buffers);
             self.object_buffer_sizes = object_buffer_sizes;
         }
     }
@@ -105,10 +103,9 @@ impl Generator {
         let Some(bind_group) = &self.bind_group else { return };
 
         // Recreate objects bind group if needed
-        let (zones_buffer, _, _) = object_buffers;
-        let object_buffer_sizes = (zones_buffer.1, ());
+        let object_buffer_sizes = used_sizes(&object_buffers);
         if object_buffer_sizes != self.object_buffer_sizes {
-            self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0);
+            self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, object_buffers);
             self.object_buffer_sizes = object_buffer_sizes;
         }
 
@@ -155,13 +152,20 @@ fn padded_bytes_per_row(width: u32) -> u32 {
     (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
 }
 
+/// Get the sizes of the object buffers the generator uses
+fn used_sizes(object_buffers: &BufferStates) -> [usize; 3] {
+    [object_buffers.zones.1, object_buffers.shapes.1, object_buffers.shape_vertices.1]
+}
+
 /// Create an objects bind group
-fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, zones_buffer: Buffer) -> BindGroup {
+fn create_objects_bind_group(device: &Device, pipeline: &ComputePipeline, object_buffers: BufferStates) -> BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Normals generator objects bind group"),
         layout: &pipeline.get_bind_group_layout(1),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: zones_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 0, resource: object_buffers.zones.0.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: object_buffers.shapes.0.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: object_buffers.shape_vertices.0.as_entire_binding() },
         ],
     })
 }
@@ -227,5 +231,11 @@ mod tests {
         assert_eq!(padded_bytes_per_row(1), 256);
         assert_eq!(padded_bytes_per_row(64), 256);
         assert_eq!(padded_bytes_per_row(65), 512);
+    }
+
+    /// The shader parses and validates
+    #[test]
+    fn shader_validates() {
+        crate::validate_wgsl(include_str!("shaders/generator.wgsl"));
     }
 }

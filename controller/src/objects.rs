@@ -1,4 +1,6 @@
 mod zone;
+mod shape;
+mod shapes;
 mod point;
 mod exterior_path;
 mod buffers;
@@ -12,24 +14,45 @@ mod diff;
 mod save;
 mod clipboard;
 mod transform;
+mod warp;
 
 use studio_math::Vec2;
 use wgpu::{Buffer, Device};
 
 use zone::Zone;
+pub use shape::{Shape, ShapeVertex, ShapeParams, ShapeParamChange, ShapeProfile};
+pub use shapes::RadiusKnobs;
+use shape::hull_distance;
 pub use point::ControlPoint;
 pub use point::ControlPointMode;
 use buffers::{VecWithBuffer, ObjectList};
+pub(crate) use buffers::{SELECTION_WIDTH, SELECTION_HEIGHT};
 pub use diff::ObjectDiff;
 pub use bounds::{Bounds, merge_bounds};
 pub use save::{SavedObjects, LoadedObjects};
-pub use transform::PointsSnapshot;
+pub use transform::ZonesSnapshot;
+pub use warp::ShapeWarp;
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
 
-/// States of the Zones buffer and Points buffer.
-pub type BufferStates = ((Buffer, usize), (Buffer, usize), (Buffer, usize));
+/// Each object buffer and how many items it can hold.
+/// The caller should keep track of the sizes, and recreate bind groups when the ones it uses change.
+#[derive(Clone)]
+pub struct BufferStates {
+    pub zones: (Buffer, usize),
+    pub points: (Buffer, usize),
+    pub point_siblings: (Buffer, usize),
+    pub shapes: (Buffer, usize),
+    pub shape_vertices: (Buffer, usize),
+}
+
+impl BufferStates {
+    /// How many items each buffer can hold, in the order they are declared
+    pub fn sizes(&self) -> [usize; 5] {
+        [self.zones.1, self.points.1, self.point_siblings.1, self.shapes.1, self.shape_vertices.1]
+    }
+}
 
 /// Manages the buffers for control points and shapes
 #[derive(Clone)]
@@ -44,11 +67,19 @@ pub struct ObjectBuffers {
     /// the point at all during rendering and it's better for alignment if we don't
     /// pass them to the GPU.
     point_siblings: ObjectList<u16>,
+
+    /// List of shapes, in zone order
+    shapes: ObjectList<Shape>,
+
+    /// List of the vertices shapes are made from, in zone order
+    shape_vertices: ObjectList<ShapeVertex>,
 }
 
 impl ObjectBuffers {
     pub fn zone_count(&self) -> u16 { self.zones.borrow().items.len() as u16 }
     pub fn point_count(&self) -> u16 { self.points.borrow().items.len() as u16 }
+    pub fn shape_count(&self) -> u16 { self.shapes.borrow().items.len() as u16 }
+    pub fn vertex_count(&self) -> u16 { self.shape_vertices.borrow().items.len() as u16 }
 
     pub fn new(device: &Device) -> Self {
         let mut siblings_buffer = VecWithBuffer::new(device, "Point Siblings Buffer");
@@ -58,6 +89,8 @@ impl ObjectBuffers {
             zones: ObjectList::new(VecWithBuffer::new(device, "Zones Buffer")),
             points: ObjectList::new(VecWithBuffer::new(device, "Control Points Buffer")),
             point_siblings: ObjectList::new(siblings_buffer),
+            shapes: ObjectList::new(VecWithBuffer::new(device, "Shapes Buffer")),
+            shape_vertices: ObjectList::new(VecWithBuffer::new(device, "Shape Vertices Buffer")),
         }
     }
 
@@ -71,6 +104,8 @@ impl ObjectBuffers {
             zones: ObjectList::new(VecWithBuffer::headless("Zones Buffer")),
             points: ObjectList::new(VecWithBuffer::headless("Control Points Buffer")),
             point_siblings: ObjectList::new(siblings_buffer),
+            shapes: ObjectList::new(VecWithBuffer::headless("Shapes Buffer")),
+            shape_vertices: ObjectList::new(VecWithBuffer::headless("Shape Vertices Buffer")),
         }
     }
 

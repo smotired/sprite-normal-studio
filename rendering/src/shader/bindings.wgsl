@@ -31,10 +31,10 @@ struct Params {
     // 06: If a path is being created. It is always the last zone, and should not be closed.
     // 07: If the latest point of the path being created is its first point, so the ghost path closes to it
     // 08: If the transform box around the selection should be drawn
-    // 09: 
-    // 10: 
-    // 11: 
-    // 12: 
+    // 09: If shapes are drawn. Only set along with 04.
+    // 10: If a shape tool is selected, so the active zone's shape vertices get knobs
+    // 11: If a path of shapes is being drawn, so a ghost line joins its latest vertex to the cursor
+    // 12: If the selected group of shapes has radius knobs, which only happens along with 10
     // 13: 
     // 14: 
     // 15: 
@@ -89,6 +89,21 @@ struct Params {
 
     // Cosine and sine of the rotation of the transform box
     transform_rotation: vec2<f32>,
+
+    // The zone a shape tool is editing, whose shape vertices get knobs. NO_OBJECT if there is none.
+    active_zone: u32,
+
+    // Aligns the ghost start to 8 bytes
+    _padding_2: u32,
+
+    // Latest vertex of the path of shapes being drawn. Only drawn if flag 11 is set.
+    ghost_start: vec2<f32>,
+
+    // The selected group's inner radius knob. Only drawn if flag 12 is set.
+    inner_knob: vec2<f32>,
+
+    // The selected group's outer radius knob. Only drawn if flag 12 is set.
+    outer_knob: vec2<f32>,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 
@@ -100,19 +115,39 @@ struct Params {
 /*       SELECTION / HELPERS       */
 /***********************************/
 
-@group(1) @binding(0) var<storage, read> selection: array<u32>; // 1024 * 32 = 65536
+// Bits for what is selected, 32 to a texel, in rows of SELECTION_WIDTH texels. Must match pack_selection in buffers.rs.
+// A texture rather than a storage buffer, since only 4 storage buffers can be bound at once.
+// Bits 0..65536: selected points
+// Bits 65536..131072: selected shape vertices
+// Bits 131072..196608: points that are selected or have a selected sibling
+@group(1) @binding(0) var selection: texture_2d<u32>;
+
+// Texels in each row of the selection texture. Must match SELECTION_WIDTH in buffers.rs.
+const SELECTION_WIDTH = 256u;
+
+// Stands in for a zone or shape ID in the uniform when there is none. Must match NO_OBJECT in viewport.rs.
+const NO_OBJECT = 0xFFFFFFFFu;
+
+// Return true if a bit of the selection texture is set
+fn selection_bit(bit: u32) -> bool {
+    let texel = bit / 32u;
+    let selected_bits = textureLoad(selection, vec2<u32>(texel % SELECTION_WIDTH, texel / SELECTION_WIDTH), 0).r;
+    return (selected_bits & (1u << (bit % 32u))) != 0u;
+}
 
 // Return true if the point with the ID is selected
 fn is_selected(point_id: u32) -> bool {
-    // Convert point ID from bit to selection buffer index
-    let buffer_index = point_id / 32u;
-    let bit_index = point_id % 32u;
+    return selection_bit(point_id);
+}
 
-    // TODO: May need to flip depending on endian-ness
+// Return true if the shape vertex with the ID is selected
+fn is_vertex_selected(vertex_id: u32) -> bool {
+    return selection_bit(65536u + vertex_id);
+}
 
-    // Check if the bit is set in the selection buffer
-    let selected_bits = selection[buffer_index];
-    return (selected_bits & (1u << bit_index)) != 0;
+// Returns true if a point or any of its siblings is selected. The CPU follows the sibling rings when packing the selection.
+fn sibling_is_selected(point_id: u32) -> bool {
+    return selection_bit(131072u + point_id);
 }
 
 /***********************************/
@@ -138,6 +173,20 @@ struct ZonePacked {
     // --------
     // Amount of points in this path
     points_start_and_point_count: u32,
+
+    // Start index of this zone's shapes
+    // --------
+    // Amount of shapes in this zone
+    shapes_start_and_shape_count: u32,
+
+    // Start index of this zone's shape vertices
+    // --------
+    // Amount of shape vertices in this zone
+    vertices_start_and_vertex_count: u32,
+
+    // The struct is rounded up to the 16 byte alignment of the vec3 anyway. Must match Zone in zone.rs.
+    _padding0: u32,
+    _padding1: u32,
 }
 @group(1) @binding(1) var<storage, read> zones: array<ZonePacked>;
 
@@ -150,6 +199,18 @@ struct Zone {
 
     // Amount of points in this path
     point_count: u32,
+
+    // Start index of this zone's shapes
+    shape_start: u32,
+
+    // Amount of shapes in this zone
+    shape_count: u32,
+
+    // Start index of this zone's shape vertices, which shapes refer to by their index from here
+    vertex_start: u32,
+
+    // Amount of shape vertices in this zone
+    vertex_count: u32,
 }
 
 fn get_zone(zone_id: u32) -> Zone {
@@ -158,6 +219,10 @@ fn get_zone(zone_id: u32) -> Zone {
         zone.normal,
         unpack_fst(zone.points_start_and_point_count),
         unpack_snd(zone.points_start_and_point_count),
+        unpack_fst(zone.shapes_start_and_shape_count),
+        unpack_snd(zone.shapes_start_and_shape_count),
+        unpack_fst(zone.vertices_start_and_vertex_count),
+        unpack_snd(zone.vertices_start_and_vertex_count),
     );
 }
 
@@ -265,27 +330,90 @@ fn right_handle(point: ControlPoint) -> vec2<f32> {
     }
 }
 
-// Defines which siblings are selected by which other nodes. Each index contains information for 2 other indices because on the CPU side IDs are u16s.
-@group(1) @binding(3) var<storage, read> siblings: array<u32>;
+/***********************************/
+/*             SHAPES              */
+/***********************************/
 
-// Get the ID of a sibling.
-fn sibling_id(point_id: u32) -> u32 {
-    if (point_id % 2 == 0u) {
-        return unpack_fst(siblings[point_id / 2u]);
-    } else {
-        return unpack_snd(siblings[point_id / 2u]);
-    }
+// Shape struct. Must match Shape in shape.rs and ShapePacked in generator.wgsl.
+struct ShapePacked {
+    // u16: The zone this shape is a part of
+    // --------
+    // u8: The profile of the shape. 0 = Cone, 1 = Dome
+    // --------
+    // u8: Flags. Bit 0 is set for shapes in a path that is still being drawn.
+    zone_profile_flags: u32,
+
+    // The first and second vertices, as their index in the zone's vertices plus one. 0 means there is no vertex.
+    vertices_a_and_b: u32,
+
+    // u16: The third vertex, the same way
+    // --------
+    // u16: The shape's group in its zone
+    vertex_c_and_group: u32,
+
+    // How far the flat core extends out from the hull of the vertices
+    inner_radius: f32,
+
+    // How far the surface falls from the edge of the core to the ground
+    outer_radius: f32,
+
+    // Height of the shape as a ratio of its outer radius. Unused by the overlay.
+    steepness: f32,
+
+    // Width of the soft edge where the shape meets the ground and other shapes. Unused by the overlay.
+    blend: f32,
+}
+@group(1) @binding(3) var<storage, read> shapes: array<ShapePacked>;
+
+// Positions of the vertices shapes are made from, in zone order
+@group(1) @binding(4) var<storage, read> shape_vertices: array<vec2<f32>>;
+
+const SHAPE_PENDING = 1u;
+
+struct Shape {
+    // Amount of vertices, from 1 to 3
+    vertex_count: u32,
+
+    // Positions of the vertices. Missing ones are at the first vertex.
+    a: vec2<f32>,
+    b: vec2<f32>,
+    c: vec2<f32>,
+
+    // IDs of the vertices. Missing ones are the first vertex.
+    ids: vec3<u32>,
+
+    // If the shape is in a path that is still being drawn
+    pending: bool,
+
+    inner_radius: f32,
+    outer_radius: f32,
 }
 
-// Returns true if any of a point's siblings is selected.
-// Requires that the siblings list be constructed correctly.
-fn sibling_is_selected(point_id: u32) -> bool {
-    if (is_selected(point_id)) { return true; }
-    var id = sibling_id(point_id);
-    // Siblings form a ring, but bound the walk so a bad list can never hang the shader.
-    for (var i = 0u; i < 64u && id != point_id; i += 1u) {
-        if (is_selected(id)) { return true; }
-        id = sibling_id(id);
-    }
-    return false;
+// Get a shape, looking up its vertices from the start of its zone's vertices
+fn get_shape(shape_id: u32, vertex_start: u32) -> Shape {
+    let shape = shapes[shape_id];
+    let slot_a = unpack_fst(shape.vertices_a_and_b);
+    let slot_b = unpack_snd(shape.vertices_a_and_b);
+    let slot_c = unpack_fst(shape.vertex_c_and_group);
+
+    var ids = vec3<u32>(vertex_start + slot_a - 1u);
+    var vertex_count = 1u;
+    if (slot_b != 0u) { ids.y = vertex_start + slot_b - 1u; vertex_count = 2u; }
+    if (slot_c != 0u) { ids.z = vertex_start + slot_c - 1u; vertex_count = 3u; }
+
+    return Shape(
+        vertex_count,
+        shape_vertices[ids.x],
+        shape_vertices[ids.y],
+        shape_vertices[ids.z],
+        ids,
+        ((shape.zone_profile_flags >> 24u) & SHAPE_PENDING) != 0u,
+        shape.inner_radius,
+        shape.outer_radius,
+    );
+}
+
+// Returns true if every vertex of a shape is selected
+fn is_shape_selected(shape: Shape) -> bool {
+    return is_vertex_selected(shape.ids.x) && is_vertex_selected(shape.ids.y) && is_vertex_selected(shape.ids.z);
 }

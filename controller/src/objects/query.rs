@@ -1,4 +1,5 @@
 use studio_math::Vec2;
+use studio_math::bezier::bezier_point_at;
 use studio_math::bounds::bounds_correct;
 
 use super::{ObjectBuffers, ControlPoint};
@@ -173,7 +174,46 @@ impl ObjectBuffers {
         }
         Ok(points)
     }
+
+    /// Returns true if a position is inside a zone's path, by counting how many times a ray straight down from it crosses the path.
+    /// Each curve is split into straight segments. Must match check_point_in_zone in assignment.wgsl closely enough to agree on clicks.
+    pub fn zone_contains(&self, zone_id: u16, pos: Vec2) -> anyhow::Result<bool> {
+        let (start, count) = self.get_zone_info(zone_id)?.range();
+        if count < 2 { return Ok(false); }
+
+        let mut crossings = 0;
+        let mut previous = self.get_point_info(start + count - 1)?;
+        for point_id in start..start + count {
+            let point = self.get_point_info(point_id)?;
+            let curve = [previous.position(), previous.right_handle(), point.left_handle(), point.position()];
+            let mut last = curve[0];
+            for i in 1..=ZONE_CONTAINS_SEGMENTS {
+                let next = bezier_point_at(curve[0], curve[1], curve[2], curve[3], i as f32 / ZONE_CONTAINS_SEGMENTS as f32);
+                if (last.x <= pos.x) != (next.x <= pos.x) && last.y + (pos.x - last.x) * (next.y - last.y) / (next.x - last.x) >= pos.y {
+                    crossings += 1;
+                }
+                last = next;
+            }
+            previous = point;
+        }
+        Ok(crossings % 2 == 1)
+    }
+
+    /// Get the zone a position is inside, preferring one zone if it contains the position.
+    /// Positions inside several other zones find the last of them, which is drawn on top.
+    pub fn zone_at(&self, pos: Vec2, prefer: Option<u16>) -> anyhow::Result<Option<u16>> {
+        if let Some(zone_id) = prefer && zone_id < self.zone_count() && self.zone_contains(zone_id, pos)? {
+            return Ok(Some(zone_id));
+        }
+        for zone_id in (0..self.zone_count()).rev() {
+            if self.zone_contains(zone_id, pos)? { return Ok(Some(zone_id)); }
+        }
+        Ok(None)
+    }
 }
+
+/// How many straight segments each curve is split into when checking if a position is inside a zone
+const ZONE_CONTAINS_SEGMENTS: usize = 16;
 
 /// Return scalar distance to a line segment, the closest point on that line segment, and t for that point.
 fn correct_to_line_segment(pos: Vec2, pos0: Vec2, pos1: Vec2) -> (f32, Vec2, f32) {
@@ -237,6 +277,33 @@ fn correct_to_bezier(pos: Vec2, pos0: Vec2, pos1: Vec2, pos2: Vec2, pos3: Vec2, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Positions inside a zone's path are found, including inside curved edges
+    #[test]
+    fn zone_contains() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        assert!(objects.zone_contains(0, Vec2::new(5.0, 5.0)).unwrap());
+        assert!(!objects.zone_contains(0, Vec2::new(15.0, 5.0)).unwrap());
+        assert!(!objects.zone_contains(0, Vec2::new(5.0, -1.0)).unwrap());
+
+        // Bulge the top edge upwards, so a position above the square is inside
+        objects.update_point(0, None, Some(crate::ControlPointMode::Broken), None, Some(Vec2::new(0.0, -8.0))).unwrap();
+        objects.update_point(1, None, Some(crate::ControlPointMode::Broken), Some(Vec2::new(0.0, -8.0)), None).unwrap();
+        assert!(objects.zone_contains(0, Vec2::new(5.0, -3.0)).unwrap());
+    }
+
+    /// The preferred zone wins where zones overlap, and otherwise the last zone does
+    #[test]
+    fn zone_at() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(5.0, 5.0), (20.0, 5.0), (20.0, 20.0), (5.0, 20.0)]);
+        assert_eq!(objects.zone_at(Vec2::new(7.0, 7.0), None).unwrap(), Some(1));
+        assert_eq!(objects.zone_at(Vec2::new(7.0, 7.0), Some(0)).unwrap(), Some(0));
+        assert_eq!(objects.zone_at(Vec2::new(2.0, 2.0), Some(1)).unwrap(), Some(0));
+        assert_eq!(objects.zone_at(Vec2::new(30.0, 30.0), None).unwrap(), None);
+    }
 
     fn assert_close(a: Vec2, b: Vec2) {
         assert!(a.distance(b) < 1e-3, "{a} is not close to {b}");
