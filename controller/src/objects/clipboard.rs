@@ -20,17 +20,28 @@ impl ObjectBuffers {
         let mut points = self.points.borrow().items.clone();
         let mut siblings = self.point_siblings.borrow().items.clone();
         ControlPoint::separate_siblings(&point_ids, &mut points, &mut siblings)?;
-        Ok(saved_zones(&zone_ids, &self.zones.borrow().items, &points, &siblings))
+        Ok(saved_zones(&zone_ids, &self.zones.borrow().items, &points, &siblings, &self.shapes.borrow().items, &self.shape_vertices.borrow().items))
     }
 
-    /// Add copied zones after every existing zone, in the same place they were copied from.
+    /// Add copied zones and their shapes after every existing zone, in the same place they were copied from.
     /// Returns the IDs of the new zones.
     pub fn paste_zones(&mut self, saved: &SavedObjects) -> anyhow::Result<Vec<u16>> {
         let loaded = saved.validate()?;
         let (zone_offset, point_offset) = (self.zone_count(), self.point_count());
+        let (shape_offset, vertex_offset) = (self.shape_count(), self.vertex_count());
         let (zone_count, point_count) = (loaded.zones.len(), loaded.points.len());
+        let (shape_count, vertex_count) = (loaded.shapes.len(), loaded.shape_vertices.len());
         if zone_offset as usize + zone_count > MAX_OBJECT_ID as usize { anyhow::bail!("No room to paste {} zones!", zone_count); }
         if point_offset as usize + point_count > MAX_OBJECT_ID as usize { anyhow::bail!("No room to paste {} control points!", point_count); }
+        if shape_offset as usize + shape_count > MAX_OBJECT_ID as usize { anyhow::bail!("No room to paste {} shapes!", shape_count); }
+        if vertex_offset as usize + vertex_count > MAX_OBJECT_ID as usize { anyhow::bail!("No room to paste {} shape vertices!", vertex_count); }
+
+        // Shapes refer to vertices by their index in the zone, so only their zones need shifting
+        self.shapes.borrow_mut().items.extend(loaded.shapes.into_iter().map(|mut shape| {
+            shape.offset_zone(zone_offset);
+            shape
+        }));
+        self.shape_vertices.borrow_mut().items.extend(loaded.shape_vertices);
 
         // The loaded objects are numbered from 0, so shift every ID past the existing objects
         let siblings = &mut self.point_siblings.borrow_mut().items;
@@ -42,7 +53,7 @@ impl ObjectBuffers {
             point
         }));
         self.zones.borrow_mut().items.extend(loaded.zones.into_iter().map(|mut zone| {
-            zone.add_offset(point_offset as i32);
+            zone.offset_ranges(point_offset, shape_offset, vertex_offset);
             zone
         }));
 
@@ -130,6 +141,26 @@ mod tests {
             assert_eq!(objects.get_point_info(4 + i).unwrap().position(), objects.get_point_info(i).unwrap().position());
             assert_eq!(objects.get_point_info(4 + i).unwrap().zone_id(), 1);
         }
+    }
+
+    /// Pasted zones bring their shapes, which follow the new zones and keep using their own vertices
+    #[test]
+    fn paste_keeps_shapes() {
+        let mut objects = branched();
+        let vertex = objects.add_shape_vertex(1, Vec2::new(-5.0, 5.0)).unwrap();
+        objects.create_shape(1, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+        let vertices: Vec<u16> = [(2.0, 2.0), (8.0, 8.0)].into_iter().map(|pos| objects.add_shape_vertex(0, Vec2::from(pos)).unwrap()).collect();
+        objects.create_shape(0, &vertices, crate::objects::ShapeParams::default(), 0).unwrap();
+        let copied = objects.copy_zones(&[0, 1]).unwrap();
+
+        objects.paste_zones(&copied).unwrap();
+        assert_eq!((objects.shape_count(), objects.vertex_count()), (4, 6));
+        assert_eq!(objects.get_zone_info(2).unwrap().shapes(), (2, 1));
+        assert_eq!(objects.get_zone_info(3).unwrap().vertices(), (5, 1));
+        assert_eq!(objects.get_shape_info(3).unwrap().zone_id(), 3);
+        assert_eq!(objects.shape_positions(2).unwrap(), vec![Vec2::new(2.0, 2.0), Vec2::new(8.0, 8.0)]);
+        assert_eq!(objects.shape_positions(3).unwrap(), vec![Vec2::new(-5.0, 5.0)]);
+        assert_eq!(objects.copy_zones(&[2, 3]).unwrap(), copied);
     }
 
     /// Copying zones that don't exist is an error

@@ -1,6 +1,6 @@
 [package]
 name = "controller"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 publish = false
 authors = ["Sam Hill <smotired@gmail.com>"]
@@ -15,3 +15,4 @@ serde = { workspace = true }
 
 [dev-dependencies]
 serde_json = "1.0.151"
+naga = { version = "30.0.1", features = ["wgsl-in"] }

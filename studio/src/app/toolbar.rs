@@ -25,6 +25,8 @@ impl StudioApp {
                     tool_button(ui, controller, "Z", EditorToolKind::Zone);
                     tool_button(ui, controller, "P", EditorToolKind::Point);
                     tool_button(ui, controller, "A", EditorToolKind::Pen);
+                    tool_button(ui, controller, "S", EditorToolKind::Shape);
+                    tool_button(ui, controller, "D", EditorToolKind::ShapePen);
                 });
             })
             .response

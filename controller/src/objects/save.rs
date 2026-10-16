@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use studio_math::{Vec2, Vec3};
 
-use super::{ObjectBuffers, ControlPoint, ControlPointMode, Zone, MAX_OBJECT_ID};
+use super::{ObjectBuffers, ControlPoint, ControlPointMode, Shape, ShapeParams, ShapeProfile, ShapeVertex, Zone, MAX_OBJECT_ID};
 
 /// Every zone and control point, as stored in a workspace file.
 /// Point IDs are not stored. They are numbered in order across all zones, starting from the first point of the first zone.
@@ -16,11 +17,52 @@ pub struct SavedObjects {
     pub(crate) sibling_groups: Vec<Vec<u16>>,
 }
 
-/// A zone and its points, as stored in a workspace file
+/// A zone with its points and shapes, as stored in a workspace file
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedZone {
     pub(crate) normal: Vec3,
     pub(crate) points: Vec<SavedPoint>,
+
+    /// Positions of the vertices this zone's shapes are made from
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) shape_vertices: Vec<Vec2>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) shapes: Vec<SavedShape>,
+}
+
+/// A shape, as stored in a workspace file
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedShape {
+    /// Indices of the shape's 1 to 3 vertices in its zone's shape_vertices
+    pub(crate) vertices: Vec<u16>,
+
+    pub(crate) profile: ShapeProfile,
+
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub(crate) inner_radius: f32,
+
+    pub(crate) outer_radius: f32,
+    pub(crate) steepness: f32,
+    pub(crate) blend: f32,
+
+    #[serde(default)]
+    pub(crate) group: Option<u16>,
+}
+
+fn is_zero(value: &f32) -> bool { *value == 0.0 }
+
+impl SavedShape {
+    /// Everything about the shape other than its zone and vertices
+    fn params(&self) -> ShapeParams {
+        ShapeParams {
+            profile: self.profile,
+            inner_radius: self.inner_radius,
+            outer_radius: self.outer_radius,
+            steepness: self.steepness,
+            blend: self.blend,
+        }
+    }
 }
 
 /// A control point, as stored in a workspace file. Handles are relative to the position.
@@ -52,6 +94,8 @@ pub struct LoadedObjects {
     pub(super) zones: Vec<Zone>,
     pub(super) points: Vec<ControlPoint>,
     pub(super) point_siblings: Vec<u16>,
+    pub(super) shapes: Vec<Shape>,
+    pub(super) shape_vertices: Vec<ShapeVertex>,
 }
 
 impl SavedObjects {
@@ -62,14 +106,20 @@ impl SavedObjects {
     pub fn validate(&self) -> anyhow::Result<LoadedObjects> {
         let zone_count = self.zones.len();
         let point_count: usize = self.zones.iter().map(|zone| zone.points.len()).sum();
+        let shape_count: usize = self.zones.iter().map(|zone| zone.shapes.len()).sum();
+        let vertex_count: usize = self.zones.iter().map(|zone| zone.shape_vertices.len()).sum();
         if zone_count > MAX_OBJECT_ID as usize { anyhow::bail!("Too many zones: {} (max {})", zone_count, MAX_OBJECT_ID); }
         if point_count > MAX_OBJECT_ID as usize { anyhow::bail!("Too many control points: {} (max {})", point_count, MAX_OBJECT_ID); }
+        if shape_count > MAX_OBJECT_ID as usize { anyhow::bail!("Too many shapes: {} (max {})", shape_count, MAX_OBJECT_ID); }
+        if vertex_count > MAX_OBJECT_ID as usize { anyhow::bail!("Too many shape vertices: {} (max {})", vertex_count, MAX_OBJECT_ID); }
 
-        // Build the zones and points, numbering points in order
+        // Build the zones, points, and shapes, numbering each in order
         let mut zones = Vec::with_capacity(zone_count);
         let mut points = Vec::with_capacity(point_count);
+        let mut shapes = Vec::with_capacity(shape_count);
+        let mut shape_vertices = Vec::with_capacity(vertex_count);
         for (zone_id, saved_zone) in self.zones.iter().enumerate() {
-            let mut zone = Zone::new(points.len() as u16, saved_zone.normal);
+            let mut zone = Zone::new(points.len() as u16, shapes.len() as u16, shape_vertices.len() as u16, saved_zone.normal);
             for saved_point in &saved_zone.points {
                 let point_id = zone.add_point();
                 for sync in [saved_point.left_sync, saved_point.right_sync].into_iter().flatten() {
@@ -78,6 +128,31 @@ impl SavedObjects {
                     }
                 }
                 points.push(ControlPoint::from_saved(point_id, zone_id as u16, saved_point));
+            }
+
+            for &position in &saved_zone.shape_vertices {
+                if !position.x.is_finite() || !position.y.is_finite() { anyhow::bail!("Zone {} has a shape vertex that isn't a finite position!", zone_id); }
+                zone.add_vertex();
+                shape_vertices.push(ShapeVertex::new(position));
+            }
+            // Shapes without a group each get one nobody else in the zone has
+            let mut next_group = saved_zone.shapes.iter().filter_map(|shape| shape.group).max().map_or(0, |max| max as u32 + 1);
+            for (i, saved_shape) in saved_zone.shapes.iter().enumerate() {
+                if let Some(&vertex) = saved_shape.vertices.iter().find(|&&vertex| vertex as usize >= saved_zone.shape_vertices.len()) {
+                    anyhow::bail!("Shape {} in zone {} uses vertex {}, which does not exist!", i, zone_id, vertex);
+                }
+                let group = match saved_shape.group {
+                    Some(group) => group,
+                    None => {
+                        let group = u16::try_from(next_group).map_err(|_| anyhow::anyhow!("Zone {} has too many shape groups!", zone_id))?;
+                        next_group += 1;
+                        group
+                    },
+                };
+                let shape = Shape::new(zone_id as u16, &saved_shape.vertices, saved_shape.params(), group, 0)
+                    .with_context(|| format!("Shape {} in zone {} is invalid", i, zone_id))?;
+                zone.add_shape();
+                shapes.push(shape);
             }
             zones.push(zone);
         }
@@ -96,28 +171,68 @@ impl SavedObjects {
         }
         point_siblings.resize(65536, 0); // match ObjectBuffers::new
 
-        Ok(LoadedObjects { zones, points, point_siblings })
+        Ok(LoadedObjects { zones, points, point_siblings, shapes, shape_vertices })
     }
 }
 
 impl ObjectBuffers {
-    /// Get every zone and control point in the form they are saved to a file
+    /// Get every zone, control point and shape in the form they are saved to a file
     pub fn save(&self) -> SavedObjects {
         let zone_ids: Vec<u16> = (0..self.zone_count()).collect();
-        saved_zones(&zone_ids, &self.zones.borrow().items, &self.points.borrow().items, &self.point_siblings.borrow().items)
+        saved_zones(
+            &zone_ids,
+            &self.zones.borrow().items,
+            &self.points.borrow().items,
+            &self.point_siblings.borrow().items,
+            &self.shapes.borrow().items,
+            &self.shape_vertices.borrow().items,
+        )
     }
 
-    /// Replace every zone and control point with ones that have been loaded from a file
+    /// Replace every zone, control point and shape with ones that have been loaded from a file
     pub fn load(&self, loaded: LoadedObjects) {
         self.zones.borrow_mut().items = loaded.zones;
         self.points.borrow_mut().items = loaded.points;
         self.point_siblings.borrow_mut().items = loaded.point_siblings;
+        self.shapes.borrow_mut().items = loaded.shapes;
+        self.shape_vertices.borrow_mut().items = loaded.shape_vertices;
     }
 }
 
-/// Get some zones and their points in the form they are saved to a file, numbering points in order across the zones.
+/// Get a zone's shapes and the vertices they use in the form they are saved to a file.
+/// Shapes in a path that is still being drawn are left out, along with vertices only they use.
+fn saved_shapes(zone: &Zone, shapes: &[Shape], vertices: &[ShapeVertex]) -> (Vec<Vec2>, Vec<SavedShape>) {
+    let (shape_start, shape_count) = zone.shapes();
+    let (vertex_start, _) = zone.vertices();
+    let kept: Vec<&Shape> = shapes[shape_start as usize..(shape_start + shape_count) as usize].iter()
+        .filter(|shape| !shape.is_pending())
+        .collect();
+
+    // Number the vertices the kept shapes use in the order they are in the zone
+    let mut used: Vec<u16> = kept.iter().flat_map(|shape| shape.local_vertices()).collect();
+    used.sort();
+    used.dedup();
+    let file_index = |local: u16| used.binary_search(&local).expect("every used vertex is numbered") as u16;
+
+    let saved_vertices = used.iter().map(|&local| vertices[(vertex_start + local) as usize].position()).collect();
+    let saved_shapes = kept.iter().map(|shape| {
+        let params = shape.params();
+        SavedShape {
+            vertices: shape.local_vertices().into_iter().map(file_index).collect(),
+            profile: params.profile,
+            inner_radius: params.inner_radius,
+            outer_radius: params.outer_radius,
+            steepness: params.steepness,
+            blend: params.blend,
+            group: Some(shape.group()),
+        }
+    }).collect();
+    (saved_vertices, saved_shapes)
+}
+
+/// Get some zones with their points and shapes in the form they are saved to a file, numbering points in order across the zones.
 /// Every handle sync and sibling of the zones' points should be in the zones too, or the saved objects won't load.
-pub(super) fn saved_zones(zone_ids: &[u16], zones: &[Zone], points: &[ControlPoint], siblings: &[u16]) -> SavedObjects {
+pub(super) fn saved_zones(zone_ids: &[u16], zones: &[Zone], points: &[ControlPoint], siblings: &[u16], shapes: &[Shape], vertices: &[ShapeVertex]) -> SavedObjects {
     // Number points in zone order, in case the points list doesn't already follow it
     let mut file_ids = HashMap::new();
     let mut point_ids = vec![];
@@ -133,11 +248,14 @@ pub(super) fn saved_zones(zone_ids: &[u16], zones: &[Zone], points: &[ControlPoi
     let saved_zones = zone_ids.iter().map(|&zone_id| {
         let zone = zones[zone_id as usize];
         let (start, count) = zone.range();
+        let (shape_vertices, zone_shapes) = saved_shapes(&zone, shapes, vertices);
         SavedZone {
             normal: zone.normal(),
             points: (start..start + count)
                 .map(|point_id| points[point_id as usize].saved(point_id, file_id))
                 .collect(),
+            shape_vertices,
+            shapes: zone_shapes,
         }
     }).collect();
 
@@ -163,15 +281,17 @@ mod tests {
     use super::super::test_utils::{add_square, add_zone};
 
     /// Get the raw bytes of every object list, to check two sets of objects are identical
-    fn raw(objects: &ObjectBuffers) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-        (
+    fn raw(objects: &ObjectBuffers) -> [Vec<u8>; 5] {
+        [
             bytemuck::cast_slice(&objects.zones.borrow().items).to_vec(),
             bytemuck::cast_slice(&objects.points.borrow().items).to_vec(),
             bytemuck::cast_slice(&objects.point_siblings.borrow().items).to_vec(),
-        )
+            bytemuck::cast_slice(&objects.shapes.borrow().items).to_vec(),
+            bytemuck::cast_slice(&objects.shape_vertices.borrow().items).to_vec(),
+        ]
     }
 
-    /// Build objects with a branching zone, curved points, and a custom normal
+    /// Build objects with a branching zone, curved points, a custom normal, and shapes sharing a vertex
     fn sample() -> ObjectBuffers {
         let mut objects = ObjectBuffers::headless();
         add_square(&mut objects, 10.0);
@@ -179,6 +299,15 @@ mod tests {
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (25.0, 10.0)]);
         objects.set_point_mode(0, ControlPointMode::Continuous).unwrap();
         objects.zones.borrow_mut().items[2].set_normal(Vec3::new(0.5, 0.0, 0.5));
+
+        let dome = ShapeParams { profile: ShapeProfile::Dome, inner_radius: 2.0, ..Default::default() };
+        let vertices: Vec<u16> = [(2.0, 2.0), (8.0, 2.0), (5.0, 8.0)].into_iter()
+            .map(|position| objects.add_shape_vertex(0, Vec2::from(position)).unwrap())
+            .collect();
+        objects.create_shape(0, &vertices, ShapeParams::default(), 0).unwrap();
+        objects.create_shape(0, &[vertices[2], vertices[0]], dome, 0).unwrap();
+        let vertex = objects.add_shape_vertex(2, Vec2::new(25.0, 3.0)).unwrap();
+        objects.create_shape(2, &[vertex], dome, 0).unwrap();
         objects
     }
 
@@ -250,7 +379,7 @@ mod tests {
     /// Saved objects with one zone of `count` points and the given sibling groups
     fn with_groups(count: usize, sibling_groups: Vec<Vec<u16>>) -> SavedObjects {
         let points = (0..count).map(|i| serde_json::from_value(point(i as f32)).unwrap()).collect();
-        SavedObjects { zones: vec![SavedZone { normal: Vec3::FORWARD, points }], sibling_groups }
+        SavedObjects { zones: vec![SavedZone { normal: Vec3::FORWARD, points, shape_vertices: vec![], shapes: vec![] }], sibling_groups }
     }
 
     /// Syncing to a point that doesn't exist is an error
@@ -275,7 +404,81 @@ mod tests {
     #[test]
     fn too_many_points() {
         let points = vec![serde_json::from_value(point(0.0)).unwrap(); MAX_OBJECT_ID as usize + 1];
-        let saved = SavedObjects { zones: vec![SavedZone { normal: Vec3::FORWARD, points }], sibling_groups: vec![] };
+        let saved = SavedObjects { zones: vec![SavedZone { normal: Vec3::FORWARD, points, shape_vertices: vec![], shapes: vec![] }], sibling_groups: vec![] };
         assert!(saved.validate().is_err());
+    }
+
+    /// Shapes keep their vertices, params and zones through saving and loading
+    #[test]
+    fn shapes_saved() {
+        let saved = sample().save();
+        assert_eq!(saved.zones[0].shape_vertices.len(), 3);
+        assert_eq!(saved.zones[0].shapes[1].vertices, vec![2, 0]);
+        assert_eq!(saved.zones[0].shapes[1].profile, ShapeProfile::Dome);
+        assert_eq!(saved.zones[2].shapes[0].vertices, vec![0]);
+        assert!(saved.zones[1].shapes.is_empty());
+
+        let loaded = ObjectBuffers::headless();
+        loaded.load(saved.validate().unwrap());
+        assert_eq!(loaded.get_zone_info(2).unwrap().shapes(), (2, 1));
+        assert_eq!(loaded.get_shape_info(2).unwrap().zone_id(), 2);
+        assert_eq!(loaded.shape_positions(1).unwrap(), vec![Vec2::new(5.0, 8.0), Vec2::new(2.0, 2.0)]);
+    }
+
+    /// Zones without shapes leave them out of the file, and files without them load with no shapes
+    #[test]
+    fn no_shapes_omitted() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let json = serde_json::to_string(&objects.save()).unwrap();
+        assert!(!json.contains("shape"));
+
+        let saved: SavedObjects = serde_json::from_str(&json).unwrap();
+        assert_eq!(saved.validate().unwrap().shapes.len(), 0);
+    }
+
+    /// Shapes still being drawn aren't saved, and neither are the vertices only they use
+    #[test]
+    fn pending_not_saved() {
+        let mut objects = sample();
+        let vertex = objects.add_shape_vertex(0, Vec2::new(9.0, 9.0)).unwrap();
+        objects.create_shape(0, &[vertex, 0], ShapeParams::default(), super::super::shape::SHAPE_PENDING).unwrap();
+        assert_eq!(objects.save(), sample().save());
+    }
+
+    /// Groups are saved, and shapes from before groups each get a group nobody else has
+    #[test]
+    fn shape_groups() {
+        let mut objects = sample();
+        objects.create_shape_in_group(0, &[0], 0, 0).unwrap();
+        let saved = objects.save();
+        assert_eq!(saved.zones[0].shapes.iter().map(|shape| shape.group).collect::<Vec<_>>(), vec![Some(0), Some(0), Some(1)]);
+
+        let mut old = saved.clone();
+        old.zones[0].shapes[0].group = None;
+        old.zones[0].shapes[2].group = None;
+        let loaded = ObjectBuffers::headless();
+        loaded.load(old.validate().unwrap());
+        let groups: Vec<u16> = (0..3).map(|shape_id| loaded.get_shape_info(shape_id).unwrap().group()).collect();
+        assert_eq!(groups, vec![1, 0, 2]);
+    }
+
+    /// Shapes need 1 to 3 different vertices that exist in their zone, and values in range
+    #[test]
+    fn invalid_shapes() {
+        let shape = |vertices: Vec<u16>| SavedShape { vertices, profile: ShapeProfile::Cone, inner_radius: 0.0, outer_radius: 5.0, steepness: 1.0, blend: 1.0, group: None };
+        let with_shape = |shape: SavedShape| {
+            let mut saved = with_groups(3, vec![]);
+            saved.zones[0].shape_vertices = vec![Vec2::ZERO, Vec2::ONE];
+            saved.zones[0].shapes = vec![shape];
+            saved
+        };
+
+        assert!(with_shape(shape(vec![0, 1])).validate().is_ok());
+        assert!(with_shape(shape(vec![0, 2])).validate().is_err());
+        assert!(with_shape(shape(vec![])).validate().is_err());
+        assert!(with_shape(shape(vec![1, 1])).validate().is_err());
+        assert!(with_shape(SavedShape { outer_radius: -1.0, ..shape(vec![0]) }).validate().is_err());
+        assert!(with_shape(SavedShape { blend: f32::INFINITY, ..shape(vec![0]) }).validate().is_err());
     }
 }

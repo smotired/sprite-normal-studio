@@ -1,7 +1,7 @@
 use studio_math::Vec2;
 
 use crate::InputModifiers;
-use crate::objects::{ControlPointMode, merge_bounds};
+use crate::objects::{ControlPointMode, ShapeWarp, merge_bounds};
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, SpecialAction, utils};
 use super::result::{ToolResult, DefaultResults};
 
@@ -60,6 +60,9 @@ pub struct EditorToolPoint {
 
     /// The end point for our selection box if we are instead dragging out a box of points
     selection_box_end: Option<Vec2>,
+
+    /// How the shapes in the zones being edited follow their paths during a drag, from where they were when it started
+    warp: Option<ShapeWarp>,
 }
 
 impl EditorTool for EditorToolPoint {
@@ -104,6 +107,7 @@ impl EditorTool for EditorToolPoint {
             let point = state.objects.get_point_info(point_id)?;
             self.handle = Some(right);
             self.handle_start = Some((point.left_handle() - point.position(), point.right_handle() - point.position()));
+            self.warp = Some(state.objects.begin_shape_warp(&state.objects.zones_around_points(&[point_id])?)?);
             return self.ok();
         }
 
@@ -123,6 +127,7 @@ impl EditorTool for EditorToolPoint {
             self.drag_origin = Some(pos);
             self.drag_anchor = Some(state.objects.get_point_info(anchor_id)?.position());
             self.drag_offset = Vec2::ZERO;
+            self.warp = Some(state.objects.begin_shape_warp(&state.objects.zones_around_points(&self.selected_points)?)?);
         }
 
         // If we didn't click anything, start dragging a box instead.
@@ -144,6 +149,7 @@ impl EditorTool for EditorToolPoint {
             let (lh, rh) = if right { (None, handle) } else { (handle, None) };
             let before = state.objects.bounds_around_points(&[point_id])?;
             state.objects.update_point(point_id, None, None, lh, rh)?;
+            self.warp_shapes(&mut state)?;
             return self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&[point_id])?));
         }
 
@@ -155,6 +161,7 @@ impl EditorTool for EditorToolPoint {
             let before = state.objects.bounds_around_points(&self.selected_points)?;
             state.objects.move_points(&self.selected_points[..], offset - self.drag_offset)?;
             self.drag_offset = offset;
+            self.warp_shapes(&mut state)?;
             return self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&self.selected_points)?));
         }
 
@@ -179,6 +186,11 @@ impl EditorTool for EditorToolPoint {
     }
 
     fn handle_cancel(&mut self, mut state: ControllerStateInput) -> ToolResult {
+        // Shapes that followed the drag go back where they started too
+        if let Some(warp) = self.warp.take() {
+            state.objects.restore_shape_warp(&warp)?;
+        }
+
         // If dragging a handle, put it back where it started
         if self.handle.take().is_some() {
             if let Some(point_id) = self.single_selected_point() && let Some((lh, rh)) = self.handle_start.take() {
@@ -265,9 +277,7 @@ impl EditorTool for EditorToolPoint {
             SpecialAction::PointModeSet(mode) => {
                 let Some(point_id) = self.single_selected_point() else { return self.ok(); };
                 self.stop_dragging();
-                let before = state.objects.bounds_around_points(&[point_id])?;
-                state.objects.set_point_mode(point_id, mode)?;
-                self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&[point_id])?))
+                self.set_mode_warping(&mut state, point_id, mode)
             },
 
             SpecialAction::PointModeToggled => {
@@ -278,9 +288,7 @@ impl EditorTool for EditorToolPoint {
                     Some(ControlPointMode::Linear) => ControlPointMode::Continuous,
                     _ => ControlPointMode::Linear,
                 };
-                let before = state.objects.bounds_around_points(&[point_id])?;
-                state.objects.set_point_mode(point_id, mode)?;
-                self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&[point_id])?))
+                self.set_mode_warping(&mut state, point_id, mode)
             },
 
             SpecialAction::CycleSibling => {
@@ -304,7 +312,7 @@ impl EditorTool for EditorToolPoint {
                 self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&inserted)?))
             },
 
-            SpecialAction::PointsMerged => {
+            SpecialAction::SelectionMerged => {
                 self.stop_dragging();
                 let before = state.objects.bounds_around_points(&self.selected_points)?;
                 self.selected_points = state.objects.merge_points(&self.selected_points)?;
@@ -341,6 +349,24 @@ impl EditorToolPoint {
         self.drag_offset = Vec2::ZERO;
         self.selection_origin = None;
         self.selection_box_end = None;
+        self.warp = None;
+    }
+
+    /// Warp the shapes in the zones being dragged to follow their paths, if a drag is warping them
+    fn warp_shapes(&self, state: &mut ControllerStateInput) -> anyhow::Result<()> {
+        match &self.warp {
+            Some(warp) => state.objects.apply_shape_warp(warp),
+            None => Ok(()),
+        }
+    }
+
+    /// Set the handle mode of a point, warping the shapes in its zones to follow their changed paths
+    fn set_mode_warping(&self, state: &mut ControllerStateInput, point_id: u16, mode: ControlPointMode) -> ToolResult {
+        let warp = state.objects.begin_shape_warp(&state.objects.zones_around_points(&[point_id])?)?;
+        let before = state.objects.bounds_around_points(&[point_id])?;
+        state.objects.set_point_mode(point_id, mode)?;
+        state.objects.apply_shape_warp(&warp)?;
+        self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&[point_id])?))
     }
 
     /// Get the points that a click (or drag start) affects, and the ID of the point that was grabbed, if anything was clicked.
@@ -1002,6 +1028,47 @@ mod tests {
         assert!(tool.selection().is_empty());
     }
 
+    /// Dragging points warps the shapes in their zones to follow the path, and cancelling puts the shapes back exactly
+    #[test]
+    fn drag_warps_shapes() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let vertex = objects.add_shape_vertex(0, Vec2::new(8.0, 2.0)).unwrap();
+        objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+        let before = objects.save();
+        let mut tool = EditorToolPoint::init();
+
+        // Pulling the corner near the shape out drags the shape along with it
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(20.0, -10.0), Default::default()).unwrap();
+        let moved = objects.get_vertex_info(vertex).unwrap().position();
+        assert!(moved.x > 12.0 && moved.y < -2.0, "{moved}");
+        assert!(objects.get_shape_info(0).unwrap().params().outer_radius > 10.0);
+
+        tool.handle_cancel(state(&objects)).unwrap();
+        assert_eq!(objects.save(), before);
+
+        // Releasing keeps the warped shapes
+        tool.handle_drag_start(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(20.0, -10.0), Default::default()).unwrap();
+        tool.handle_drag_released(state(&objects), Default::default()).unwrap();
+        assert_eq!(objects.get_vertex_info(vertex).unwrap().position(), moved);
+    }
+
+    /// Changing a point's handle mode curves its zone's path, which warps the shapes
+    #[test]
+    fn mode_change_warps_shapes() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let vertex = objects.add_shape_vertex(0, Vec2::new(9.0, 5.0)).unwrap();
+        objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+        let mut tool = EditorToolPoint::init();
+
+        tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), Default::default()).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::PointModeSet(ControlPointMode::Continuous)).unwrap();
+        assert_ne!(objects.get_vertex_info(vertex).unwrap().position(), Vec2::new(9.0, 5.0));
+    }
+
     /// Cancel while dragging a handle puts it back and keeps the selection
     #[test]
     fn cancel_handle_drag_restores_handle() {
@@ -1169,7 +1236,7 @@ mod tests {
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         let mut tool = EditorToolPoint::select(&[1, 4], state(&objects));
 
-        tool.handle_special_action(state(&objects), SpecialAction::PointsMerged).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionMerged).unwrap();
         assert_eq!(sorted(tool.selection()), vec![1, 4]);
         assert_eq!(objects.get_siblings(1), vec![4]);
     }

@@ -33,7 +33,7 @@ impl ObjectBuffers {
         Ok(())
     }
 
-    /// Updates the position of a list of zones, based on a new position for the very first point in that range.
+    /// Updates the position of a list of zones and their shapes, based on a new position for the very first point in that range.
     pub fn move_zones(&mut self, zone_ids: &[u16], first_point_position: Vec2) -> anyhow::Result<()> {
         if zone_ids.is_empty() { return Ok(()); }
 
@@ -46,13 +46,16 @@ impl ObjectBuffers {
         // Determine how much to move it
         let delta = first_point_position - self.get_point_info(first_id)?.position();
 
-        // Get all point IDs in all zones
+        // Get all point and shape vertex IDs in all zones
         let mut point_ids = vec![];
+        let mut vertex_ids = vec![];
         for &zone_id in zone_ids {
             let (start, count) = self.get_zone_info(zone_id)?.range();
             point_ids.extend(start..start+count);
+            vertex_ids.extend(self.zone_vertex_ids(zone_id)?);
         }
-        self.move_points(&point_ids[..], delta)
+        self.move_points(&point_ids[..], delta)?;
+        self.move_shape_vertices(&vertex_ids, delta)
     }
 
     /// Move a list of points by a delta. Siblings move together, so each set of siblings is only moved once
@@ -89,7 +92,7 @@ impl ObjectBuffers {
         
         // Pull the rest of the points and zones backwards
         for zone in &mut zones[(zone_id + 1)..zone_count] {
-            zone.add_offset(-1);
+            zone.add_point_offset(-1);
         }
 
         Ok(false)
@@ -104,10 +107,11 @@ impl ObjectBuffers {
         self.delete_point_with_threshold(point_id, 1)
     }
 
-    /// Remove a whole zone and all its points.
+    /// Remove a whole zone and all its points and shapes.
     pub fn delete_zone(&mut self, zone_id: u16) -> anyhow::Result<()> {
         let (start, count) = self.get_zone_info(zone_id)?.range();
-        
+        self.clear_zone_shapes(&[zone_id])?;
+
         // Remove points backwards to preserve indices
         for i in 0..count {
             let point_id = start + count - 1 - i;
@@ -118,12 +122,17 @@ impl ObjectBuffers {
         let new_zone_count = self.zone_count() as usize - 1;
         let zones = &mut self.zones.borrow_mut().items;
         let points = &mut self.points.borrow_mut().items;
+        let shapes = &mut self.shapes.borrow_mut().items;
         zones.remove(zone_id as usize);
         for (i, zone) in zones.iter().enumerate().take(new_zone_count).skip(zone_id as usize) {
-            // The zone should already have had its range updated
+            // The zone should already have had its ranges updated
             let (start, count) = zone.range();
             for j in 0..count {
                 points[(start + j) as usize].set_zone_id(i as u16);
+            }
+            let (start, count) = zone.shapes();
+            for j in 0..count {
+                shapes[(start + j) as usize].set_zone_id(i as u16);
             }
         }
 
@@ -239,8 +248,12 @@ mod tests {
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
+        let vertex = objects.add_shape_vertex(0, Vec2::new(3.0, 4.0)).unwrap();
+        objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+
         objects.move_zones(&[0], Vec2::new(5.0, 5.0)).unwrap();
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(5.0, 5.0));
+        assert_eq!(objects.get_vertex_info(vertex).unwrap().position(), Vec2::new(8.0, 9.0));
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(15.0, 15.0));
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(20.0, 0.0));
     }
