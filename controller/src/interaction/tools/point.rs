@@ -312,7 +312,7 @@ impl EditorTool for EditorToolPoint {
                 self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&inserted)?))
             },
 
-            SpecialAction::PointsMerged => {
+            SpecialAction::SelectionMerged => {
                 self.stop_dragging();
                 let before = state.objects.bounds_around_points(&self.selected_points)?;
                 self.selected_points = state.objects.merge_points(&self.selected_points)?;
@@ -1236,7 +1236,7 @@ mod tests {
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         let mut tool = EditorToolPoint::select(&[1, 4], state(&objects));
 
-        tool.handle_special_action(state(&objects), SpecialAction::PointsMerged).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionMerged).unwrap();
         assert_eq!(sorted(tool.selection()), vec![1, 4]);
         assert_eq!(objects.get_siblings(1), vec![4]);
     }

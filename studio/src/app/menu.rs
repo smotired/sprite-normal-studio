@@ -209,13 +209,16 @@ impl StudioApp {
         let tool = controller.selected_tool();
         let zones_selected = tool == EditorToolKind::Zone && !controller.selected_points().is_empty();
         let in_point_tool = tool == EditorToolKind::Point;
+        let in_shape_tool = tool == EditorToolKind::Shape;
 
         let items = [
             // The pen sets the normal for new zones
             ("Reset Normal", Some(RESET_NORMAL), zones_selected || tool == EditorToolKind::Pen, SpecialAction::NormalSet(Vec3::FORWARD, false)),
-            ("Merge", Some(MERGE), in_point_tool && controller.can_merge_selection(), SpecialAction::PointsMerged),
-            ("Detach", Some(DETACH), (tool == EditorToolKind::Zone || in_point_tool) && controller.can_separate_selection(), SpecialAction::SelectionSeparated),
+            ("Merge", Some(MERGE), (in_point_tool && controller.can_merge_selection()) || (in_shape_tool && controller.can_merge_shape_vertices()), SpecialAction::SelectionMerged),
+            ("Detach", Some(DETACH), ((tool == EditorToolKind::Zone || in_point_tool) && controller.can_separate_selection()) || (in_shape_tool && controller.can_detach_shape_vertices()), SpecialAction::SelectionSeparated),
             ("Split", None, in_point_tool && controller.selected_path().is_some(), SpecialAction::PathSplit),
+            ("Group Shapes", None, in_shape_tool && controller.can_group_shapes(), SpecialAction::ShapesGrouped),
+            ("Ungroup Shapes", None, in_shape_tool && controller.can_ungroup_shapes(), SpecialAction::ShapesUngrouped),
         ];
         for (label, shortcut, enabled, action) in items {
             if menu_item(ui, label, shortcut, enabled, None) {

@@ -224,7 +224,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                     // Merge the selected points
                     Key::M => {
                         if pressed && !repeat && modifiers.ctrl {
-                            Action::Special(SpecialAction::PointsMerged)
+                            Action::Special(SpecialAction::SelectionMerged)
                         } else { Action::None }
                     },
 

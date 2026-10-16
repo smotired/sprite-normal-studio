@@ -62,11 +62,17 @@ pub struct ViewportDataUniform {
     // The zone a shape tool is editing, whose shape vertices get knobs. NO_OBJECT if there is none.
     pub active_zone: u32,
 
-    // The only selected shape, whose radius knobs are drawn. NO_OBJECT if no shape or several are selected.
-    pub selected_shape: u32,
+    // Aligns the ghost start to 8 bytes, like the shader expects
+    _padding_2: u32,
 
     // Latest vertex of the path of shapes being drawn, which a ghost line joins to the cursor. Only drawn if overlay flag 11 is set.
     pub ghost_start: Vec2,
+
+    // The selected group's inner radius knob. Only drawn if overlay flag 12 is set.
+    pub inner_knob: Vec2,
+
+    // The selected group's outer radius knob. Only drawn if overlay flag 12 is set.
+    pub outer_knob: Vec2,
 }
 
 /// Stands in for a zone or shape ID in the uniform when there is none. IDs only go up to 65535.
@@ -84,12 +90,6 @@ impl ViewportDataUniform {
     ) -> Self {
         let (zone_count, point_count) = objects.object_counts();
 
-        // Radius knobs are only drawn when exactly one shape is selected
-        let selected_shape = match objects.shapes_with_all_vertices(tool.shape_selection()).unwrap_or_default()[..] {
-            [shape_id] => Some(shape_id),
-            _ => None,
-        };
-
         // Calculate selection box
         let (selection_box_start, selection_box_end) = {
             if let Some((start, end)) = tool.selection_box() {
@@ -103,6 +103,12 @@ impl ViewportDataUniform {
         if transform_box.is_some() { overlay_flags |= 1 << 8; }
         let TransformBox { center, half_size, angle } = transform_box.unwrap_or(TransformBox { center: Vec2::ZERO, half_size: Vec2::ZERO, angle: 0.0 });
         let (sin, cos) = angle.sin_cos();
+
+        // Radius knobs are drawn with the shape tools' vertex knobs, when exactly one whole group of shapes is selected
+        let knobs = objects.shapes_with_all_vertices(tool.shape_selection()).ok()
+            .and_then(|shape_ids| objects.radius_knobs(&shape_ids, camera.inv_scale()).ok().flatten())
+            .filter(|_| overlay_flags & (1 << 10) != 0);
+        if knobs.is_some() { overlay_flags |= 1 << 12; }
 
         Self {
             camera_pos: camera.position,
@@ -125,11 +131,13 @@ impl ViewportDataUniform {
                 Some(SpecialValue::Zone(Some(zone_id))) => zone_id as u32,
                 _ => NO_OBJECT,
             },
-            selected_shape: selected_shape.map_or(NO_OBJECT, u32::from),
+            _padding_2: 0,
             ghost_start: match tool.handle_special_query(SpecialQuery::ShapeGhost) {
                 Some(SpecialValue::Position(position)) => position,
                 _ => Vec2::ZERO,
             },
+            inner_knob: knobs.map_or(Vec2::ZERO, |knobs| knobs.inner),
+            outer_knob: knobs.map_or(Vec2::ZERO, |knobs| knobs.outer),
         }
     }
 
@@ -178,7 +186,8 @@ mod tests {
         assert_eq!(uniform.selection_box_end, Vec2::new(0.0, 0.0));
         assert_eq!(uniform.pixels_per_point, 1.0);
         assert_eq!(uniform.overlay_flags & (1 << 8), 0);
-        assert_eq!((uniform.active_zone, uniform.selected_shape), (NO_OBJECT, NO_OBJECT));
+        assert_eq!(uniform.active_zone, NO_OBJECT);
+        assert_eq!(uniform.overlay_flags & (1 << 12), 0);
     }
 
     /// The transform box is passed along and drawn, but only if the overlay is on
@@ -199,6 +208,27 @@ mod tests {
         overlay.toggle_overlay();
         let uniform = ViewportDataUniform::new(&Light::default(), &camera, &overlay, Vec2::ZERO, &objects, tool.as_ref(), Some(transform_box));
         assert_eq!(uniform.overlay_flags & (1 << 8), 0);
+    }
+
+    /// A whole selected group's radius knobs are passed along in the shape tool
+    #[test]
+    fn radius_knobs() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 100.0);
+        let vertex = objects.add_shape_vertex(0, Vec2::new(20.0, 20.0)).unwrap();
+        objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+        let mut tool = crate::interaction::tools::EditorToolShape::select(&[0], crate::interaction::tools::test_utils::state(&objects));
+        tool.handle_click(crate::interaction::tools::test_utils::state(&objects), Vec2::new(20.0, 20.0), Default::default()).unwrap();
+
+        let uniform = ViewportDataUniform::new(&Light::default(), &Camera::default(), &OverlayState::default(), Vec2::ZERO, &objects, tool.as_ref(), None);
+        assert_ne!(uniform.overlay_flags & (1 << 12), 0);
+        assert_eq!(uniform.outer_knob, Vec2::new(30.0, 20.0));
+        assert_eq!(uniform.inner_knob, Vec2::new(20.0, 30.0));
+
+        // Not in other tools, which don't draw shape knobs
+        let zone_tool = EditorToolZone::init();
+        let uniform = ViewportDataUniform::new(&Light::default(), &Camera::default(), &OverlayState::default(), Vec2::ZERO, &objects, zone_tool.as_ref(), None);
+        assert_eq!(uniform.overlay_flags & (1 << 12), 0);
     }
 
     /// Bytes should cover the whole struct

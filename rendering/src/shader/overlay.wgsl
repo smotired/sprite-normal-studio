@@ -413,7 +413,7 @@ fn outline_shapes(
     return col;
 }
 
-// Draw the knobs for editing shapes: one on each of the active zone's shape vertices, and the selected shape's radius knobs.
+// Draw the knobs for editing shapes: one on each of the active zone's shape vertices, and the selected group's radius knobs.
 // Also draw the ghost line from the path of shapes being drawn to the cursor.
 fn overlay_shape_handles(
     color: vec3<f32>,   // Base color below this part of the overlay
@@ -428,17 +428,11 @@ fn overlay_shape_handles(
         col = draw_line(col, pos, vec4<f32>(1, 1, 1, 0.5), params.ghost_start, params.cursor_pos, PATH_HALF_WIDTH * 0.5);
     }
 
-    // The selected shape's radius knobs, as diamonds
-    if (params.selected_shape != NO_OBJECT) {
-        let packed = shapes[params.selected_shape];
-        let zone = get_zone(unpack_fst(packed.zone_profile_flags));
-        let shape = get_shape(params.selected_shape, zone.vertex_start);
-        let frame = radius_handle_frame(shape);
+    // The selected group's radius knobs, as diamonds. The CPU works out where they go.
+    if (flag(12)) {
         let diamond = vec2<f32>(0.70710678, 0.70710678);
-        let inner = frame.anchor + frame.direction * shape.inner_radius;
-        let outer = frame.anchor + frame.direction * (shape.inner_radius + shape.outer_radius);
-        col = draw_rotated_box(col, pos, vec4<f32>(SELECTED_SHAPE_COLOR, 1.0), inner, SHAPE_RADIUS_HANDLE_HALF_WIDTH, diamond);
-        col = draw_rotated_box(col, pos, vec4<f32>(SELECTED_SHAPE_COLOR, 1.0), outer, SHAPE_RADIUS_HANDLE_HALF_WIDTH, diamond);
+        col = draw_rotated_box(col, pos, vec4<f32>(SELECTED_SHAPE_COLOR, 1.0), params.inner_knob, SHAPE_RADIUS_HANDLE_HALF_WIDTH, diamond);
+        col = draw_rotated_box(col, pos, vec4<f32>(SELECTED_SHAPE_COLOR, 1.0), params.outer_knob, SHAPE_RADIUS_HANDLE_HALF_WIDTH, diamond);
     }
 
     // Knobs on the active zone's vertices, on top

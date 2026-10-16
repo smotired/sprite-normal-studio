@@ -1,7 +1,7 @@
 use studio_math::Vec2;
 
 use crate::{Bounds, InputModifiers};
-use crate::objects::{merge_bounds, ShapeParamChange, ShapeParams};
+use crate::objects::{merge_bounds, RadiusKnobs, ShapeParamChange, ShapeParams};
 
 use super::{EditorTool, EditorToolKind, ControllerStateInput, SelectionType, SpecialAction, SpecialQuery, SpecialValue, utils};
 use super::result::{ToolResult, DefaultResults};
@@ -20,8 +20,10 @@ use super::result::{ToolResult, DefaultResults};
 /// SHIFT: snap movement to horizontal, vertical, or diagonal
 /// CTRL: snap to the grid
 ///
-/// While exactly one shape is selected, it has knobs for its inner radius and outer radius, which can be dragged.
-/// The outer radius knob takes priority over everything, but vertices take priority over the inner radius knob, which sits on the hull while the inner radius is 0.
+/// While exactly one whole group of shapes is selected, it has knobs for its inner radius and outer radius, which can be dragged.
+/// The knobs take priority over everything else. The outer radius knob is dragged out along a line from the hull,
+/// and the inner radius knob is dragged along its own line a quarter turn from it (downwards for points).
+/// The inner knob sits a few pixels past the inner radius, so it can be grabbed even while the inner radius is 0.
 /// CTRL: snap the radius to whole pixels
 ///
 /// Dragging anywhere else drags out a selection box of the active zone's vertices, using the selection rules against the selection from before the drag.
@@ -58,19 +60,25 @@ enum ShapeDrag {
         originals: Vec<(u16, Vec2)>,
     },
 
-    /// A radius knob of a shape
+    /// A radius knob of a group of shapes
     Radius {
+        /// The first shape in the group, whose params the group shares
         shape_id: u16,
 
         /// True for the outer radius, false for the inner radius
         outer: bool,
 
-        /// The shape's params before the drag
+        /// The group's params before the drag
         original: ShapeParams,
 
-        /// Where the knobs start from on the edge of the hull, and the direction they go out from it
+        /// Where the knobs start from on the edge of the hull
         anchor: Vec2,
-        direction: Vec2,
+
+        /// The direction this knob is dragged in
+        axis: Vec2,
+
+        /// How far along the axis the radius starts: the inner radius for the outer knob, or the knob's offset for the inner knob
+        start: f32,
     },
 
     /// A selection box
@@ -86,7 +94,7 @@ enum ShapeDrag {
 /// What is at a position in the shape tool, in order of priority
 #[derive(Copy, Clone, PartialEq, Debug)]
 enum Hit {
-    /// A radius knob of the only selected shape. True for the outer radius.
+    /// A radius knob of the only selected group, by its first shape. True for the outer radius.
     Radius(u16, bool),
 
     /// A shape vertex, and its zone
@@ -159,10 +167,10 @@ impl EditorTool for EditorToolShape {
         let hit = self.hit(&state, pos)?;
 
         // Grab a radius knob
-        if let Hit::Radius(shape_id, outer) = hit {
-            let (anchor, direction) = state.objects.shape_radius_frame(shape_id)?;
+        if let Hit::Radius(shape_id, outer) = hit && let Some(knobs) = self.knobs(&state)? {
             let original = state.objects.get_shape_info(shape_id)?.params();
-            self.drag = Some(ShapeDrag::Radius { shape_id, outer, original, anchor, direction });
+            let (axis, start) = if outer { (knobs.direction, original.inner_radius) } else { (knobs.side, knobs.offset) };
+            self.drag = Some(ShapeDrag::Radius { shape_id, outer, original, anchor: knobs.anchor, axis, start });
             return self.ok();
         }
 
@@ -209,14 +217,10 @@ impl EditorTool for EditorToolShape {
                 self.stale_in(merge_bounds(before, state.objects.shapes_reach_bounds(&shape_ids)?))
             },
 
-            Some(ShapeDrag::Radius { shape_id, outer, original, anchor, direction }) => {
-                let mut distance = (pos - anchor).dot(direction);
-                if modifiers.ctrl { distance = distance.round(); }
-                let change = if outer {
-                    ShapeParamChange::OuterRadius(distance - original.inner_radius)
-                } else {
-                    ShapeParamChange::InnerRadius(distance)
-                };
+            Some(ShapeDrag::Radius { shape_id, outer, anchor, axis, start, .. }) => {
+                let mut radius = (pos - anchor).dot(axis) - start;
+                if modifiers.ctrl { radius = radius.round(); }
+                let change = if outer { ShapeParamChange::OuterRadius(radius) } else { ShapeParamChange::InnerRadius(radius) };
                 self.change_params(&mut state, &[shape_id], &[change])
             },
 
@@ -309,7 +313,7 @@ impl EditorTool for EditorToolShape {
                 let shape_ids = state.objects.shapes_with_all_vertices(&self.selected_vertices)?;
                 self.change_params(&mut state, &shape_ids, &[change])
             },
-            SpecialAction::ShapeVerticesMerged => {
+            SpecialAction::SelectionMerged => {
                 self.abandon_drag();
                 let before = state.objects.shapes_reach_bounds(&state.objects.shapes_using_vertices(&self.selected_vertices)?)?;
                 let merged = state.objects.merge_shape_vertices(&self.selected_vertices)?;
@@ -317,6 +321,43 @@ impl EditorTool for EditorToolShape {
                 let after = state.objects.shapes_reach_bounds(&state.objects.shapes_using_vertices(&[merged])?)?;
                 self.stale_in(merge_bounds(before, after))
             },
+
+            // Detaching doesn't move anything, so no normals change
+            SpecialAction::SelectionSeparated => {
+                self.abandon_drag();
+                let keep = state.objects.shapes_with_all_vertices(&self.selected_vertices)?;
+                state.objects.detach_shape_vertices(&self.selected_vertices, &keep)?;
+                self.ok()
+            },
+
+            SpecialAction::ShapesGrouped | SpecialAction::ShapesUngrouped => {
+                self.abandon_drag();
+                let shape_ids = state.objects.shapes_with_all_vertices(&self.selected_vertices)?;
+                let before = state.objects.shapes_reach_bounds(&shape_ids)?;
+                if action == SpecialAction::ShapesGrouped {
+                    state.objects.join_shape_groups(&shape_ids)?;
+                } else {
+                    state.objects.separate_shape_groups(&shape_ids)?;
+                }
+
+                // Shapes moved within the zone, but their vertices didn't, so the selection still finds them
+                let shape_ids = state.objects.shapes_with_all_vertices(&self.selected_vertices)?;
+                self.stale_in(merge_bounds(before, state.objects.shapes_reach_bounds(&shape_ids)?))
+            },
+
+            SpecialAction::ShapesSelected(start, count) => {
+                let mut vertex_ids = vec![];
+                for shape_id in start..start.saturating_add(count) {
+                    let shape = state.objects.get_shape_info(shape_id)?;
+                    if Some(shape.zone_id()) != self.active_zone { continue; }
+                    vertex_ids.extend(state.objects.shape_vertex_ids(shape_id)?);
+                }
+                vertex_ids.sort();
+                vertex_ids.dedup();
+                self.selected_vertices = vertex_ids;
+                self.ok()
+            },
+
             _ => self.ok(),
         }
     }
@@ -378,17 +419,20 @@ impl EditorToolShape {
         self.stale_in(merge_bounds(before, state.objects.shapes_reach_bounds(&grouped)?))
     }
 
+    /// Get the radius knobs of the selected shapes, if they are exactly one whole group
+    fn knobs(&self, state: &ControllerStateInput) -> anyhow::Result<Option<RadiusKnobs>> {
+        state.objects.radius_knobs(&state.objects.shapes_with_all_vertices(&self.selected_vertices)?, state.camera_inv_scale)
+    }
+
     /// Find what is at a position. See Hit for the priority.
     fn hit(&self, state: &ControllerStateInput, pos: Vec2) -> anyhow::Result<Hit> {
         let tolerance = utils::CLICK_TOLERANCE * state.camera_inv_scale;
 
-        // Radius knobs of the only selected shape
-        let knobs = match state.objects.shapes_with_all_vertices(&self.selected_vertices)?[..] {
-            [shape_id] => Some((shape_id, state.objects.shape_radius_handles(shape_id)?)),
-            _ => None,
-        };
-        if let Some((shape_id, (_, outer))) = knobs && outer.distance(pos) <= tolerance {
-            return Ok(Hit::Radius(shape_id, true));
+        // Radius knobs of the only selected group
+        if let Some(knobs) = self.knobs(state)? {
+            let first = state.objects.shapes_with_all_vertices(&self.selected_vertices)?[0];
+            if knobs.outer.distance(pos) <= tolerance { return Ok(Hit::Radius(first, true)); }
+            if knobs.inner.distance(pos) <= tolerance { return Ok(Hit::Radius(first, false)); }
         }
 
         // Vertices, preferring the active zone's
@@ -398,10 +442,6 @@ impl EditorToolShape {
                 && state.objects.get_vertex_info(vertex_id)?.position().distance(pos) <= tolerance {
                 return Ok(Hit::Vertex(zone_id, vertex_id));
             }
-        }
-
-        if let Some((shape_id, (inner, _))) = knobs && inner.distance(pos) <= tolerance {
-            return Ok(Hit::Radius(shape_id, false));
         }
 
         // Shapes, preferring the active zone's
@@ -523,9 +563,9 @@ mod tests {
         let mut tool = tool(&objects);
         tool.handle_click(state(&objects), Vec2::new(65.0, 50.0), IM::none()).unwrap();
 
-        // Away from the middle of the line, where its inner radius knob is
-        tool.handle_drag_start(state(&objects), Vec2::new(55.0, 50.0), IM::none()).unwrap();
-        let result = tool.handle_dragging_to(state(&objects), Vec2::new(65.0, 53.0), IM::shift()).unwrap();
+        // Away from where the line's radius knobs are
+        tool.handle_drag_start(state(&objects), Vec2::new(70.0, 50.0), IM::none()).unwrap();
+        let result = tool.handle_dragging_to(state(&objects), Vec2::new(80.0, 53.0), IM::shift()).unwrap();
         assert!(result.normals_stale.is_some());
         assert_eq!(objects.shape_positions(1).unwrap(), vec![Vec2::new(60.0, 50.0), Vec2::new(90.0, 50.0)]);
         assert_eq!(objects.shape_positions(0).unwrap(), vec![Vec2::new(20.0, 20.0)]);
@@ -563,18 +603,82 @@ mod tests {
         tool.handle_cancel(state(&objects)).unwrap();
         assert_eq!(objects.get_shape_info(0).unwrap().params().outer_radius, 10.0);
 
-        // The inner knob sits on the vertex while the inner radius is 0, so dragging there moves the vertex instead
+        // The inner knob is 10 pixels below the point while the inner radius is 0, so it can be dragged down to make a circle.
+        // Only the downward part of the drag counts.
+        tool.handle_drag_start(state(&objects), Vec2::new(20.0, 30.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(25.0, 34.0), IM::none()).unwrap();
+        assert_eq!(objects.get_shape_info(0).unwrap().params().inner_radius, 4.0);
+        assert_eq!(objects.get_shape_info(0).unwrap().params().outer_radius, 10.0);
+        tool.handle_drag_released(state(&objects), IM::none()).unwrap();
+
+        // The vertex itself still moves
         tool.handle_drag_start(state(&objects), Vec2::new(20.0, 20.0), IM::none()).unwrap();
         tool.handle_dragging_to(state(&objects), Vec2::new(22.0, 20.0), IM::none()).unwrap();
         assert_eq!(objects.shape_positions(0).unwrap(), vec![Vec2::new(22.0, 20.0)]);
         tool.handle_drag_released(state(&objects), IM::none()).unwrap();
 
-        // On a line, the inner knob is on the middle of the line
+        // On a line, the inner knob is on the line, 10 pixels from its middle, and is dragged along the line
         tool.handle_click(state(&objects), Vec2::new(65.0, 52.0), IM::none()).unwrap();
-        tool.handle_drag_start(state(&objects), Vec2::new(65.0, 50.0), IM::none()).unwrap();
-        tool.handle_dragging_to(state(&objects), Vec2::new(65.0, 54.0), IM::none()).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(55.0, 50.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(51.0, 53.0), IM::none()).unwrap();
         assert_eq!(objects.get_shape_info(1).unwrap().params().inner_radius, 4.0);
         assert_eq!(objects.get_shape_info(1).unwrap().params().outer_radius, 10.0);
+    }
+
+    /// A whole selected group has knobs on its outer edge, and dragging them changes the whole group
+    #[test]
+    fn drag_group_radius() {
+        let mut objects = sample();
+        let corners: Vec<u16> = [(10.0, 60.0), (40.0, 60.0), (40.0, 90.0), (10.0, 90.0)].into_iter()
+            .map(|pos| objects.add_shape_vertex(0, Vec2::from(pos)).unwrap())
+            .collect();
+        objects.replace_pending_shapes(0, &[vec![corners[0], corners[2], corners[1]], vec![corners[0], corners[2], corners[3]]], ShapeParams::default(), false).unwrap();
+
+        // Clicking the mesh selects both triangles, whose knobs go out from the right edge
+        let mut tool = tool(&objects);
+        tool.handle_click(state(&objects), Vec2::new(25.0, 75.0), IM::none()).unwrap();
+        assert_eq!(objects.shapes_with_all_vertices(tool.shape_selection()).unwrap().len(), 2);
+        tool.handle_drag_start(state(&objects), Vec2::new(50.0, 75.0), IM::none()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(55.0, 75.0), IM::none()).unwrap();
+        assert_eq!(objects.get_shape_info(2).unwrap().params().outer_radius, 15.0);
+        assert_eq!(objects.get_shape_info(3).unwrap().params().outer_radius, 15.0);
+    }
+
+    /// Detaching, grouping and ungrouping change the selected shapes
+    #[test]
+    fn group_actions() {
+        let mut objects = sample();
+        objects.create_shape(0, &[0, 1], ShapeParams::default(), 0).unwrap();
+        let mut tool = tool(&objects);
+
+        // Group the point with the new line, which share a vertex
+        tool.handle_click(state(&objects), Vec2::new(30.0, 30.0), IM::ctrl()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(20.0, 20.0), IM::shift()).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::ShapesGrouped).unwrap();
+        assert_eq!(objects.shape_groups(&[0]).unwrap(), vec![0, 1]);
+        assert_eq!(objects.shape_vertex_ids(1).unwrap(), vec![0, 1]);
+
+        // Ungroup them again
+        tool.handle_special_action(state(&objects), SpecialAction::ShapesUngrouped).unwrap();
+        assert_eq!(objects.shape_groups(&[0]).unwrap().len(), 1);
+        assert_eq!(objects.shape_groups(&[2]).unwrap().len(), 1);
+
+        // Detach the point from the line it shares a vertex with
+        tool.handle_click(state(&objects), Vec2::new(20.0, 20.0), IM::none()).unwrap();
+        assert_eq!(objects.shapes_using_vertices(tool.shape_selection()).unwrap().len(), 2);
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionSeparated).unwrap();
+        assert_eq!(objects.shapes_using_vertices(tool.shape_selection()).unwrap().len(), 1);
+    }
+
+    /// Selecting a range of shapes selects their vertices, if they are in the active zone
+    #[test]
+    fn select_range() {
+        let objects = sample();
+        let mut tool = tool(&objects);
+        tool.handle_special_action(state(&objects), SpecialAction::ShapesSelected(1, 1)).unwrap();
+        assert_eq!(tool.shape_selection(), &[1, 2]);
+        tool.handle_special_action(state(&objects), SpecialAction::ShapesSelected(2, 1)).unwrap();
+        assert!(tool.shape_selection().is_empty());
     }
 
     /// Dragging a box selects the active zone's vertices inside it, using the selection rules
@@ -624,7 +728,7 @@ mod tests {
         assert_eq!(objects.get_shape_info(1).unwrap().params().steepness, 2.0);
         assert_eq!(objects.get_shape_info(0).unwrap().params().steepness, 1.0);
 
-        tool.handle_special_action(state(&objects), SpecialAction::ShapeVerticesMerged).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionMerged).unwrap();
         assert_eq!(tool.shape_selection(), &[1]);
         assert_eq!(objects.shape_positions(1).unwrap(), vec![Vec2::new(65.0, 50.0)]);
     }

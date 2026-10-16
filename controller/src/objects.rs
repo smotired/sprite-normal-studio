@@ -21,6 +21,7 @@ use wgpu::{Buffer, Device};
 
 use zone::Zone;
 pub use shape::{Shape, ShapeVertex, ShapeParams, ShapeParamChange, ShapeProfile};
+pub use shapes::RadiusKnobs;
 use shape::hull_distance;
 pub use point::ControlPoint;
 pub use point::ControlPointMode;

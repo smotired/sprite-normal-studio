@@ -18,6 +18,9 @@ pub const MIN_BLEND: f32 = 0.1;
 /// Must match MAX_DOME_SLOPE in generator.wgsl and helpers.wgsl.
 pub const MAX_DOME_SLOPE: f32 = 8.0;
 
+/// How far in screen pixels the inner radius knob sits past the edge of a shape's core, so it can be grabbed even when the inner radius is 0
+pub const KNOB_OFFSET: f32 = 10.0;
+
 /// Flag for shapes in a path that is still being drawn. They are drawn in the overlay but not used for normals, and not saved.
 pub const SHAPE_PENDING: u8 = 1 << 0;
 
@@ -195,6 +198,9 @@ impl Shape {
     /// Get the group of this shape within its zone
     pub fn group(&self) -> u16 { self.group }
 
+    /// Set the group of this shape. Shapes in a group should be next to each other in their zone, with the same params.
+    pub fn set_group(&mut self, group: u16) { self.group = group; }
+
     /// Returns true if this shape uses a vertex, by its index in the zone's vertex range
     pub fn uses_local(&self, local_vertex: u16) -> bool { self.local_vertices().contains(&local_vertex) }
 
@@ -271,8 +277,7 @@ pub fn hull_distance(vertices: &[Vec2], pos: Vec2) -> (f32, Vec2) {
 
 /// Get where the knobs for a shape's radii start from, on the edge of its hull, and the direction they go out from it.
 /// Points go right, lines go to the left of their first edge, and triangles go out from their first edge.
-/// The inner radius knob is that far out from the start, and the outer radius knob is the inner plus outer radius out.
-/// Must match radius_handle_frame in helpers.wgsl.
+/// To use a different edge, put its vertices first.
 pub fn radius_handle_frame(vertices: &[Vec2]) -> (Vec2, Vec2) {
     let (a, b) = match *vertices {
         [a, b, ..] if a != b => (a, b),
