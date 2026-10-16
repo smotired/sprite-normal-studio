@@ -207,6 +207,13 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                         } else { Action::None }
                     },
 
+                    // Regenerate the whole normal map
+                    Key::G => {
+                        if pressed && !repeat && modifiers.ctrl {
+                            Action::RegenerateNormals
+                        } else { Action::None }
+                    },
+
                     // Toggle the selected point between linear and continuous
                     Key::B => {
                         if pressed && !repeat && modifiers.ctrl {
