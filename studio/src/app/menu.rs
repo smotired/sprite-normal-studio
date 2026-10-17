@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use controller::{Action, Axis, EditorToolKind, PastePlacement, SpecialAction};
+use controller::{Action, Axis, EditorToolKind, PastePlacement, SpecialAction, ZoneOrderChange};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 use studio_math::Vec3;
 
@@ -30,6 +30,8 @@ const SPRITE_GRID: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key
 const TIMELINE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::T);
 const RESET_NORMAL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::Z);
 const MERGE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::M);
+const BRING_FORWARD: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::CloseBracket);
+const SEND_BACKWARD: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::OpenBracket);
 const DETACH: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::K);
 
 /// Something clicked in the menu bar, which is run after the menu is shown since the menu borrows the app
@@ -246,6 +248,18 @@ impl StudioApp {
         ] {
             if menu_item(ui, label, None, zones_selected, None) {
                 *clicked = Some(MenuAction::Controller(Action::Special(action)));
+            }
+        }
+        ui.separator();
+
+        // Ordering the selected zones, which decides which is in front where they overlap. Shift moves all the way, but isn't listed.
+        let can_reorder = controller.can_reorder_zones();
+        for (label, shortcut, change) in [
+            ("Bring Forward", BRING_FORWARD, ZoneOrderChange::Forward),
+            ("Send Backward", SEND_BACKWARD, ZoneOrderChange::Backward),
+        ] {
+            if menu_item(ui, label, Some(shortcut), can_reorder, None) {
+                *clicked = Some(MenuAction::Controller(Action::Special(SpecialAction::ZonesReordered(change))));
             }
         }
     }

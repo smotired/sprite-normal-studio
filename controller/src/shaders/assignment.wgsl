@@ -326,56 +326,79 @@ fn check_point_in_zone(
     return sum % 2u == 1u;
 }
 
-// Method to check how much of a pixel is inside a zone.
-fn check_pixel_coverage(
+// How many subsamples of each pixel are tested, in a 4x4 grid
+const SUBSAMPLES = 16u;
+
+// No zone owns a subsample
+const NO_ZONE = 0xFFFFFFFFu;
+
+// Which of a pixel's subsamples are inside a zone, as a bit mask. Each subsample is in the middle of its sixteenth of the pixel.
+fn pixel_coverage_mask(
     pxl: vec2<u32>,
     zone: Zone,
-) -> f32 {
-    // Check a 4x4 grid of points, each in the middle of its sixteenth of the pixel
-    var inside = 0u;
+) -> u32 {
+    var mask = 0u;
     let offset = 0.125;
     for (var i = 0u; i < 4u; i += 1u) {
         for (var j = 0u; j < 4u; j += 1u) {
             let pos = vec2<f32>(pxl) + vec2<f32>(f32(i), f32(j)) * 0.25 + offset;
             if (check_point_in_zone(pos, zone)) {
-                inside += 1u;
+                mask |= 1u << (i * 4u + j);
             }
         }
     }
-
-    return f32(inside) / 16.0;
+    return mask;
 }
 
-// Evaluate a zone and add to the output if it's better
-fn evaluate_zone(
-    pxl: vec2<u32>,
-    zone_id: u32,
-    zone: Zone,
-    previous: Output,
-) -> Output {
-    let coverage = check_pixel_coverage(pxl, zone);
-    if (coverage == 0.0) { return previous; }
+// Assign a pixel to the two zones that own the most of it.
+// Zones later in the list are in front, so each subsample belongs to the last zone covering it, and zones behind it don't show through.
+// Along a front zone's edge, the pixel is shared with whatever shows beside it, so edges are still smooth.
+fn assign_pixel(pxl: vec2<u32>) -> Output {
+    var owner: array<u32, 16>;
+    for (var s = 0u; s < SUBSAMPLES; s += 1u) { owner[s] = NO_ZONE; }
 
-    var result = previous;
-    if (!previous.has_zone1 || coverage > previous.coverage1) {
-        // Move zone1 to zone2
-        if (previous.has_zone1) {
-            result.zone2_id = previous.zone1_id;
-            result.coverage2 = previous.coverage1;
+    for (var i = 0u; i < params.zone_count; i += 1u) {
+        let mask = pixel_coverage_mask(pxl, get_zone(i));
+        if (mask == 0u) { continue; }
+        for (var s = 0u; s < SUBSAMPLES; s += 1u) {
+            if ((mask & (1u << s)) != 0u) { owner[s] = i; }
+        }
+    }
+
+    // Count each owner's subsamples once, at its first subsample, keeping the two with the most. Ties go to the zone in front.
+    var result = Output(0u, 0u, 1.0, 0.0, false, false);
+    for (var s = 0u; s < SUBSAMPLES; s += 1u) {
+        let zone_id = owner[s];
+        if (zone_id == NO_ZONE) { continue; }
+        var counted = false;
+        for (var t = 0u; t < s; t += 1u) {
+            if (owner[t] == zone_id) { counted = true; }
+        }
+        if (counted) { continue; }
+
+        var count = 0u;
+        for (var t = s; t < SUBSAMPLES; t += 1u) {
+            if (owner[t] == zone_id) { count += 1u; }
+        }
+        let coverage = f32(count) / f32(SUBSAMPLES);
+
+        let beats_first = !result.has_zone1 || coverage > result.coverage1 || (coverage == result.coverage1 && zone_id > result.zone1_id);
+        let beats_second = !result.has_zone2 || coverage > result.coverage2 || (coverage == result.coverage2 && zone_id > result.zone2_id);
+        if (beats_first) {
+            if (result.has_zone1) {
+                result.zone2_id = result.zone1_id;
+                result.coverage2 = result.coverage1;
+                result.has_zone2 = true;
+            }
+            result.zone1_id = zone_id;
+            result.coverage1 = coverage;
+            result.has_zone1 = true;
+        } else if (beats_second) {
+            result.zone2_id = zone_id;
+            result.coverage2 = coverage;
             result.has_zone2 = true;
         }
-
-        result.zone1_id = zone_id;
-        result.coverage1 = coverage;
-        result.has_zone1 = true;
     }
-    
-    else if (!previous.has_zone2 || coverage > previous.coverage2) {
-        result.zone2_id = zone_id;
-        result.coverage2 = coverage;
-        result.has_zone2 = true;
-    }
-
     return result;
 }
 
@@ -398,14 +421,5 @@ fn main(
         return;
     }
 
-    // Set up the output for this pixel
-    var result = Output(0u, 0u, 1.0, 0.0, false, false);
-
-    // Loop through and evaluate all zones
-    for (var i = 0u; i < params.zone_count; i += 1u) {
-        result = evaluate_zone(id.xy, i, get_zone(i), result);
-    }
-
-    // Pack and output
-    textureStore(output, id.xy, pack_output(result));
+    textureStore(output, id.xy, pack_output(assign_pixel(id.xy)));
 }

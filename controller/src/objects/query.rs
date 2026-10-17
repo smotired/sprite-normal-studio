@@ -1,6 +1,7 @@
 use studio_math::Vec2;
 use studio_math::bezier::bezier_point_at;
 use studio_math::bounds::bounds_correct;
+use studio_math::polygon::point_in_polygon;
 
 use super::{ObjectBuffers, ControlPoint};
 
@@ -178,25 +179,27 @@ impl ObjectBuffers {
     /// Returns true if a position is inside a zone's path, by counting how many times a ray straight down from it crosses the path.
     /// Each curve is split into straight segments. Must match check_point_in_zone in assignment.wgsl closely enough to agree on clicks.
     pub fn zone_contains(&self, zone_id: u16, pos: Vec2) -> anyhow::Result<bool> {
-        let (start, count) = self.get_zone_info(zone_id)?.range();
-        if count < 2 { return Ok(false); }
+        let polygon = self.zone_polygon(zone_id)?;
+        Ok(polygon.len() > 2 && point_in_polygon(pos, &polygon))
+    }
 
-        let mut crossings = 0;
+    /// Get a zone's path as a closed polygon, with each curve split into straight segments.
+    /// Zones with fewer than two points have no area, so give fewer than three corners.
+    pub fn zone_polygon(&self, zone_id: u16) -> anyhow::Result<Vec<Vec2>> {
+        let (start, count) = self.get_zone_info(zone_id)?.range();
+        if count < 2 { return Ok(vec![]); }
+
+        let mut polygon = Vec::with_capacity(count as usize * ZONE_CONTAINS_SEGMENTS);
         let mut previous = self.get_point_info(start + count - 1)?;
         for point_id in start..start + count {
             let point = self.get_point_info(point_id)?;
             let curve = [previous.position(), previous.right_handle(), point.left_handle(), point.position()];
-            let mut last = curve[0];
             for i in 1..=ZONE_CONTAINS_SEGMENTS {
-                let next = bezier_point_at(curve[0], curve[1], curve[2], curve[3], i as f32 / ZONE_CONTAINS_SEGMENTS as f32);
-                if (last.x <= pos.x) != (next.x <= pos.x) && last.y + (pos.x - last.x) * (next.y - last.y) / (next.x - last.x) >= pos.y {
-                    crossings += 1;
-                }
-                last = next;
+                polygon.push(bezier_point_at(curve[0], curve[1], curve[2], curve[3], i as f32 / ZONE_CONTAINS_SEGMENTS as f32));
             }
             previous = point;
         }
-        Ok(crossings % 2 == 1)
+        Ok(polygon)
     }
 
     /// Get the zone a position is inside, preferring one zone if it contains the position.

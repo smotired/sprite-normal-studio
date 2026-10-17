@@ -15,7 +15,7 @@ use result::{EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
 use crate::{Axis, Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, SavedObjects, Status};
-use crate::objects::{ShapeParams, ShapeParamChange, ShapeProfile};
+use crate::objects::{ShapeParams, ShapeParamChange, ShapeProfile, ZoneOrderChange};
 use super::history::{History, DragStep};
 
 /// Options for which tool we are using in the editor.
@@ -128,6 +128,9 @@ pub enum SpecialAction {
 
     /// Zone: remove every shape from the selected zones.
     ShapesCleared,
+
+    /// Zone: move the selected zones in front of or behind other zones. Zones in front take priority where they overlap.
+    ZonesReordered(ZoneOrderChange),
 
     /// Zone, Point: move the selected points by a world space delta. Shape: move the selected shape vertices.
     /// The bool is true if this continues a held key, so holding an arrow key is one undoable change.
@@ -398,6 +401,11 @@ impl Controller {
 
     /// Get the IDs of the selected points
     pub fn selected_points(&self) -> &[u16] { self.tool.selection() }
+
+    /// Returns true if the selected zones can be moved in front of or behind other zones
+    pub fn can_reorder_zones(&self) -> bool {
+        self.tool.kind() == EditorToolKind::Zone && !self.selected_zones().is_empty() && self.objects.zone_count() > 1
+    }
 
     /// Returns true if there are any zones
     pub fn has_objects(&self) -> bool { self.objects.zone_count() > 0 }

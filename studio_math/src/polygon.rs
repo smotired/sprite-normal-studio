@@ -90,6 +90,18 @@ fn segments_touch(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> bool {
     on_segment(b0, b1, a0, d0) || on_segment(b0, b1, a1, d1) || on_segment(a0, a1, b0, d2) || on_segment(a0, a1, b1, d3)
 }
 
+/// Returns true if a point is inside a closed polygon, by counting how many edges a ray straight down from it crosses
+pub fn point_in_polygon(point: Vec2, polygon: &[Vec2]) -> bool {
+    let mut inside = false;
+    for i in 0..polygon.len() {
+        let (start, end) = (polygon[i], polygon[(i + 1) % polygon.len()]);
+        if (start.x <= point.x) != (end.x <= point.x) && start.y + (point.x - start.x) * (end.y - start.y) / (end.x - start.x) >= point.y {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +166,13 @@ mod tests {
         assert!(triangulate(&polygon(&[(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)])).is_none());
         assert!(triangulate(&polygon(&[(0.0, 0.0), (5.0, 0.0)])).is_none());
         assert!(!self_intersects(&polygon(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)])));
+    }
+
+    /// Points inside are found by crossings, and points outside aren't
+    #[test]
+    fn points_in_polygon() {
+        let triangle = polygon(&[(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)]);
+        assert!(point_in_polygon(Vec2::new(2.0, 2.0), &triangle));
+        assert!(!point_in_polygon(Vec2::new(8.0, 8.0), &triangle));
     }
 }

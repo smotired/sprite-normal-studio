@@ -183,4 +183,18 @@ mod tests {
         assert!(objects.paste_zones(&copied).is_err());
         assert_eq!(objects.object_counts(), (1, 4));
     }
+
+    /// Pasted zones go in front of every zone, keeping the order they were in, whatever order they were picked in
+    #[test]
+    fn paste_keeps_order() {
+        let mut objects = ObjectBuffers::headless();
+        for x in [0.0, 20.0, 40.0] {
+            super::super::test_utils::add_zone(&mut objects, &[(x, 0.0), (x + 10.0, 0.0), (x + 5.0, 10.0)]);
+        }
+        let copied = objects.copy_zones(&[2, 0]).unwrap();
+        assert_eq!(objects.paste_zones(&copied).unwrap(), vec![3, 4]);
+        let first = |zone_id: u16| objects.get_point_info(objects.get_zone_info(zone_id).unwrap().range().0).unwrap().position();
+        assert_eq!(first(3), Vec2::new(0.0, 0.0));
+        assert_eq!(first(4), Vec2::new(40.0, 0.0));
+    }
 }

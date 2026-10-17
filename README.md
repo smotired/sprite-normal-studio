@@ -122,9 +122,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Copy/paste/move with sprite-level intervals
 [x] Timeline panel where sprites can easily be added
 [x] Display looping lit animation
-[ ] Layer management, including temporarily disabling them.
-[ ] Putting zones (and their control points) on different layers. Pixels will be assigned to the highest layer zone.
-    This allows more complicated sprites where one object might pass in front of another.
+[x] Allow changing zone draw ordering, so that objects can pass over each other.
 [ ] Feathering between connected edges of zones, just between two control points. Difficult
 ```
 

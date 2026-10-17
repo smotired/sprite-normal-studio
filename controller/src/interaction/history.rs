@@ -293,4 +293,26 @@ mod tests {
         history.undo(&objects, &mut tool).unwrap();
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
     }
+
+    /// Changing the order of zones is undone like any other change
+    #[test]
+    fn reorder_undone() {
+        use super::super::tools::SpecialAction;
+        use crate::objects::ZoneOrderChange;
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        crate::objects::test_utils::add_zone(&mut objects, &[(5.0, 5.0), (15.0, 5.0), (15.0, 15.0)]);
+        let before = objects.save();
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::select(&[0], state(&objects));
+        let mut history = History::default();
+
+        let action = SpecialAction::ZonesReordered(ZoneOrderChange::ToFront);
+        run(&mut history, &mut tool, &objects, action.drag_step(), |tool, state| tool.handle_special_action(state, action));
+        history.close(&objects, tool.as_ref());
+        assert_ne!(objects.save(), before);
+
+        history.undo(&objects, &mut tool).unwrap();
+        assert_eq!(objects.save(), before);
+        assert_eq!(tool.selection(), &[0, 1, 2, 3]);
+    }
 }

@@ -1,4 +1,4 @@
-use controller::{Axis, Action, Controller, InputModifiers, PastePlacement, SpecialAction};
+use controller::{Axis, Action, Controller, InputModifiers, PastePlacement, SpecialAction, ZoneOrderChange};
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
 use studio_math::Vec2;
 
@@ -154,6 +154,19 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
 
             // Key events, unless a widget has focus and gets the keys instead
             Event::Key { .. } if widget_focused => Action::None,
+            // Moving the selected zones in front of or behind others. Matched by the physical key, since shift turns [ into { on many layouts.
+            Event::Key { physical_key: Some(bracket @ (Key::OpenBracket | Key::CloseBracket)), pressed, repeat, modifiers, .. } => {
+                if pressed && !repeat && !modifiers.ctrl && !modifiers.alt {
+                    let change = match (bracket == Key::CloseBracket, modifiers.shift) {
+                        (true, false) => ZoneOrderChange::Forward,
+                        (false, false) => ZoneOrderChange::Backward,
+                        (true, true) => ZoneOrderChange::ToFront,
+                        (false, true) => ZoneOrderChange::ToBack,
+                    };
+                    Action::Special(SpecialAction::ZonesReordered(change))
+                } else { Action::None }
+            },
+
             Event::Key { key, pressed, repeat, modifiers, .. } => {
                 match key {
                     // Recenter camera

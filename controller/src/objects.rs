@@ -15,6 +15,7 @@ mod save;
 mod clipboard;
 mod transform;
 mod warp;
+mod order;
 
 use studio_math::Vec2;
 use wgpu::{Buffer, Device};
@@ -32,6 +33,7 @@ pub use bounds::{Bounds, merge_bounds};
 pub use save::{SavedObjects, LoadedObjects};
 pub use transform::ZonesSnapshot;
 pub use warp::ShapeWarp;
+pub use order::ZoneOrderChange;
 
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;

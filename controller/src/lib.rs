@@ -19,7 +19,7 @@ use crate::interaction::tools::{EditorTool, EditorToolZone};
 use crate::interaction::history::History;
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorChange, PastePlacement, SpecialAction, SpecialQuery, SpecialValue, ShapeParamsSummary};
-pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects, ShapeParams, ShapeParamChange, ShapeProfile};
+pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects, ShapeParams, ShapeParamChange, ShapeProfile, ZoneOrderChange};
 pub use crate::save::SavedScene;
 pub use crate::status::Status;
 pub use crate::grid::GRID_SIZES;

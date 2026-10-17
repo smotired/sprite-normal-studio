@@ -432,6 +432,20 @@ impl EditorTool for EditorToolZone {
                 let angle = if clockwise { std::f32::consts::FRAC_PI_2 } else { -std::f32::consts::FRAC_PI_2 };
                 self.transform_selected_zones(&mut state, |center| Affine2::rotate_about(angle, center))
             },
+            // Every ID changes in the new order, so the selection follows its zones to their new IDs
+            SpecialAction::ZonesReordered(change) => {
+                if self.drag_snapshot.is_some() || self.transform.is_some() || self.selection_origin.is_some() { return self.ok(); }
+                // Zones already as far as they can go stay where they are
+                let Some(new_order) = state.objects.changed_zone_order(&self.selected_zones, change)? else { return self.ok(); };
+                let bounds = state.objects.zones_bounds(&self.selected_zones)?;
+                state.objects.reorder_zones(&new_order)?;
+                let mut selected: Vec<u16> = self.selected_zones.iter()
+                    .filter_map(|zone| new_order.iter().position(|old| old == zone).map(|new| new as u16))
+                    .collect();
+                selected.sort();
+                self.set_selection(selected, &state)?;
+                self.stale_in(bounds)
+            },
             // Arrow keys don't fight the mouse over a drag in progress
             SpecialAction::SelectionNudged(delta, _) => {
                 if self.drag_snapshot.is_some() || self.transform.is_some() || self.selection_origin.is_some() { return self.ok(); }
@@ -1803,5 +1817,38 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         tool.handle_drag_start(state(&objects), Vec2::new(26.0, 8.0), Default::default()).unwrap();
         tool.handle_special_action(state(&objects), SpecialAction::SelectionNudged(Vec2::new(16.0, 0.0), true)).unwrap();
         assert_eq!(position(&objects, 2), Vec2::new(26.0, 8.0));
+    }
+
+    /// Moving forward and backward hops past the next overlapping zone, skipping ones that don't overlap, and keeps the moved zone selected
+    #[test]
+    fn special_reorder() {
+        use crate::objects::ZoneOrderChange as Order;
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        add_zone(&mut objects, &[(50.0, 50.0), (60.0, 50.0), (60.0, 60.0)]);
+        add_zone(&mut objects, &[(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)]);
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+        let first_of = |objects: &ObjectBuffers, zone_id: u16| position(objects, objects.get_zone_info(zone_id).unwrap().range().0);
+
+        // The square hops over the triangle, which doesn't overlap it, to in front of the other square
+        let result = tool.handle_special_action(state(&objects), SpecialAction::ZonesReordered(Order::Forward)).unwrap();
+        assert_eq!(result.normals_stale, Some((Vec2::ZERO, Vec2::new(10.0, 10.0))));
+        assert_eq!(first_of(&objects, 2), Vec2::ZERO);
+        assert_eq!(first_of(&objects, 0), Vec2::new(50.0, 50.0));
+        assert_eq!(tool.selection(), &[7, 8, 9, 10]);
+
+        // Nothing is in front of it now, so it can't go further, and nothing changes
+        let result = tool.handle_special_action(state(&objects), SpecialAction::ZonesReordered(Order::Forward)).unwrap();
+        assert!(result.normals_stale.is_none());
+        assert_eq!(first_of(&objects, 2), Vec2::ZERO);
+
+        // Back behind the other square, then all the way to the back
+        tool.handle_special_action(state(&objects), SpecialAction::ZonesReordered(Order::Backward)).unwrap();
+        assert_eq!(first_of(&objects, 1), Vec2::ZERO);
+        tool.handle_special_action(state(&objects), SpecialAction::ZonesReordered(Order::ToBack)).unwrap();
+        assert_eq!(first_of(&objects, 0), Vec2::ZERO);
+        tool.handle_special_action(state(&objects), SpecialAction::ZonesReordered(Order::ToFront)).unwrap();
+        assert_eq!(first_of(&objects, 2), Vec2::ZERO);
+        assert_eq!(tool.selection().len(), 4);
     }
 }
