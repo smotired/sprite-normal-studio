@@ -27,6 +27,7 @@ const OVERLAY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::O)
 const PATHS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::H);
 const SHAPES: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::J);
 const SPRITE_GRID: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::G);
+const TIMELINE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::T);
 const RESET_NORMAL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::Z);
 const MERGE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::M);
 const DETACH: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::K);
@@ -38,6 +39,7 @@ enum MenuAction {
     LoadSpritesheet,
     LoadNormalMap,
     ResetBaseNormals,
+    ToggleTimeline,
     Controller(Action),
 
     /// Cut, copy or paste, which is sent back as the same event as its shortcut
@@ -67,6 +69,7 @@ impl StudioApp {
             MenuAction::LoadSpritesheet => self.load_spritesheet(),
             MenuAction::LoadNormalMap => self.load_normal_map(),
             MenuAction::ResetBaseNormals => self.reset_base_normals(),
+            MenuAction::ToggleTimeline => self.timeline_open = !self.timeline_open,
             MenuAction::Controller(action) => if let Some(project) = self.project_mut() {
                 project.controller.handle_action(action);
             },
@@ -200,6 +203,11 @@ impl StudioApp {
             if menu_item(ui, label, Some(shortcut), enabled, Some(checked)) {
                 *clicked = Some(MenuAction::Controller(action));
             }
+        }
+        ui.separator();
+
+        if menu_item(ui, "Timeline", Some(TIMELINE), true, Some(self.timeline_open)) {
+            *clicked = Some(MenuAction::ToggleTimeline);
         }
     }
 

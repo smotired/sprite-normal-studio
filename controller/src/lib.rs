@@ -1,3 +1,4 @@
+mod animation;
 mod generator;
 mod grid;
 mod interaction;
@@ -22,6 +23,7 @@ pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMo
 pub use crate::save::SavedScene;
 pub use crate::status::Status;
 pub use crate::grid::GRID_SIZES;
+pub use crate::animation::{Animation, Frame, DEFAULT_FPS, cell_of, origin_of, next_cell};
 use crate::objects::merge_bounds;
 
 /// The Controller manages our actual working pipeline.
@@ -73,6 +75,12 @@ pub struct Controller {
 
     /// Width and height of the spritesheet, or (0, 0) until one is set. The assigner's output has a placeholder size until then.
     sheet_size: (u32, u32),
+
+    /// The animations in the workspace, as frames of the spritesheet
+    animations: Vec<animation::Animation>,
+
+    /// A rect in world space to highlight like a selection box, such as the sprite being picked for a frame
+    highlight: Option<Bounds>,
 }
 
 impl Controller {
@@ -110,6 +118,8 @@ impl Controller {
             grid_size: GRID_SIZES[0],
             sprite_size: (0, 0),
             sheet_size: (0, 0),
+            animations: Vec::new(),
+            highlight: None,
         }
     }
     

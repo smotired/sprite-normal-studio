@@ -9,6 +9,7 @@ mod relink;
 mod sidebar;
 mod status;
 mod tabs;
+mod timeline;
 mod toolbar;
 mod welcome;
 mod workspace;
@@ -18,7 +19,7 @@ use std::path::PathBuf;
 use controller::Controller;
 use eframe::egui;
 use eframe::wgpu::FilterMode;
-use rendering::Renderer;
+use rendering::{PreviewRenderer, Renderer};
 
 use crate::app::file::loader::SpriteFileSelection;
 
@@ -44,6 +45,9 @@ struct Project {
 
     /// The project's objects, history, camera and tool
     controller: Controller,
+
+    /// The selected animation and frame, and how the preview is shown
+    timeline: timeline::TimelineState,
 }
 
 /// Defines application state
@@ -75,6 +79,14 @@ pub struct StudioApp {
     /// Renderer viewport texture ID
     viewport_texture_id: egui::TextureId,
 
+    /// If the timeline panel is open below the viewport. Closed when the app starts.
+    timeline_open: bool,
+    /// Renderer for the animation preview in the timeline, and its texture ID
+    preview_renderer: PreviewRenderer,
+    preview_texture_id: egui::TextureId,
+    /// What the preview should draw once the normal map is updated this frame
+    pending_preview: Option<timeline::PreviewRequest>,
+
     /// If the dialog with the full status text is open
     show_status_dialog: bool,
 
@@ -99,6 +111,9 @@ impl StudioApp {
         let renderer = Renderer::new(&render_state.device, &controller.selection_texture(), controller.object_buffers(&render_state.device));
         let viewport_texture_id = render_state.renderer.write()
             .register_native_texture(&render_state.device, renderer.view(), FilterMode::Nearest);
+        let preview_renderer = PreviewRenderer::new(&render_state.device);
+        let preview_texture_id = render_state.renderer.write()
+            .register_native_texture(&render_state.device, preview_renderer.view(), FilterMode::Nearest);
 
         Self {
             projects: Vec::new(),
@@ -111,6 +126,10 @@ impl StudioApp {
             renderer,
             render_state,
             viewport_texture_id,
+            timeline_open: false,
+            preview_renderer,
+            preview_texture_id,
+            pending_preview: None,
             show_status_dialog: false,
             tool_sidebars: Default::default(),
             allow_close: false,
@@ -145,6 +164,7 @@ impl StudioApp {
 
         project.controller.set_inputs(&self.render_state.device, project.sprite.texture(), normal);
         self.renderer.set_inputs(&self.render_state.device, project.sprite.texture(), project.controller.output());
+        self.preview_renderer.set_inputs(&self.render_state.device, project.sprite.texture(), project.controller.output());
     }
 
     /// Select a project's tab, drawing it in the editor. Its selection and camera are kept.
@@ -153,6 +173,7 @@ impl StudioApp {
         let device = &self.render_state.device;
         self.renderer.set_inputs(device, project.sprite.texture(), project.controller.output());
         self.renderer.set_objects(device, &project.controller.selection_texture(), project.controller.object_buffers(device));
+        self.preview_renderer.set_inputs(device, project.sprite.texture(), project.controller.output());
 
         self.current = index;
         self.scroll_to_current = true;
@@ -278,12 +299,16 @@ impl StudioApp {
         self.show_sidebar(ui);
         let toolbar_response = self.show_toolbar(ui);
         let status_response = self.show_status_bar(ui);
+        let bottom = match self.timeline_open {
+            true => self.show_timeline(ui).rect.min.y,
+            false => status_response.rect.min.y,
+        };
 
         // The rest of the space will now be taken up by the editor
         let full_rect = ui.max_rect();
         let viewport_rect = egui::Rect::from_min_max(
             egui::Pos2::new(toolbar_response.rect.max.x, full_rect.min.y),
-            egui::Pos2::new(full_rect.max.x, status_response.rect.min.y),
+            egui::Pos2::new(full_rect.max.x, bottom),
         );
 
         // Handle app-level input events, unless a dialog is open and should get them instead
@@ -295,6 +320,7 @@ impl StudioApp {
         if let Some(project) = self.projects.get_mut(self.current) {
             project.controller.update(&self.render_state.device, &self.render_state.queue);
         }
+        self.render_preview(ui.ctx());
 
         // Render the main editor component and handle input events on the image itself
         let response = self.show_editor(ui);

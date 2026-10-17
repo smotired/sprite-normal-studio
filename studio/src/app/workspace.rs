@@ -28,7 +28,8 @@ const FORMAT: &str = "sprite-normal-studio";
 /// - Version 4: Added shapes and shape vertices to zones. Zones in older files have no shapes.
 /// - Version 5: Added a group to each shape. Shapes in version 4 files each get a group of their own.
 /// - Version 6: Added the slice size, the size of each sprite in the spritesheet. Older files use the whole spritesheet as one sprite.
-const VERSION: u32 = 6;
+/// - Version 7: Added animations, each a list of frames by the top left pixel of their sprite. Older files have none.
+const VERSION: u32 = 7;
 
 /// Extension of workspace files
 pub(super) const EXTENSION: &str = "sns";
@@ -374,7 +375,7 @@ impl StudioApp {
         // Loading the scene resets the light, then adding the project centers it on the spritesheet.
         // The file as it was read is what's on disk, so images picked somewhere else count as unsaved changes.
         let mut controller = Controller::new(&self.render_state.device);
-        controller.load_scene(pending.objects, pending.file.scene.slice_size);
+        controller.load_scene(pending.objects, pending.file.scene.slice_size, pending.file.scene.animations.clone());
         let project = Project {
             sprite,
             normal,
@@ -384,6 +385,7 @@ impl StudioApp {
             clean: pending.file,
             dirty: false,
             controller,
+            timeline: Default::default(),
         };
         self.add_project(ctx, project);
         self.recent.mark_used(&pending.path);
@@ -680,6 +682,20 @@ mod tests {
         json["slice_size"] = serde_json::json!([16, 32]);
         let file = read_workspace(&json.to_string()).unwrap();
         assert_eq!(file.scene.slice_size, Some((16, 32)));
+        assert_eq!(read_workspace(&serde_json::to_string_pretty(&file).unwrap()).unwrap(), file);
+    }
+
+    /// Version 6 files have no animations. Version 7 files keep theirs.
+    #[test]
+    fn read_animations() {
+        let file = read_workspace(&workspace_json(FORMAT, 6)).unwrap();
+        assert!(file.scene.animations.is_empty());
+
+        let mut json: serde_json::Value = serde_json::from_str(&workspace_json(FORMAT, 7)).unwrap();
+        json["animations"] = serde_json::json!([{ "name": "idle", "fps": 12.0, "frames": [{ "origin": [16, 0], "hold": 2 }] }]);
+        let file = read_workspace(&json.to_string()).unwrap();
+        assert_eq!(file.scene.animations.len(), 1);
+        assert_eq!(file.scene.animations[0].frames[0], controller::Frame { origin: (16, 0), hold: 2 });
         assert_eq!(read_workspace(&serde_json::to_string_pretty(&file).unwrap()).unwrap(), file);
     }
 

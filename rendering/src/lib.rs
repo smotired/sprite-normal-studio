@@ -1,3 +1,7 @@
+mod preview;
+
+pub use preview::{PreviewRenderer, PreviewUniform, preview_inv_scale};
+
 use studio_math::Vec2;
 use wgpu::{BindGroup, Buffer, ComputePipeline, Device, Queue, Texture, TextureView};
 use controller::{BufferStates, Controller, ViewportDataUniform};
@@ -294,11 +298,15 @@ mod tests {
     /// The concatenated shader parses, validates, and fits in the device's limits. Nothing else checks it without a GPU.
     #[test]
     fn shader_validates() {
-        let source = shader_source();
-        let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+        validate(&shader_source());
+    }
+
+    /// Parse and validate a shader, and check it fits in the device's limits, panicking with its errors
+    pub(crate) fn validate(source: &str) {
+        let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
             .validate(&module)
-            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
 
         // The app asks for wgpu's downlevel limits, so it runs on as many devices as possible
         let limits = wgpu::Limits::downlevel_defaults();

@@ -2,7 +2,7 @@ use controller::{Axis, Action, Controller, InputModifiers, PastePlacement, Speci
 use eframe::egui::{Event, InputState, Key, Modifiers, PointerButton, Pos2, Rect, Response, Ui};
 use studio_math::Vec2;
 
-use crate::app::StudioApp;
+use crate::app::{timeline, StudioApp};
 use crate::app::clipboard::ClipboardEvent;
 use crate::app::workspace::WorkspaceCommand;
 
@@ -25,11 +25,23 @@ impl StudioApp {
 
     /// Forward app-level input events to the controller and update the world space cursor position.
     pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) {
-        let Some(project) = self.projects.get_mut(self.current) else { return; };
-        let controller = &mut project.controller;
-
-        // Arrow keys belong to a focused widget, like the sprite size fields, instead of moving the selection
+        // Keys belong to a focused widget, like the sprite size fields or an animation's name, instead of being shortcuts
         let widget_focused = ui.ctx().memory(|m| m.focused().is_some());
+
+        // Toggle the timeline, which belongs to the app instead of the controller
+        if !widget_focused && ui.input(|i| i.key_pressed(Key::T) && !i.modifiers.any()) {
+            self.timeline_open = !self.timeline_open;
+        }
+
+        let timeline_open = self.timeline_open;
+        let Some(project) = self.projects.get_mut(self.current) else { return; };
+
+        // Escape stops picking a sprite for a frame in the timeline, instead of cancelling what the tool is doing
+        if timeline_open && project.timeline.picking() && !widget_focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            project.timeline.cancel_pick();
+            project.controller.set_highlight(None);
+        }
+        let controller = &mut project.controller;
         let clipboard_events = ui.input_mut(|i| {
             for event in handle_app_input(controller, i, viewport_rect, widget_focused) {
                 controller.handle_action(event);
@@ -57,9 +69,29 @@ impl StudioApp {
         }
     }
 
-    /// Forward input events on the editor image, i.e. click and drag, to the controller
+    /// Forward input events on the editor image, i.e. click and drag, to the controller.
+    /// While picking a sprite for a frame in the timeline, clicks pick the sprite instead and only the camera can move.
     pub(super) fn process_editor_input(&mut self, ui: &Ui, response: Response) {
+        let timeline_open = self.timeline_open;
         let Some(project) = self.projects.get_mut(self.current) else { return; };
+
+        if timeline_open && project.timeline.picking() {
+            let rect = response.rect;
+            let controller = &mut project.controller;
+            let to_world = |pos: Pos2| controller.screen_to_world(Vec2::from(pos - rect.min), Vec2::from(rect.size()));
+            let hovered = response.hover_pos().map(to_world);
+            let clicked = response.clicked().then(|| response.interact_pointer_pos()).flatten().map(to_world);
+            controller.set_highlight(hovered.and_then(|pos| timeline::sprite_rect_at(controller, pos)).map(|(min, size)| (min, min + size)));
+            if let Some(pos) = clicked {
+                project.timeline.pick(&mut project.controller, pos);
+            }
+            for event in handle_editor_input(&project.controller, ui, response) {
+                if matches!(event, Action::CameraDragged(_)) { project.controller.handle_action(event); }
+            }
+            return;
+        }
+
+        project.controller.set_highlight(None);
         for event in handle_editor_input(&project.controller, ui, response) {
             project.controller.handle_action(event);
         }
@@ -120,7 +152,8 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                 }
             },
 
-            // Key events
+            // Key events, unless a widget has focus and gets the keys instead
+            Event::Key { .. } if widget_focused => Action::None,
             Event::Key { key, pressed, repeat, modifiers, .. } => {
                 match key {
                     // Recenter camera
@@ -221,7 +254,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
 
                     // Move the selection one grid space, or one pixel with ctrl, or one sprite with shift
                     Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown => {
-                        if pressed && !widget_focused {
+                        if pressed {
                             let direction = match key {
                                 Key::ArrowLeft => Vec2::new(-1.0, 0.0),
                                 Key::ArrowRight => Vec2::new(1.0, 0.0),

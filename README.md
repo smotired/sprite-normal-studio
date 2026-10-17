@@ -120,8 +120,8 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 [x] Slicing the grid into individual sprites, and displaying the grid
 [x] Copy/paste/move with sprite-level intervals
-[ ] Timeline panel where sprites can easily be added
-[ ] Display looping lit animation
+[x] Timeline panel where sprites can easily be added
+[x] Display looping lit animation
 [ ] Layer management, including temporarily disabling them.
 [ ] Putting zones (and their control points) on different layers. Pixels will be assigned to the highest layer zone.
     This allows more complicated sprites where one object might pass in front of another.

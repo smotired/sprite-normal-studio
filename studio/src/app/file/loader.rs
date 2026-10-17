@@ -9,7 +9,11 @@ pub const FLAT_NORMAL_COLOR: [u8; 4] = [128, 128, 255, 255];
 pub struct SpriteFileSelection {
     label: String,
     path: PathBuf,
+    /// The image as it is, for the shaders
     texture: wgpu::Texture,
+    /// The image with premultiplied alpha, which egui expects, so transparent pixels don't draw their color
+    display_texture: wgpu::Texture,
+    /// The ID egui draws the display texture with
     texture_id: TextureId,
     size: (u32, u32),
 }
@@ -20,6 +24,9 @@ impl SpriteFileSelection {
 
     /// The selected file
     pub fn path(&self) -> &Path { &self.path }
+
+    /// The egui texture the image is drawn with
+    pub fn texture_id(&self) -> TextureId { self.texture_id }
 
     /// The size of the selected image
     pub fn size(&self) -> (u32, u32) { self.size }
@@ -34,13 +41,15 @@ impl SpriteFileSelection {
     /// Create a selection from an image that has already been loaded, registering a new texture ID for it
     fn from_image(label: &str, path: PathBuf, rs: &RenderState, image: &image::RgbaImage) -> Self {
         let texture = create_texture(rs, label, image);
-        let view = texture.create_view(&Default::default());
+        let display_texture = create_texture(rs, label, &premultiplied(image));
+        let view = display_texture.create_view(&Default::default());
         let texture_id = rs.renderer.write().register_native_texture(&rs.device, &view, wgpu::FilterMode::Nearest);
 
         Self {
             label: label.to_owned(),
             path,
             texture,
+            display_texture,
             texture_id,
             size: image.dimensions(),
         }
@@ -49,9 +58,10 @@ impl SpriteFileSelection {
     /// Replace the selected file and texture with an image that has already been loaded, keeping the same texture ID
     fn set_image(&mut self, path: PathBuf, rs: &RenderState, image: &image::RgbaImage) {
         let texture = create_texture(rs, &self.label, image);
+        let display_texture = create_texture(rs, &self.label, &premultiplied(image));
 
         // Update the texture ID
-        let view = texture.create_view(&Default::default());
+        let view = display_texture.create_view(&Default::default());
         rs.renderer.write().update_egui_texture_from_wgpu_texture(
             &rs.device, &view, wgpu::FilterMode::Nearest, self.texture_id,
         );
@@ -59,6 +69,7 @@ impl SpriteFileSelection {
         self.path = path;
         self.size = image.dimensions();
         self.texture = texture;
+        self.display_texture = display_texture;
     }
 
     /// Unregister the texture from egui. The selection must not be displayed after this.
@@ -76,6 +87,18 @@ impl SpriteFileSelection {
         self.set_image(path, rs, &image);
         Ok(self.size)
     }
+}
+
+/// A copy of an image with its color multiplied by its alpha, like egui's Color32
+fn premultiplied(image: &image::RgbaImage) -> image::RgbaImage {
+    let mut image = image.clone();
+    for pixel in image.pixels_mut() {
+        let alpha = pixel[3] as u32;
+        for channel in &mut pixel.0[..3] {
+            *channel = ((*channel as u32 * alpha + 127) / 255) as u8;
+        }
+    }
+    image
 }
 
 /// Create a flat normal map texture of a size, for when there is no base normal map
@@ -168,5 +191,22 @@ impl Widget for SpriteFileSelectionDisplay<'_> {
         })
         .inner
         .on_hover_text_at_pointer(name)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Color is scaled by alpha, so fully transparent pixels are black and opaque ones keep their color
+    #[test]
+    fn premultiplies() {
+        let mut image = image::RgbaImage::new(3, 1);
+        image.put_pixel(0, 0, image::Rgba([255, 255, 255, 0]));
+        image.put_pixel(1, 0, image::Rgba([200, 100, 50, 255]));
+        image.put_pixel(2, 0, image::Rgba([200, 100, 50, 128]));
+        let image = premultiplied(&image);
+        assert_eq!(image.get_pixel(0, 0).0, [0, 0, 0, 0]);
+        assert_eq!(image.get_pixel(1, 0).0, [200, 100, 50, 255]);
+        assert_eq!(image.get_pixel(2, 0).0, [100, 50, 25, 128]);
     }
 }

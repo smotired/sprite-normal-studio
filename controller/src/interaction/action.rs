@@ -41,6 +41,9 @@ pub enum Action {
     /// Moving the camera in a direction by a float amount
     CameraMove(Axis, f32),
 
+    /// Centering the camera on a world space position, keeping its scale
+    CameraCenter(Vec2),
+
     /// Changing the camera scale.
     /// Optionally, scale relative to a fixed anchor point in world space.
     CameraScale(i32, Option<Vec2>),
@@ -132,6 +135,9 @@ impl Controller {
     /// If shapes are shown in the overlay outside the shape tools
     pub fn shapes_on(&self) -> bool { self.overlay_state.shapes_on() }
 
+    /// Color of the light, packed as 0x00BBGGRR
+    pub fn light_color(&self) -> u32 { self.light.packed_color() }
+
     /// If the lines between sprites are shown in the overlay
     pub fn sprite_grid_on(&self) -> bool { self.overlay_state.sprite_grid_on() }
 
@@ -153,6 +159,10 @@ impl Controller {
                         self.camera.move_position(Vec2::hz(amount * self.camera.inv_scale()));
                     },
                 }
+            },
+
+            Action::CameraCenter(pos) => {
+                self.camera.position = pos;
             },
 
             Action::CameraScale(amount, relative_to) => {
