@@ -22,7 +22,7 @@ impl Controller {
 
     // Get output
     pub fn uniform(&self) -> viewport::ViewportDataUniform {
-        viewport::ViewportDataUniform::new(
+        let mut uniform = viewport::ViewportDataUniform::new(
             &self.light,
             &self.camera,
             &self.overlay_state,
@@ -30,6 +30,8 @@ impl Controller {
             &self.objects,
             self.tool.as_ref(),
             self.tool.transform_box(&self.objects),
-        )
+        );
+        uniform.sprite_size = Vec2::new(self.sprite_size.0 as f32, self.sprite_size.1 as f32);
+        uniform
     }
 }

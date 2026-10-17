@@ -15,10 +15,6 @@ pub const ROTATE_TOLERANCE: f32 = 15.0;
 /// Increment in radians that rotation snaps to while holding ctrl
 pub const ROTATE_SNAP: f32 = 5.0 * std::f32::consts::PI / 180.0;
 
-/// Size in pixels of the grid that dragging snaps to while holding ctrl.
-/// This will be replaced with a user setting in the future.
-const GRID_SIZE: u32 = 1;
-
 /// tan(22.5 degrees), the slope that splits orthagonal from diagonal when snapping directions.
 const TAN_HALF_OCTANT: f32 = 0.414_213_56;
 
@@ -40,8 +36,8 @@ pub fn enforce_handle_length(handle: Vec2, fallback: Vec2) -> Vec2 {
 /// Apply the drag modifiers to the target position of whatever is being dragged.
 /// `start` is where the target was when the drag began, and `origin` is where the mouse was.
 /// SHIFT: snap movement to horizontal, vertical, or diagonal, whichever is closest to the direction moved
-/// CTRL: snap to the grid (see GRID_SIZE)
-pub fn snap_drag_target(mut target: Vec2, start: Vec2, origin: Vec2, pos: Vec2, modifiers: InputModifiers) -> Vec2 {
+/// CTRL: snap to a grid of `grid` pixels
+pub fn snap_drag_target(mut target: Vec2, start: Vec2, origin: Vec2, pos: Vec2, modifiers: InputModifiers, grid: f32) -> Vec2 {
     // Shift: only move orthagonally/diagonally
     if modifiers.shift {
         let delta = pos - origin;
@@ -61,14 +57,13 @@ pub fn snap_drag_target(mut target: Vec2, start: Vec2, origin: Vec2, pos: Vec2, 
 
     // Ctrl: snap to the grid
     if modifiers.ctrl {
-        target = snap_to_grid(target);
+        target = snap_to_grid(target, grid);
     }
     target
 }
 
-/// Round a position to the nearest point on the grid (see GRID_SIZE)
-pub fn snap_to_grid(pos: Vec2) -> Vec2 {
-    let grid = GRID_SIZE as f32;
+/// Round a position to the nearest point on a grid of `grid` pixels
+pub fn snap_to_grid(pos: Vec2, grid: f32) -> Vec2 {
     Vec2::new((pos.x / grid).round() * grid, (pos.y / grid).round() * grid)
 }
 
@@ -216,5 +211,20 @@ mod tests {
         assert_eq!((zone_id, point_id), (0, 0));
         assert!(corrected.distance(Vec2::new(5.0, 0.0)) < 1e-3);
         assert!(get_clicked_zone_path(&state(&objects), Vec2::new(5.0, -20.0)).unwrap().is_none());
+    }
+
+    /// Positions snap to the nearest point on a grid of the given size
+    #[test]
+    fn snap_to_grid_sizes() {
+        assert_eq!(snap_to_grid(Vec2::new(5.4, 6.6), 1.0), Vec2::new(5.0, 7.0));
+        assert_eq!(snap_to_grid(Vec2::new(5.0, 6.1), 4.0), Vec2::new(4.0, 8.0));
+        assert_eq!(snap_to_grid(Vec2::new(-9.0, 25.0), 16.0), Vec2::new(-16.0, 32.0));
+    }
+
+    /// Ctrl snaps a drag target to the grid it is given
+    #[test]
+    fn snap_drag_target_grid() {
+        let target = snap_drag_target(Vec2::new(13.0, 2.0), Vec2::ZERO, Vec2::ZERO, Vec2::new(13.0, 2.0), InputModifiers::ctrl(), 8.0);
+        assert_eq!(target, Vec2::new(16.0, 0.0));
     }
 }

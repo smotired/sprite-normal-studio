@@ -35,7 +35,7 @@ struct Params {
     // 10: If a shape tool is selected, so the active zone's shape vertices get knobs
     // 11: If a path of shapes is being drawn, so a ghost line joins its latest vertex to the cursor
     // 12: If the selected group of shapes has radius knobs, which only happens along with 10
-    // 13: 
+    // 13: If the lines between the sprites the spritesheet is sliced into are drawn
     // 14: 
     // 15: 
     // 16: 
@@ -104,6 +104,12 @@ struct Params {
 
     // The selected group's outer radius knob. Only drawn if flag 12 is set.
     outer_knob: vec2<f32>,
+
+    // Width and height of each sprite the spritesheet is sliced into. Lines between them are drawn if flag 13 is set.
+    sprite_size: vec2<f32>,
+
+    // Pads the struct to a multiple of 16 bytes
+    _padding_3: vec2<f32>,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 

@@ -268,4 +268,29 @@ mod tests {
         assert_eq!(objects.object_counts(), (0, 0));
         assert_eq!(tool.creating_path(), None);
     }
+
+    /// Holding an arrow key repeats nudges that continue the first one, so they are undone at once
+    #[test]
+    fn held_nudge_is_one_entry() {
+        use super::super::tools::SpecialAction;
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::select(&[0], state(&objects));
+        let mut history = History::default();
+
+        for repeat in [false, true, true] {
+            let action = SpecialAction::SelectionNudged(Vec2::new(2.0, 0.0), repeat);
+            run(&mut history, &mut tool, &objects, action.drag_step(), |tool, state| tool.handle_special_action(state, action));
+        }
+        let action = SpecialAction::SelectionNudged(Vec2::new(0.0, 1.0), false);
+        run(&mut history, &mut tool, &objects, action.drag_step(), |tool, state| tool.handle_special_action(state, action));
+        history.close(&objects, tool.as_ref());
+        assert_eq!(history.undo.len(), 2);
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(16.0, 11.0));
+
+        history.undo(&objects, &mut tool).unwrap();
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(16.0, 10.0));
+        history.undo(&objects, &mut tool).unwrap();
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
+    }
 }

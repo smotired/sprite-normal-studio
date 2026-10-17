@@ -81,7 +81,7 @@ impl EditorTool for EditorToolShapePen {
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: Vec2, modifiers: InputModifiers) -> ToolResult {
         // Move the vertex that was just added. The path doesn't affect normals yet, so nothing is stale.
         if let Some(vertex_id) = self.new_vertex {
-            let pos = if modifiers.shift { utils::snap_to_grid(pos) } else { pos };
+            let pos = if modifiers.shift { utils::snap_to_grid(pos, state.grid_size) } else { pos };
             state.objects.set_vertex_position(vertex_id, pos)?;
             self.ghost = Some(pos);
         }
@@ -176,7 +176,7 @@ impl EditorToolShapePen {
             Some(vertex_id) if self.path.contains(&vertex_id) => anyhow::bail!("The path already uses that vertex!"),
             Some(vertex_id) => vertex_id,
             None => {
-                let pos = if modifiers.shift { utils::snap_to_grid(pos) } else { pos };
+                let pos = if modifiers.shift { utils::snap_to_grid(pos, state.grid_size) } else { pos };
                 let vertex_id = state.objects.add_shape_vertex(zone_id, pos)?;
                 self.new_vertex = Some(vertex_id);
                 vertex_id

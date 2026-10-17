@@ -156,7 +156,7 @@ impl EditorTool for EditorToolPoint {
         // Or if we are dragging points, move them all together. Moving points also moves their siblings, but each one is only moved once.
         else if let (Some(origin), Some(anchor)) = (self.drag_origin, self.drag_anchor) {
             if self.selected_points.is_empty() { return self.ok(); }
-            let target = utils::snap_drag_target(anchor + (pos - origin), anchor, origin, pos, modifiers);
+            let target = utils::snap_drag_target(anchor + (pos - origin), anchor, origin, pos, modifiers, state.grid_size);
             let offset = target - anchor;
             let before = state.objects.bounds_around_points(&self.selected_points)?;
             state.objects.move_points(&self.selected_points[..], offset - self.drag_offset)?;
@@ -316,6 +316,16 @@ impl EditorTool for EditorToolPoint {
                 self.stop_dragging();
                 let before = state.objects.bounds_around_points(&self.selected_points)?;
                 self.selected_points = state.objects.merge_points(&self.selected_points)?;
+                self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&self.selected_points)?))
+            },
+
+            // Arrow keys don't fight the mouse over a drag in progress. Shapes in the zones around the points follow their paths.
+            SpecialAction::SelectionNudged(delta, _) => {
+                if self.drag_origin.is_some() || self.handle.is_some() || self.selection_origin.is_some() { return self.ok(); }
+                let warp = state.objects.begin_shape_warp(&state.objects.zones_around_points(&self.selected_points)?)?;
+                let before = state.objects.bounds_around_points(&self.selected_points)?;
+                state.objects.move_points(&self.selected_points, delta)?;
+                state.objects.apply_shape_warp(&warp)?;
                 self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&self.selected_points)?))
             },
 
@@ -1293,5 +1303,26 @@ mod tests {
         let mut tool = EditorToolPoint::select(&[2], state(&objects));
         tool.handle_select_all(state(&objects)).unwrap();
         assert_eq!(sorted(tool.selection()), (0..7).collect::<Vec<u16>>());
+    }
+
+    /// Nudging moves the selected points by the delta and warps the shapes in their zones, but not in the middle of a drag
+    #[test]
+    fn special_nudge() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let vertex = objects.add_shape_vertex(0, Vec2::new(8.0, 8.0)).unwrap();
+        objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+        let mut tool = EditorToolPoint::select(&[2], state(&objects));
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::SelectionNudged(Vec2::new(4.0, 4.0), false)).unwrap();
+        assert!(result.normals_stale.is_some());
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(14.0, 14.0));
+        assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(0.0, 0.0));
+        let warped = objects.get_vertex_info(vertex).unwrap().position();
+        assert!(warped.x > 8.0 && warped.y > 8.0, "{warped}");
+
+        tool.handle_drag_start(state(&objects), Vec2::new(14.0, 14.0), Default::default()).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionNudged(Vec2::new(4.0, 4.0), true)).unwrap();
+        assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(14.0, 14.0));
     }
 }

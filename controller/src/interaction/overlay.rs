@@ -13,6 +13,9 @@ pub struct OverlayState {
 
     /// If shapes are drawn outside the shape tools, which always draw them
     shapes_on: bool,
+
+    /// If the lines between sprites are drawn
+    sprite_grid_on: bool,
 }
 
 impl OverlayState {
@@ -52,6 +55,9 @@ impl OverlayState {
                 if drawing_shapes { flags |= 1 << 11; }
             }
 
+            // 13: Lines between the sprites the spritesheet is sliced into
+            if self.sprite_grid_on { flags |= 1 << 13; }
+
             // 05: If the currently selected zone path should have its points drawn
             match tool {
                 EditorToolKind::Point | EditorToolKind::Pen => {
@@ -85,6 +91,10 @@ impl OverlayState {
 
     pub fn toggle_shapes(&mut self) { self.shapes_on = !self.shapes_on; }
 
+    pub fn sprite_grid_on(&self) -> bool { self.sprite_grid_on }
+
+    pub fn toggle_sprite_grid(&mut self) { self.sprite_grid_on = !self.sprite_grid_on; }
+
     pub fn toggle_overlay(&mut self) -> bool {
         if self.overlay_on {
             self.dragging_light = false;
@@ -106,6 +116,7 @@ impl Default for OverlayState {
             overlay_on: true,
             paths_on: true,
             shapes_on: false,
+            sprite_grid_on: true,
         }
     }
 }
@@ -121,15 +132,15 @@ mod tests {
     #[test]
     fn default_flags_zone_tool() {
         let tool = EditorToolZone::init();
-        assert_eq!(OverlayState::default().get_flags(tool.as_ref()), 0b0001_0111);
+        assert_eq!(OverlayState::default().get_flags(tool.as_ref()), 0b10_0000_0001_0111);
     }
 
     /// Point and pen tools also draw the points
     #[test]
     fn default_flags_point_tools() {
         let state = OverlayState::default();
-        assert_eq!(state.get_flags(EditorToolPoint::init().as_ref()), 0b0011_0111);
-        assert_eq!(state.get_flags(EditorToolPen::init().as_ref()), 0b0011_0111);
+        assert_eq!(state.get_flags(EditorToolPoint::init().as_ref()), 0b10_0000_0011_0111);
+        assert_eq!(state.get_flags(EditorToolPen::init().as_ref()), 0b10_0000_0011_0111);
     }
 
     /// With the overlay off, only shading flags are set
@@ -147,7 +158,7 @@ mod tests {
     #[test]
     fn light_flags() {
         let tool = EditorToolZone::init();
-        let mut state = OverlayState { lighting_on: false, normals_on: false, ..Default::default() };
+        let mut state = OverlayState { lighting_on: false, normals_on: false, sprite_grid_on: false, ..Default::default() };
         assert_eq!(state.get_flags(tool.as_ref()), 0b1_0000);
 
         state.dragging_light = true;
@@ -158,7 +169,7 @@ mod tests {
     #[test]
     fn path_and_shape_flags() {
         let tool = EditorToolZone::init();
-        let mut state = OverlayState::default();
+        let mut state = OverlayState { sprite_grid_on: false, ..Default::default() };
         assert!(state.paths_on() && !state.shapes_on());
 
         state.toggle_shapes();
@@ -170,6 +181,23 @@ mod tests {
         state.toggle_overlay();
         state.toggle_paths();
         assert_eq!(state.get_flags(tool.as_ref()), 0b11);
+    }
+
+    /// The sprite grid is on by default, can be toggled, and is only drawn with the overlay
+    #[test]
+    fn sprite_grid_flag() {
+        let tool = EditorToolZone::init();
+        let mut state = OverlayState::default();
+        assert!(state.sprite_grid_on());
+        assert_ne!(state.get_flags(tool.as_ref()) & (1 << 13), 0);
+
+        state.toggle_sprite_grid();
+        assert!(!state.sprite_grid_on());
+        assert_eq!(state.get_flags(tool.as_ref()) & (1 << 13), 0);
+
+        state.toggle_sprite_grid();
+        state.toggle_overlay();
+        assert_eq!(state.get_flags(tool.as_ref()) & (1 << 13), 0);
     }
 
     /// Toggling reports the new state, and turning the overlay off stops dragging the light

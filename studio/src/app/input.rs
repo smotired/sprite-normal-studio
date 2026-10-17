@@ -27,8 +27,11 @@ impl StudioApp {
     pub(super) fn process_app_input(&mut self, ui: &mut Ui, viewport_rect: Rect) {
         let Some(project) = self.projects.get_mut(self.current) else { return; };
         let controller = &mut project.controller;
+
+        // Arrow keys belong to a focused widget, like the sprite size fields, instead of moving the selection
+        let widget_focused = ui.ctx().memory(|m| m.focused().is_some());
         let clipboard_events = ui.input_mut(|i| {
-            for event in handle_app_input(controller, i, viewport_rect) {
+            for event in handle_app_input(controller, i, viewport_rect, widget_focused) {
                 controller.handle_action(event);
             }
 
@@ -85,7 +88,7 @@ fn paste_placement(shift: bool, mouse_world: Option<Vec2>) -> PastePlacement {
 }
 
 // Convert egui inputs into something our controller can use.
-fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport_rect: Rect) -> Box<dyn Iterator<Item = Action> + 'a> {
+fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport_rect: Rect, widget_focused: bool) -> Box<dyn Iterator<Item = Action> + 'a> {
     // Get movement constants
     let movement = |shift: bool| { if shift { 100.0 } else { 10.0 } };
     let scale = |shift: bool| { if shift { 2 } else { 1 } };
@@ -207,10 +210,25 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                         } else { Action::None }
                     },
 
-                    // Regenerate the whole normal map
+                    // Regenerate the whole normal map with ctrl, otherwise toggle the lines between sprites
                     Key::G => {
                         if pressed && !repeat && modifiers.ctrl {
                             Action::RegenerateNormals
+                        } else if pressed && !repeat && !modifiers.any() {
+                            Action::SpriteGridToggled
+                        } else { Action::None }
+                    },
+
+                    // Move the selection one grid space, or one pixel with ctrl, or one sprite with shift
+                    Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown => {
+                        if pressed && !widget_focused {
+                            let direction = match key {
+                                Key::ArrowLeft => Vec2::new(-1.0, 0.0),
+                                Key::ArrowRight => Vec2::new(1.0, 0.0),
+                                Key::ArrowUp => Vec2::new(0.0, -1.0),
+                                _ => Vec2::new(0.0, 1.0),
+                            };
+                            Action::Nudge(direction, modifiers.convert(), repeat)
                         } else { Action::None }
                     },
 

@@ -1,4 +1,5 @@
 pub mod loader;
+pub mod unity_meta;
 
 use std::path::{Path, PathBuf};
 use eframe::egui::{Align, Button, CursorIcon, Id, Layout, Rect, Response, RichText, Sense, Stroke, Ui, Vec2};

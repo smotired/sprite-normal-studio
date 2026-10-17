@@ -3,7 +3,8 @@ use std::path::Path;
 use controller::Controller;
 use eframe::egui;
 
-use crate::app::file::{self, loader::SpriteFileSelection};
+use crate::app::file::{self, loader::SpriteFileSelection, unity_meta};
+use crate::app::sidebar::grid::sprite_size_fields;
 use crate::app::workspace::{build_workspace_file, EXTENSION, NORMAL_LABEL, SPRITE_LABEL};
 use crate::app::{Project, StudioApp};
 
@@ -21,6 +22,9 @@ pub(super) struct NewProjectDialog {
     sprite: Option<SpriteFileSelection>,
     normal: Option<SpriteFileSelection>,
     error: Option<String>,
+
+    /// Width and height of each sprite the spritesheet is sliced into. Set when a spritesheet is picked.
+    sprite_size: (u32, u32),
 }
 
 /// What the user did with the dialog this frame
@@ -45,19 +49,32 @@ impl NewProjectDialog {
         });
         ui.add_space(8.0);
 
-        // Spritesheet, which also names the project if it has no name yet
+        // Spritesheet, which also names the project if it has no name yet.
+        // It's sliced like Unity slices it if there is a .meta file, and otherwise is one sprite.
         match file::pick_image(ui, "Spritesheet", true, &mut self.sprite, SPRITE_LABEL, rs, retired) {
             Ok(true) => {
                 let sprite = self.sprite.as_ref().unwrap();
                 if self.name.trim().is_empty() {
                     self.name = sprite.path().file_stem().unwrap_or_default().to_string_lossy().into_owned();
                 }
+                let sheet = sprite.size();
+                self.sprite_size = unity_meta::sprite_size(sprite.path())
+                    .map_or(sheet, |(width, height)| (width.min(sheet.0), height.min(sheet.1)));
                 self.error = None;
             },
             Ok(false) => {},
             Err(e) => self.error = Some(e),
         }
         file::preview(ui, self.sprite.as_ref(), "None selected");
+
+        // Sprite size, once there is a spritesheet to slice
+        if let Some(sprite) = &self.sprite {
+            ui.horizontal(|ui| {
+                ui.label("Sprite size");
+                let (width, height) = &mut self.sprite_size;
+                sprite_size_fields(ui, width, height, sprite.size());
+            });
+        }
         ui.add_space(8.0);
 
         // Base normal map, which is optional. Without one, the normal map starts flat.
@@ -139,8 +156,10 @@ impl StudioApp {
         let folder = sprite.path().parent().unwrap_or(Path::new(""));
         let path = folder.join(format!("{}.{EXTENSION}", dialog.name.trim()));
 
+        // The sprite size is fit to the spritesheet once it is loaded into the controller
         let mut controller = Controller::new(&self.render_state.device);
         controller.new_scene();
+        controller.set_sprite_size(dialog.sprite_size);
         let clean = build_workspace_file(&sprite, normal.as_ref(), None, controller.save_scene(), &path);
         self.add_project(ctx, Project { sprite, normal, path, saved: false, export_path: None, clean, dirty: true, controller });
 

@@ -24,7 +24,7 @@ use super::result::{ToolResult, DefaultResults};
 ///
 /// Dragging zones:
 /// SHIFT: snap movement to horizontal, vertical, or diagonal, whichever is closest to the direction moved
-/// CTRL: snap to the grid (see utils::GRID_SIZE)
+/// CTRL: snap to the grid (see the grid size setting)
 ///
 /// Dragging a selection box:
 /// Uses the same selection rules as above, applied against the selection from before the drag started.
@@ -107,7 +107,7 @@ struct TransformDrag {
 
 impl TransformDrag {
     /// Get the transform for the mouse being dragged to a position, from where the points were before the drag
-    fn update(&mut self, pos: Vec2, modifiers: InputModifiers) -> Affine2 {
+    fn update(&mut self, pos: Vec2, modifiers: InputModifiers, grid: f32) -> Affine2 {
         let (min, max) = self.bounds;
         let center = (min + max) * 0.5;
         let half = (max - min) * 0.5;
@@ -125,7 +125,7 @@ impl TransformDrag {
                 // Move the grabbed handle along with the mouse
                 let handle = handle_position(self.bounds, handle_x, handle_y);
                 let mut target = handle + (pos - self.origin);
-                if modifiers.ctrl { target = utils::snap_to_grid(target); }
+                if modifiers.ctrl { target = utils::snap_to_grid(target, grid); }
 
                 // Scale each axis so the handle reaches the target, keeping the opposite side (or the center) in place.
                 // Axes with no extent can't be scaled by a handle.
@@ -289,7 +289,7 @@ impl EditorTool for EditorToolZone {
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, modifiers: InputModifiers) -> ToolResult {
         // Transform the selected zones from where they started if we are dragging the transform box
         if let Some(drag) = self.transform.as_mut() {
-            let transform = drag.update(pos, modifiers);
+            let transform = drag.update(pos, modifiers, state.grid_size);
             let before = state.objects.bounds_around_points(&self.selected_points_reference)?;
             state.objects.apply_transform(&drag.snapshot, &transform)?;
             let after = state.objects.bounds_around_points(&self.selected_points_reference)?;
@@ -299,7 +299,7 @@ impl EditorTool for EditorToolZone {
         // Drag selected zones if we are doing that, moving the first point of the first zone to the target
         else if let (Some(reference_delta), Some(origin), Some(snapshot)) = (self.reference_delta, self.drag_origin, &self.drag_snapshot) {
             let start = origin - reference_delta;
-            let target = utils::snap_drag_target(pos - reference_delta, start, origin, pos, modifiers);
+            let target = utils::snap_drag_target(pos - reference_delta, start, origin, pos, modifiers, state.grid_size);
             return self.transform_from_snapshot(&mut state, snapshot, &Affine2::translate(target - start));
         }
         // Or if we are dragging a selection box, tentatively select the zones in the box
@@ -431,6 +431,11 @@ impl EditorTool for EditorToolZone {
             SpecialAction::SelectionRotated(clockwise) => {
                 let angle = if clockwise { std::f32::consts::FRAC_PI_2 } else { -std::f32::consts::FRAC_PI_2 };
                 self.transform_selected_zones(&mut state, |center| Affine2::rotate_about(angle, center))
+            },
+            // Arrow keys don't fight the mouse over a drag in progress
+            SpecialAction::SelectionNudged(delta, _) => {
+                if self.drag_snapshot.is_some() || self.transform.is_some() || self.selection_origin.is_some() { return self.ok(); }
+                self.transform_selected_zones(&mut state, |_| Affine2::translate(delta))
             },
             SpecialAction::ShapesCleared => {
                 let mut shape_ids = vec![];
@@ -1778,5 +1783,25 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
         tool.handle_paste(state(&objects), &copied, PastePlacement::At(Vec2::new(50.0, 50.0))).unwrap();
         assert_eq!(objects.get_point_info(4).unwrap().position(), Vec2::new(45.0, 45.0));
+    }
+
+    /// Nudging moves the selected zones and their shapes by the delta, but not in the middle of a drag
+    #[test]
+    fn special_nudge() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let vertex = objects.add_shape_vertex(0, Vec2::new(5.0, 5.0)).unwrap();
+        objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
+        let mut tool = EditorToolZone::select(&[0], state(&objects));
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::SelectionNudged(Vec2::new(16.0, -2.0), false)).unwrap();
+        assert!(result.normals_stale.is_some());
+        assert_eq!(position(&objects, 2), Vec2::new(26.0, 8.0));
+        assert_eq!(objects.get_vertex_info(vertex).unwrap().position(), Vec2::new(21.0, 3.0));
+        assert_eq!(tool.selection().len(), 4);
+
+        tool.handle_drag_start(state(&objects), Vec2::new(26.0, 8.0), Default::default()).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionNudged(Vec2::new(16.0, 0.0), true)).unwrap();
+        assert_eq!(position(&objects, 2), Vec2::new(26.0, 8.0));
     }
 }

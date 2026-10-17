@@ -1,4 +1,5 @@
 mod controls;
+pub(super) mod grid;
 mod utils;
 mod zone;
 mod point;
@@ -57,8 +58,13 @@ impl StudioApp {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         egui::Frame::new().inner_margin(margin).show(ui, |ui| {
-                            // Options for the selected tool
                             if let Some(project) = self.projects.get_mut(self.current) {
+                                // Settings that apply to every tool
+                                grid::show_grid_size(ui, &mut project.controller);
+                                grid::show_sprite_size(ui, &mut project.controller);
+                                ui.separator();
+
+                                // Options for the selected tool
                                 self.tool_sidebars.get(project.controller.selected_tool()).ui(ui, &mut project.controller);
                             }
                         });

@@ -1,4 +1,5 @@
 mod generator;
+mod grid;
 mod interaction;
 mod objects;
 mod assignment;
@@ -20,6 +21,7 @@ pub use crate::interaction::tools::{EditorToolKind, EditorChange, PastePlacement
 pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects, ShapeParams, ShapeParamChange, ShapeProfile};
 pub use crate::save::SavedScene;
 pub use crate::status::Status;
+pub use crate::grid::GRID_SIZES;
 use crate::objects::merge_bounds;
 
 /// The Controller manages our actual working pipeline.
@@ -62,6 +64,15 @@ pub struct Controller {
 
     /// The params new shapes get. Kept here so every shape tool uses the same ones.
     shape_defaults: ShapeParams,
+
+    /// Size in pixels of the grid that ctrl snaps to and the arrow keys move by. One of GRID_SIZES.
+    grid_size: u32,
+
+    /// Width and height of each sprite the spritesheet is sliced into. (0, 0) until set, which becomes the whole spritesheet.
+    sprite_size: (u32, u32),
+
+    /// Width and height of the spritesheet, or (0, 0) until one is set. The assigner's output has a placeholder size until then.
+    sheet_size: (u32, u32),
 }
 
 impl Controller {
@@ -96,6 +107,9 @@ impl Controller {
             status: Status::Ok,
             history: History::default(),
             shape_defaults: ShapeParams::default(),
+            grid_size: GRID_SIZES[0],
+            sprite_size: (0, 0),
+            sheet_size: (0, 0),
         }
     }
     
@@ -111,6 +125,11 @@ impl Controller {
         self.assigner.set_inputs(device, sprite, object_buffers.clone());
         self.generator.set_inputs(device, normal, self.assigner.output(), object_buffers.clone());
         self.normals_stale = Some((Vec2::ZERO, self.assigner.size()));
+
+        // Keep the sprite size if it was already set, but make sure it still fits in the spritesheet
+        let size = self.assigner.size();
+        self.sheet_size = (size.x as u32, size.y as u32);
+        self.set_sprite_size(self.sprite_size);
 
         // Recenter the camera and the light by adding a fake input (maybe not a good idea but icbatgetslftmoas </3)
         self.handle_action(Action::Recenter);

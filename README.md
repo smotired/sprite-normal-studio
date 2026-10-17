@@ -115,10 +115,11 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 
 ### Phase VI - Extra Features
+*10/17/26 - present*
 
 ```
-[ ] Slicing the grid into individual sprites, and displaying the grid
-[ ] Copy/paste/move with sprite-level intervals
+[x] Slicing the grid into individual sprites, and displaying the grid
+[x] Copy/paste/move with sprite-level intervals
 [ ] Timeline panel where sprites can easily be added
 [ ] Display looping lit animation
 [ ] Layer management, including temporarily disabling them.

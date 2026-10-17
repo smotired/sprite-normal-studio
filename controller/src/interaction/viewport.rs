@@ -73,6 +73,13 @@ pub struct ViewportDataUniform {
 
     // The selected group's outer radius knob. Only drawn if overlay flag 12 is set.
     pub outer_knob: Vec2,
+
+    // Width and height of each sprite the spritesheet is sliced into. Lines between them are drawn if overlay flag 13 is set.
+    // Set by the controller, since it isn't part of the overlay state.
+    pub sprite_size: Vec2,
+
+    // Pads the struct to a multiple of 16 bytes, like the shader expects
+    _padding_3: Vec2,
 }
 
 /// Stands in for a zone or shape ID in the uniform when there is none. IDs only go up to 65535.
@@ -138,6 +145,8 @@ impl ViewportDataUniform {
             },
             inner_knob: knobs.map_or(Vec2::ZERO, |knobs| knobs.inner),
             outer_knob: knobs.map_or(Vec2::ZERO, |knobs| knobs.outer),
+            sprite_size: Vec2::ZERO,
+            _padding_3: Vec2::ZERO,
         }
     }
 
@@ -236,5 +245,8 @@ mod tests {
     fn bytes() {
         let uniform = ViewportDataUniform { zone_count: 1, ..Default::default() };
         assert_eq!(uniform.bytes().len(), std::mem::size_of::<ViewportDataUniform>());
+
+        // Uniform structs in WGSL are padded to 16 bytes
+        assert_eq!(std::mem::size_of::<ViewportDataUniform>() % 16, 0);
     }
 }

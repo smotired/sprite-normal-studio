@@ -52,6 +52,9 @@ pub struct ControllerStateInput {
 
     // Params that new shapes get
     pub shape_defaults: ShapeParams,
+
+    // Size in pixels of the grid that ctrl snaps to
+    pub grid_size: f32,
 }
 
 pub type SelectionType<'a> = &'a [u16]; // slice of vector of selected points
@@ -125,12 +128,16 @@ pub enum SpecialAction {
 
     /// Zone: remove every shape from the selected zones.
     ShapesCleared,
+
+    /// Zone, Point: move the selected points by a world space delta. Shape: move the selected shape vertices.
+    /// The bool is true if this continues a held key, so holding an arrow key is one undoable change.
+    SelectionNudged(Vec2, bool),
 }
 
 impl SpecialAction {
     /// How this action relates to a drag. Continuing to set a value continues the drag, everything else starts something new.
     pub fn drag_step(&self) -> DragStep {
-        if matches!(self, Self::NormalSet(_, true) | Self::ShapeParamSet(_, true)) { DragStep::Continue } else { DragStep::None }
+        if matches!(self, Self::NormalSet(_, true) | Self::ShapeParamSet(_, true) | Self::SelectionNudged(_, true)) { DragStep::Continue } else { DragStep::None }
     }
 }
 
@@ -500,6 +507,7 @@ impl Controller {
             objects: self.objects.clone(),
             camera_inv_scale: self.camera.inv_scale(),
             shape_defaults: self.shape_defaults,
+            grid_size: self.grid_size as f32,
         }
     }
 }
@@ -591,7 +599,7 @@ pub(super) mod test_utils {
 
     /// Create the input state for a tool with a specific inverse camera scale
     pub(super) fn state_scaled(objects: &ObjectBuffers, camera_inv_scale: f32) -> ControllerStateInput {
-        ControllerStateInput { mouse: Vec2::ZERO, objects: objects.clone(), camera_inv_scale, shape_defaults: crate::objects::ShapeParams::default() }
+        ControllerStateInput { mouse: Vec2::ZERO, objects: objects.clone(), camera_inv_scale, shape_defaults: crate::objects::ShapeParams::default(), grid_size: 1.0 }
     }
 }
 

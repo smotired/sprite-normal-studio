@@ -26,6 +26,7 @@ const NORMAL_MAP: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key
 const OVERLAY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::O);
 const PATHS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::H);
 const SHAPES: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::J);
+const SPRITE_GRID: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::G);
 const RESET_NORMAL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::Z);
 const MERGE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::M);
 const DETACH: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::K);
@@ -194,6 +195,7 @@ impl StudioApp {
         for (label, shortcut, enabled, checked, action) in [
             ("Paths", PATHS, overlay_on, paths_on, Action::PathsToggled),
             ("Shapes", SHAPES, overlay_on && paths_on, controller.shapes_on(), Action::ShapesToggled),
+            ("Sprite Grid", SPRITE_GRID, overlay_on, controller.sprite_grid_on(), Action::SpriteGridToggled),
         ] {
             if menu_item(ui, label, Some(shortcut), enabled, Some(checked)) {
                 *clicked = Some(MenuAction::Controller(action));

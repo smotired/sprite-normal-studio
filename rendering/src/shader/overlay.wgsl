@@ -30,6 +30,36 @@ fn overlay_selection_box(
 }
 
 /***********************************/
+/*      SPRITE GRID OVERLAY        */
+/***********************************/
+
+const SPRITE_GRID_COLOR = vec4<f32>(0.3, 0.7, 1.0, 0.5); // Color of the lines between sprites
+
+fn overlay_sprite_grid(
+    color: vec3<f32>,   // Base color below this part of the overlay
+    pos: vec2<f32>,     // World-space position of this pixel
+) -> vec3<f32> {        // Returns new color after adding the lines between sprites
+    let sheet = vec2<f32>(textureDimensions(sprite));
+    let cell = params.sprite_size;
+
+    // Nothing to draw if there is only one sprite, or outside the spritesheet
+    if (cell.x <= 0.0 || cell.y <= 0.0 || (cell.x >= sheet.x && cell.y >= sheet.y)) {
+        return color;
+    }
+    if (pos.x < 0.0 || pos.y < 0.0 || pos.x > sheet.x || pos.y > sheet.y) {
+        return color;
+    }
+
+    // Distance in world space to the closest line on each axis. Lines are one screen point wide.
+    let offset = pos - round(pos / cell) * cell;
+    let half_width = 0.5 * params.inv_scale;
+    if (abs(offset.x) <= half_width || abs(offset.y) <= half_width) {
+        return mix(color, SPRITE_GRID_COLOR.rgb, SPRITE_GRID_COLOR.a);
+    }
+    return color;
+}
+
+/***********************************/
 /*         LIGHTS OVERLAY          */
 /***********************************/
 
@@ -462,6 +492,11 @@ fn overlay_color(
 ) -> vec3<f32> {              // Returns pixel color from overlay
     // Render the overlay layer by layer.
     var color = start_color;
+
+    // Lines between sprites, below everything else
+    if (flag(13)) {
+        color = overlay_sprite_grid(color, pos);
+    }
 
     // Shapes, below the zone paths
     if (flag(9)) {

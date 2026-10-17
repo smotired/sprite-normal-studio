@@ -27,7 +27,8 @@ const FORMAT: &str = "sprite-normal-studio";
 /// - Version 3: Made the base normal map path optional (null for a flat normal map), and added the export path.
 /// - Version 4: Added shapes and shape vertices to zones. Zones in older files have no shapes.
 /// - Version 5: Added a group to each shape. Shapes in version 4 files each get a group of their own.
-const VERSION: u32 = 5;
+/// - Version 6: Added the slice size, the size of each sprite in the spritesheet. Older files use the whole spritesheet as one sprite.
+const VERSION: u32 = 6;
 
 /// Extension of workspace files
 pub(super) const EXTENSION: &str = "sns";
@@ -373,7 +374,7 @@ impl StudioApp {
         // Loading the scene resets the light, then adding the project centers it on the spritesheet.
         // The file as it was read is what's on disk, so images picked somewhere else count as unsaved changes.
         let mut controller = Controller::new(&self.render_state.device);
-        controller.load_scene(pending.objects);
+        controller.load_scene(pending.objects, pending.file.scene.slice_size);
         let project = Project {
             sprite,
             normal,
@@ -667,6 +668,19 @@ mod tests {
         let file = read_workspace(&json).unwrap();
         let again = read_workspace(&serde_json::to_string_pretty(&file).unwrap()).unwrap();
         assert_eq!(file, again);
+    }
+
+    /// Version 5 files have no slice size, so the whole spritesheet is one sprite. Version 6 files keep theirs.
+    #[test]
+    fn read_slice_size() {
+        let file = read_workspace(&workspace_json(FORMAT, 5)).unwrap();
+        assert_eq!(file.scene.slice_size, None);
+
+        let mut json: serde_json::Value = serde_json::from_str(&workspace_json(FORMAT, 6)).unwrap();
+        json["slice_size"] = serde_json::json!([16, 32]);
+        let file = read_workspace(&json.to_string()).unwrap();
+        assert_eq!(file.scene.slice_size, Some((16, 32)));
+        assert_eq!(read_workspace(&serde_json::to_string_pretty(&file).unwrap()).unwrap(), file);
     }
 
     /// Newer versions and other formats are rejected

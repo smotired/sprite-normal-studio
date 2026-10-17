@@ -99,6 +99,13 @@ pub enum Action {
     /// An action from the UI that the selected tool handles in its own way.
     Special(SpecialAction),
 
+    /// An arrow key is pressed: move the selection in a direction (a unit vector), by a step that depends on the modifiers.
+    /// The bool is true if the key is being held and repeating.
+    Nudge(Vec2, InputModifiers, bool),
+
+    /// The lines between sprites in the overlay are toggled on or off
+    SpriteGridToggled,
+
     /// Lighting/shading is toggled.
     /// If none, toggle both. If true, toggling lighting, otherwise toggling normal.
     LightingToggled(Option<bool>),
@@ -124,6 +131,9 @@ impl Controller {
 
     /// If shapes are shown in the overlay outside the shape tools
     pub fn shapes_on(&self) -> bool { self.overlay_state.shapes_on() }
+
+    /// If the lines between sprites are shown in the overlay
+    pub fn sprite_grid_on(&self) -> bool { self.overlay_state.sprite_grid_on() }
 
     // Handle different actions from the UI
     pub fn handle_action(&mut self, action: Action) {
@@ -273,6 +283,15 @@ impl Controller {
 
             Action::Special(action) => {
                 self.run_special_action(action);
+            },
+
+            Action::Nudge(direction, modifiers, repeat) => {
+                let delta = self.nudge_delta(direction, modifiers);
+                self.run_special_action(SpecialAction::SelectionNudged(delta, repeat));
+            },
+
+            Action::SpriteGridToggled => {
+                self.overlay_state.toggle_sprite_grid();
             },
 
             Action::None => { },

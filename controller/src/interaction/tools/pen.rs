@@ -129,7 +129,7 @@ impl EditorTool for EditorToolPen {
             // Ctrl snaps the end of the handle to the grid, otherwise shift snaps its direction
             let snap_modifiers = if modifiers.ctrl { InputModifiers::ctrl() } else if modifiers.shift { InputModifiers::shift() } else { InputModifiers::none() };
             let handle_end = point_pos + handle;
-            let handle = utils::snap_drag_target(handle_end, point_pos, point_pos, handle_end, snap_modifiers) - point_pos;
+            let handle = utils::snap_drag_target(handle_end, point_pos, point_pos, handle_end, snap_modifiers, state.grid_size) - point_pos;
 
             let current = if self.handle.unwrap() { point.right_handle() } else { point.left_handle() } - point_pos;
             let handle = utils::enforce_handle_length(handle, current);
@@ -314,7 +314,7 @@ impl EditorToolPen {
     /// Helper method to handle creating a point. Used by both handle_click and handle_drag_start.
     fn handle_create_point(&mut self, mut state: ControllerStateInput, pos: studio_math::Vec2, dragging: bool, modifiers: InputModifiers) -> ToolResult {
         // Shift snaps newly added points to the grid
-        let new_point_pos = if modifiers.shift { utils::snap_to_grid(pos) } else { pos };
+        let new_point_pos = if modifiers.shift { utils::snap_to_grid(pos, state.grid_size) } else { pos };
 
         // If we have a zone selected, we are already creating one, so add a linear node
         if let Some(zone_id) = self.creating_zone {

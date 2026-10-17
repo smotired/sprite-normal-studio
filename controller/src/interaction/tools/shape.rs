@@ -205,7 +205,7 @@ impl EditorTool for EditorToolShape {
     fn handle_dragging_to(&mut self, mut state: ControllerStateInput, pos: Vec2, modifiers: InputModifiers) -> ToolResult {
         match self.drag.clone() {
             Some(ShapeDrag::Move { origin, start, originals }) => {
-                let target = utils::snap_drag_target(start + (pos - origin), start, origin, pos, modifiers);
+                let target = utils::snap_drag_target(start + (pos - origin), start, origin, pos, modifiers, state.grid_size);
                 let delta = target - start;
                 let vertex_ids: Vec<u16> = originals.iter().map(|&(vertex_id, _)| vertex_id).collect();
                 let shape_ids = state.objects.shapes_using_vertices(&vertex_ids)?;
@@ -320,6 +320,15 @@ impl EditorTool for EditorToolShape {
                 self.selected_vertices = vec![merged];
                 let after = state.objects.shapes_reach_bounds(&state.objects.shapes_using_vertices(&[merged])?)?;
                 self.stale_in(merge_bounds(before, after))
+            },
+
+            // Arrow keys don't fight the mouse over a drag in progress
+            SpecialAction::SelectionNudged(delta, _) => {
+                if self.drag.is_some() || self.selected_vertices.is_empty() { return self.ok(); }
+                let shape_ids = state.objects.shapes_using_vertices(&self.selected_vertices)?;
+                let before = state.objects.shapes_reach_bounds(&shape_ids)?;
+                state.objects.move_shape_vertices(&self.selected_vertices, delta)?;
+                self.stale_in(merge_bounds(before, state.objects.shapes_reach_bounds(&shape_ids)?))
             },
 
             // Detaching doesn't move anything, so no normals change
@@ -740,5 +749,22 @@ mod tests {
         let mut tool = tool(&objects);
         tool.handle_select_all(state(&objects)).unwrap();
         assert_eq!(tool.shape_selection(), &[0, 1, 2]);
+    }
+
+    /// Nudging moves the selected shape vertices by the delta, but not in the middle of a drag
+    #[test]
+    fn special_nudge() {
+        let objects = sample();
+        let mut tool = tool(&objects);
+        tool.handle_click(state(&objects), Vec2::new(65.0, 50.0), IM::none()).unwrap();
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::SelectionNudged(Vec2::new(8.0, 0.0), false)).unwrap();
+        assert!(result.normals_stale.is_some());
+        assert_eq!(objects.shape_positions(1).unwrap(), vec![Vec2::new(58.0, 50.0), Vec2::new(88.0, 50.0)]);
+        assert_eq!(objects.shape_positions(0).unwrap(), vec![Vec2::new(20.0, 20.0)]);
+
+        tool.handle_drag_start(state(&objects), Vec2::new(70.0, 50.0), IM::none()).unwrap();
+        tool.handle_special_action(state(&objects), SpecialAction::SelectionNudged(Vec2::new(8.0, 0.0), true)).unwrap();
+        assert_eq!(objects.shape_positions(1).unwrap(), vec![Vec2::new(58.0, 50.0), Vec2::new(88.0, 50.0)]);
     }
 }
