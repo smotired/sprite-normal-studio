@@ -297,19 +297,15 @@ impl StudioApp {
     fn show_project(&mut self, ui: &mut egui::Ui, modal_open: bool) {
         // Side panels must be shown before the central panel, left to right, then the status bar below the workspace
         self.show_sidebar(ui);
-        let toolbar_response = self.show_toolbar(ui);
-        let status_response = self.show_status_bar(ui);
-        let bottom = match self.timeline_open {
-            true => self.show_timeline(ui).rect.min.y,
-            false => status_response.rect.min.y,
-        };
+        self.show_toolbar(ui);
+        self.show_status_bar(ui);
+        if self.timeline_open {
+            self.show_timeline(ui);
+        }
 
-        // The rest of the space will now be taken up by the editor
-        let full_rect = ui.max_rect();
-        let viewport_rect = egui::Rect::from_min_max(
-            egui::Pos2::new(toolbar_response.rect.max.x, full_rect.min.y),
-            egui::Pos2::new(full_rect.max.x, bottom),
-        );
+        // Each panel takes its space from the window, so the space left is exactly where the editor goes,
+        // below the menu and tab bars and above the status bar and timeline
+        let viewport_rect = ui.available_rect_before_wrap();
 
         // Handle app-level input events, unless a dialog is open and should get them instead
         if !modal_open {
