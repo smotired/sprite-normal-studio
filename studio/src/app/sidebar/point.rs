@@ -43,7 +43,7 @@ impl ToolSidebar for PointSidebar {
                     ui.label("Feather");
                     let mut width = feather;
                     let response = ui.add(egui::DragValue::new(&mut width).range(0..=MAX_FEATHER).suffix(" px"))
-                        .on_hover_text("How far the zones on either side blend into each other across this edge");
+                        .on_hover_text("Blend adjacent zones (costly)");
                     if response.changed() && width != feather {
                         // Only the first change in a drag starts something new to undo
                         let continuing_drag = response.dragged() && !response.drag_started();

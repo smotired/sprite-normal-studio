@@ -97,7 +97,7 @@ fn check_size(path: &Path, rs: &RenderState) -> anyhow::Result<()> {
     let (width, height) = image::image_dimensions(path)?;
     let max = rs.device.limits().max_texture_dimension_2d;
     if width > max || height > max {
-        anyhow::bail!("The image is {width}x{height}, but this GPU can only use images up to {max}x{max}.");
+        anyhow::bail!("This GPU can only use images up to {max}x{max}.");
     }
     Ok(())
 }

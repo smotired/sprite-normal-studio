@@ -401,7 +401,7 @@ impl StudioApp {
         self.recent.mark_used(&pending.path);
 
         let sheet_warning = (size != saved_size).then(|| format!(
-            "The spritesheet is {}x{}, but was {}x{} when the workspace was saved. Zones may not line up with it.",
+            "The spritesheet is {}x{}, but was {}x{} when the workspace was saved.",
             size.0, size.1, saved_size.0, saved_size.1,
         ));
         let warnings: Vec<String> = sheet_warning.into_iter().chain(normal_warning).collect();
@@ -486,13 +486,13 @@ pub(super) fn build_workspace_file(
 /// Parse a workspace file, checking it is one this build can read
 fn read_workspace(json: &str) -> anyhow::Result<WorkspaceFile> {
     // Check the format and version first, so newer files give a clear error instead of a parse error
-    let header: serde_json::Value = serde_json::from_str(json).context("The file is not valid JSON")?;
+    let header: serde_json::Value = serde_json::from_str(json).context("The file is not valid JSON!")?;
     if header.get("format").and_then(|format| format.as_str()) != Some(FORMAT) {
-        anyhow::bail!("This is not a Sprite Normal Studio workspace file.");
+        anyhow::bail!("This is not a workspace file.");
     }
     let version = header.get("version").and_then(|version| version.as_u64()).context("The workspace file has no version")?;
     if version > VERSION as u64 {
-        anyhow::bail!("This workspace file is version {version}, but only version {VERSION} or older can be opened. Update Sprite Normal Studio to open it.");
+        anyhow::bail!("This workspace file is version {version}, but only version {VERSION} or older can be opened. You may need to update Sprite Normal Studio.");
     }
 
     serde_json::from_value(header).context("The workspace file is broken")

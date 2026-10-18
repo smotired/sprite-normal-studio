@@ -127,7 +127,6 @@ impl TimelineState {
         let Some(frame) = controller.animations_mut().get_mut(index).and_then(|animation| animation.frames.get_mut(frame_index)) else { return; };
         frame.origin = origin_of(cell, sprite_size);
         self.picking = false;
-        controller.set_feedback(format!("Frame {} shows column {}, row {}", frame_index + 1, cell.0, cell.1));
     }
 }
 
@@ -441,7 +440,7 @@ fn frame_strip(ui: &mut egui::Ui, state: &mut TimelineState, controller: &mut Co
                         } else if response.hovered() {
                             ui.painter().rect_stroke(rect, 2.0, visuals.widgets.hovered.bg_stroke, egui::StrokeKind::Inside);
                         }
-                        let label = egui::RichText::new(format!("{} ×{}", frame_index + 1, frame.hold));
+                        let label = egui::RichText::new(format!("{} x{}", frame_index + 1, frame.hold));
                         ui.label(if selected { label.strong().color(visuals.selection.stroke.color) } else { label });
 
                         if response.clicked() {
@@ -524,7 +523,7 @@ fn selected_frame_controls(ui: &mut egui::Ui, state: &mut TimelineState, control
         // Picking the sprite by clicking it in the workspace
         ui.separator();
         let pick = ui.add(egui::Button::selectable(state.picking, "Pick in Workspace"))
-            .on_hover_text("Click a sprite in the workspace to show it in this frame (I). Escape cancels.");
+            .on_hover_text("Click a sprite in the workspace (I).");
         if pick.clicked() {
             state.picking = !state.picking;
         }

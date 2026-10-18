@@ -22,19 +22,19 @@ impl StudioApp {
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
 
                     let Some(controller) = controller else { return; };
-                    tool_button(ui, controller, "Z", EditorToolKind::Zone);
-                    tool_button(ui, controller, "P", EditorToolKind::Point);
-                    tool_button(ui, controller, "A", EditorToolKind::Pen);
-                    tool_button(ui, controller, "S", EditorToolKind::Shape);
-                    tool_button(ui, controller, "D", EditorToolKind::ShapePen);
+                    tool_button(ui, controller, "Z", "Zone", EditorToolKind::Zone);
+                    tool_button(ui, controller, "P", "Point", EditorToolKind::Point);
+                    tool_button(ui, controller, "A", "Pen", EditorToolKind::Pen);
+                    tool_button(ui, controller, "S", "Shape", EditorToolKind::Shape);
+                    tool_button(ui, controller, "D", "Shape Pen", EditorToolKind::ShapePen);
                 });
             })
             .response
     }
 }
 
-/// A single square toolbar button that selects `kind` when clicked
-fn tool_button(ui: &mut egui::Ui, controller: &mut Controller, label: &str, kind: EditorToolKind) {
+/// A single square toolbar button that selects `kind` when clicked, with `tooltip` on hover
+fn tool_button(ui: &mut egui::Ui, controller: &mut Controller, label: &str, tooltip: &str, kind: EditorToolKind) {
     let selected_color = egui::Color32::DARK_GRAY;
     let default_color = egui::Color32::TRANSPARENT;
 
@@ -43,7 +43,7 @@ fn tool_button(ui: &mut egui::Ui, controller: &mut Controller, label: &str, kind
         egui::Button::new(label)
             .corner_radius(0)
             .fill(if controller.selected_tool() == kind { selected_color } else { default_color })
-    ).clicked() {
+    ).on_hover_text(tooltip).clicked() {
         controller.select_tool(kind);
     }
 }

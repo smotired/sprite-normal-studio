@@ -37,7 +37,7 @@ impl RelinkDialog {
     fn ui(&mut self, ui: &mut egui::Ui, rs: &eframe::egui_wgpu::RenderState, retired: &mut Vec<SpriteFileSelection>) -> DialogAction {
         ui.set_width(WIDTH);
         ui.heading("Missing Files");
-        ui.add(egui::Label::new("Some files used in the workspace couldn't be loaded. Pick where they are now.").wrap());
+        ui.add(egui::Label::new("Some files used in the workspace couldn't be loaded. Locate these files.").wrap());
         ui.add_space(8.0);
 
         // Spritesheet
@@ -59,7 +59,7 @@ impl RelinkDialog {
         file::preview(ui, self.normal.as_ref(), if self.normal_missing { "None selected" } else { file::FLAT_NORMAL_TEXT });
         if self.normal_missing {
             let flat = file::right_aligned_button(ui, "Create flat normal map")
-                .on_hover_text("Start from a flat normal map instead, with no base normal map file");
+                .on_hover_text("Start from a blank slate.");
             if flat.clicked() {
                 self.normal_missing = false;
             }

@@ -118,7 +118,7 @@ impl StudioApp {
             *clicked = Some(MenuAction::LoadNormalMap);
         }
         let has_base_normals = self.project().is_some_and(|project| project.normal.is_some());
-        if menu_item(ui, "Reset Base Normals", None, has_base_normals, None) {
+        if menu_item(ui, "Clear Base Normals", None, has_base_normals, None) {
             *clicked = Some(MenuAction::ResetBaseNormals);
         }
     }

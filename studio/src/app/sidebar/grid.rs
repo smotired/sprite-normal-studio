@@ -36,7 +36,7 @@ pub(super) fn show_sprite_size(ui: &mut egui::Ui, controller: &mut Controller) {
 /// Fields for a sprite's width and height, each from 1 pixel up to the spritesheet's size. Returns true if either changed.
 pub(crate) fn sprite_size_fields(ui: &mut egui::Ui, width: &mut u32, height: &mut u32, (sheet_width, sheet_height): (u32, u32)) -> bool {
     let width_changed = ui.add(egui::DragValue::new(width).range(1..=sheet_width.max(1)).suffix(" px")).changed();
-    ui.label("×");
+    ui.label("x");
     let height_changed = ui.add(egui::DragValue::new(height).range(1..=sheet_height.max(1)).suffix(" px")).changed();
     width_changed || height_changed
 }

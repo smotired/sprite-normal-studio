@@ -165,7 +165,7 @@ impl ObjectsHandle {
             let points = &self.points.borrow().items;
             let (left_root, _) = ControlPoint::get_sync_id(point_id, false, points)?;
             let (right_root, _) = ControlPoint::get_sync_id(point_id, true, points)?;
-            if left_root != right_root { anyhow::bail!("Can't change the handle mode of a point whose handles sync to different points!"); }
+            if left_root != right_root { anyhow::bail!("Can't change the handle mode of this point, try a sibling."); }
             left_root
         };
 

@@ -123,7 +123,7 @@ pub fn normal_size_warning(sprite: &SpriteFileSelection, normal: Option<&SpriteF
 /// The text of the warning for a base normal map whose size doesn't match the spritesheet
 fn size_mismatch_text(sprite: (u32, u32), normal: (u32, u32)) -> Option<String> {
     (sprite != normal).then(|| format!(
-        "The base normal map is {}x{}, but the spritesheet is {}x{}. It's only used where they overlap, and the rest is flat.",
+        "The base normal map is {}x{}, but the spritesheet is {}x{}.",
         normal.0, normal.1, sprite.0, sprite.1,
     ))
 }

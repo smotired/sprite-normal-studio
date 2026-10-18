@@ -121,7 +121,7 @@ impl StudioApp {
         self.retired_selections.push(normal);
         self.update_input_textures();
         if let Some(project) = self.project_mut() {
-            project.controller.set_feedback("Reset base normals to a flat normal map");
+            project.controller.set_feedback("Cleared base normal map");
         }
 
     }

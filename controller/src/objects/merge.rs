@@ -116,13 +116,13 @@ impl ObjectsHandle {
 
         // The run starts at the member that comes after a point that isn't merged
         let Some(&first) = members.iter().find(|&&point_id| !members.contains(&prev(point_id))) else {
-            anyhow::bail!("Can't merge points that have unselected points between them on a path!");
+            anyhow::bail!("Couldn't find a path to merge points.");
         };
         let mut run = vec![first];
         while members.contains(&next(*run.last().unwrap())) && run.len() < members.len() {
             run.push(next(*run.last().unwrap()));
         }
-        if run.len() != members.len() { anyhow::bail!("Can't merge points that have unselected points between them on a path!"); }
+        if run.len() != members.len() { anyhow::bail!("Couldn't find a path to merge points."); }
 
         // The kept point gets the outer handles of the run
         let first_info = self.get_point_info(first)?;

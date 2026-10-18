@@ -20,7 +20,7 @@ impl ToolSidebar for ShapeSidebar {
             (false, Some(zone_id), _) => ui.label(format!("Zone {zone_id}: drawing new shapes.")),
             (false, None, _) => ui.label("Drawing new shapes."),
             (true, None, _) => ui.label("Click a zone to edit its shapes."),
-            (true, Some(zone_id), 0) => ui.label(format!("Zone {zone_id}: no shapes selected. Editing values for new shapes.")),
+            (true, Some(zone_id), 0) => ui.label(format!("Zone {zone_id}: no shapes selected.")),
             (true, Some(zone_id), 1) => ui.label(format!("Zone {zone_id}: 1 shape selected.")),
             (true, Some(zone_id), count) => ui.label(format!("Zone {zone_id}: {count} shapes selected.")),
         };
