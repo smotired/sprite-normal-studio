@@ -23,6 +23,7 @@ pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMo
 pub use crate::save::SavedScene;
 pub use crate::status::Status;
 pub use crate::grid::GRID_SIZES;
+pub use crate::objects::MAX_FEATHER;
 pub use crate::animation::{Animation, Frame, DEFAULT_FPS, cell_of, origin_of, next_cell};
 use crate::objects::merge_bounds;
 
@@ -158,8 +159,11 @@ impl Controller {
         }
     }
 
-    /// Add a region to the part of the normal map to regenerate on the next render
+    /// Add a region to the part of the normal map to regenerate on the next render.
+    /// Feathered curves blend zones past their edges, so the region grows by the widest feather.
     fn mark_normals_stale(&mut self, bounds: Option<Bounds>) {
+        let grow = Vec2::square(self.objects.max_feather() as f32);
+        let bounds = bounds.map(|(min, max)| { let (min, max) = bounds_correct(min, max); (min - grow, max + grow) });
         self.normals_stale = merge_bounds(self.normals_stale, bounds);
     }
 

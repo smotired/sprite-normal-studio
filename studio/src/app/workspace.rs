@@ -29,7 +29,8 @@ const FORMAT: &str = "sprite-normal-studio";
 /// - Version 5: Added a group to each shape. Shapes in version 4 files each get a group of their own.
 /// - Version 6: Added the slice size, the size of each sprite in the spritesheet. Older files use the whole spritesheet as one sprite.
 /// - Version 7: Added animations, each a list of frames by the top left pixel of their sprite. Older files have none.
-const VERSION: u32 = 7;
+/// - Version 8: Added how far each point's outgoing curve is feathered into the zone on its other side. Older files have no feathering.
+const VERSION: u32 = 8;
 
 /// Extension of workspace files
 pub(super) const EXTENSION: &str = "sns";
@@ -697,6 +698,32 @@ mod tests {
         assert_eq!(file.scene.animations.len(), 1);
         assert_eq!(file.scene.animations[0].frames[0], controller::Frame { origin: (16, 0), hold: 2 });
         assert_eq!(read_workspace(&serde_json::to_string_pretty(&file).unwrap()).unwrap(), file);
+    }
+
+    /// Version 7 files have no feathering. Version 8 files keep it, and leave it out of points that aren't feathered.
+    #[test]
+    fn read_feather() {
+        let point = |x: f32, feather: Option<u8>| {
+            let mut point = serde_json::json!({
+                "position": { "x": x, "y": 0.0 },
+                "left_handle": { "x": 0.0, "y": 0.0 },
+                "right_handle": { "x": 0.0, "y": 0.0 },
+                "mode": "linear",
+            });
+            if let Some(feather) = feather { point["feather"] = serde_json::json!(feather); }
+            point
+        };
+        let mut json: serde_json::Value = serde_json::from_str(&workspace_json(FORMAT, 8)).unwrap();
+        json["zones"] = serde_json::json!([{
+            "normal": { "x": 0.0, "y": 0.0, "z": 1.0 },
+            "points": [point(0.0, Some(7)), point(10.0, None), point(5.0, None)],
+        }]);
+        let file = read_workspace(&json.to_string()).unwrap();
+        let written = serde_json::to_string(&file).unwrap();
+        assert_eq!(written.matches("feather").count(), 1);
+        assert_eq!(read_workspace(&written).unwrap(), file);
+
+        assert!(file.scene.objects.validate().is_ok());
     }
 
     /// Newer versions and other formats are rejected

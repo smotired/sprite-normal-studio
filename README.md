@@ -123,7 +123,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 [x] Timeline panel where sprites can easily be added
 [x] Display looping lit animation
 [x] Allow changing zone draw ordering, so that objects can pass over each other.
-[ ] Feathering between connected edges of zones, just between two control points. Difficult
+[x] Feathering between connected edges of zones, just between two control points. Difficult
 ```
 
 ### Interlude

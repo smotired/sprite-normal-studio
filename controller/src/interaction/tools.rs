@@ -101,6 +101,10 @@ pub enum SpecialAction {
     /// Point: insert a point halfway along the selected path, and select it.
     PathSplit,
 
+    /// Point: set how far the selected path is feathered into the zone on its other side, in pixels, if it is an edge two zones share.
+    /// The bool is true if this continues a drag, like NormalSet.
+    PathFeatherSet(u8, bool),
+
     /// Point: merge the selected points into one group of siblings, and select them.
     /// Shape: merge the selected shape vertices into one at their average position, and select it.
     SelectionMerged,
@@ -140,7 +144,7 @@ pub enum SpecialAction {
 impl SpecialAction {
     /// How this action relates to a drag. Continuing to set a value continues the drag, everything else starts something new.
     pub fn drag_step(&self) -> DragStep {
-        if matches!(self, Self::NormalSet(_, true) | Self::ShapeParamSet(_, true) | Self::SelectionNudged(_, true)) { DragStep::Continue } else { DragStep::None }
+        if matches!(self, Self::NormalSet(_, true) | Self::ShapeParamSet(_, true) | Self::SelectionNudged(_, true) | Self::PathFeatherSet(_, true)) { DragStep::Continue } else { DragStep::None }
     }
 }
 
@@ -426,6 +430,16 @@ impl Controller {
         let groups = self.objects.sibling_groups(self.tool.selection());
         if groups.len() != 2 { return None; }
         self.objects.path_between(&groups[0], &groups[1]).ok().flatten()
+    }
+
+    /// How far the selected path is feathered, if it is an edge two zones share. Only the point tool selects paths.
+    pub fn selected_path_feather(&self) -> Option<u8> {
+        if self.tool.kind() != EditorToolKind::Point { return None; }
+        let groups = self.objects.sibling_groups(self.tool.selection());
+        if groups.len() != 2 { return None; }
+        let starts = self.objects.shared_segment_starts(&groups[0], &groups[1]).ok()?;
+        if starts.len() < 2 { return None; }
+        starts.iter().filter_map(|&start| self.objects.get_point_info(start).ok()).map(|point| point.feather()).max()
     }
 
     /// Returns true if the selected points are from more than one sibling group

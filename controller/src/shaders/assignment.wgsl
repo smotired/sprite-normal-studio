@@ -403,6 +403,85 @@ fn assign_pixel(pxl: vec2<u32>) -> Output {
 }
 
 /***********************************/
+/*         FEATHERED EDGES         */
+/***********************************/
+
+// Where a curve's feather width starts in its control point's flags. Must match FEATHER_SHIFT in point.rs.
+const FEATHER_SHIFT = 2u;
+const PI = 3.14159265;
+
+// How far the curve starting at a point is feathered, in pixels. The flags are the high byte of the first u16.
+fn point_feather(point_id: u32) -> f32 {
+    let flags = (unpack_fst(points[point_id].mode_and_sync_mode_and_zone_id) >> 8u) & 0xFFu;
+    return f32(flags >> FEATHER_SHIFT);
+}
+
+// Point on a cubic bezier curve
+fn bezier_at(pos0: vec2<f32>, pos1: vec2<f32>, pos2: vec2<f32>, pos3: vec2<f32>, t: f32) -> vec2<f32> {
+    let a0 = lerp(pos0, pos1, t);
+    let a1 = lerp(pos1, pos2, t);
+    let a2 = lerp(pos2, pos3, t);
+    return lerp(lerp(a0, a1, t), lerp(a1, a2, t), t);
+}
+
+// Blend a pixel's zone with another zone across a feathered curve of that zone, if one reaches the pixel.
+// Each zone has its own copy of an edge it shares, so the pixel's zone only looks at the other zones' curves.
+// The feather reaches its full width halfway along the curve and tapers to nothing at its control points,
+// and the two zones are 50/50 on the curve, fading to all the pixel's own zone at the edge of the feather.
+fn feather_pixel(pxl: vec2<u32>, assigned: Output) -> Output {
+    if (!assigned.has_zone1) { return assigned; }
+    let pos = vec2<f32>(pxl) + 0.5;
+
+    var best_distance = 1e9;
+    var best_own = 1.0;
+    var partner = NO_ZONE;
+    for (var i = 0u; i < params.zone_count; i += 1u) {
+        if (i == assigned.zone1_id) { continue; }
+        let zone = get_zone(i);
+        if (zone.point_count < 2u) { continue; }
+
+        for (var j = 0u; j < zone.point_count; j += 1u) {
+            let start_id = zone.points_start + j;
+            let width = point_feather(start_id);
+            if (width == 0.0) { continue; }
+
+            let start = get_point(start_id);
+            let end = get_point(zone.points_start + (j + 1u) % zone.point_count);
+            let p0 = start.position;
+            let p1 = right_handle(start);
+            let p2 = left_handle(end);
+            let p3 = end.position;
+
+            // Skip curves too far away to reach
+            let low = min(min(p0, p1), min(p2, p3)) - width;
+            let high = max(max(p0, p1), max(p2, p3)) + width;
+            if (any(pos < low) || any(pos > high)) { continue; }
+
+            // Closest point on the curve, split into straight pieces
+            var last = p0;
+            for (var k = 1u; k <= 16u; k += 1u) {
+                let next = bezier_at(p0, p1, p2, p3, f32(k) / 16.0);
+                let along = next - last;
+                let length_squared = dot(along, along);
+                var u = 0.0;
+                if (length_squared > 0.0) { u = clamp(dot(pos - last, along) / length_squared, 0.0, 1.0); }
+                let distance = length(pos - (last + along * u));
+                let reach = width * sin(PI * (f32(k - 1u) + u) / 16.0);
+                if (distance < reach && distance < best_distance) {
+                    best_distance = distance;
+                    best_own = 0.5 + 0.5 * smoothstep(0.0, reach, distance);
+                    partner = i;
+                }
+                last = next;
+            }
+        }
+    }
+
+    if (partner == NO_ZONE) { return assigned; }
+    return Output(assigned.zone1_id, partner, best_own, 1.0 - best_own, true, true);
+}
+
+/***********************************/
 /*         MAIN FUNCTION           */
 /***********************************/
 
@@ -421,5 +500,5 @@ fn main(
         return;
     }
 
-    textureStore(output, id.xy, pack_output(assign_pixel(id.xy)));
+    textureStore(output, id.xy, pack_output(feather_pixel(id.xy, assign_pixel(id.xy))));
 }

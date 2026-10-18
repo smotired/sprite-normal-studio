@@ -100,7 +100,7 @@ impl ObjectBuffers {
 
     pub fn delete_point(&mut self, point_id: u16) -> anyhow::Result<()> {
         self.delete_point_with_threshold(point_id, 2)?;
-        Ok(())
+        self.clear_unshared_feathers()
     }
 
     pub fn delete_point_in_wip_path(&mut self, point_id: u16) -> anyhow::Result<bool> {
@@ -119,24 +119,27 @@ impl ObjectBuffers {
         }
 
         // Remove the zone from the list, and pull the rest of them backward
-        let new_zone_count = self.zone_count() as usize - 1;
-        let zones = &mut self.zones.borrow_mut().items;
-        let points = &mut self.points.borrow_mut().items;
-        let shapes = &mut self.shapes.borrow_mut().items;
-        zones.remove(zone_id as usize);
-        for (i, zone) in zones.iter().enumerate().take(new_zone_count).skip(zone_id as usize) {
-            // The zone should already have had its ranges updated
-            let (start, count) = zone.range();
-            for j in 0..count {
-                points[(start + j) as usize].set_zone_id(i as u16);
-            }
-            let (start, count) = zone.shapes();
-            for j in 0..count {
-                shapes[(start + j) as usize].set_zone_id(i as u16);
+        {
+            let new_zone_count = self.zone_count() as usize - 1;
+            let zones = &mut self.zones.borrow_mut().items;
+            let points = &mut self.points.borrow_mut().items;
+            let shapes = &mut self.shapes.borrow_mut().items;
+            zones.remove(zone_id as usize);
+            for (i, zone) in zones.iter().enumerate().take(new_zone_count).skip(zone_id as usize) {
+                // The zone should already have had its ranges updated
+                let (start, count) = zone.range();
+                for j in 0..count {
+                    points[(start + j) as usize].set_zone_id(i as u16);
+                }
+                let (start, count) = zone.shapes();
+                for j in 0..count {
+                    shapes[(start + j) as usize].set_zone_id(i as u16);
+                }
             }
         }
 
-        Ok(())
+        // The zones that shared edges with it don't anymore
+        self.clear_unshared_feathers()
     }
 
     /// Get the IDs of the points before and after a point in its zone.
@@ -186,9 +189,12 @@ impl ObjectBuffers {
     /// Separate the listed points from their unlisted siblings, so they can be moved independently.
     /// Listed siblings stay siblings with each other, and unlisted siblings stay siblings with each other.
     pub fn separate_points(&mut self, point_ids: &[u16]) -> anyhow::Result<()> {
-        let points = &mut self.points.borrow_mut().items;
-        let siblings = &mut self.point_siblings.borrow_mut().items;
-        ControlPoint::separate_siblings(point_ids, points, siblings)
+        {
+            let points = &mut self.points.borrow_mut().items;
+            let siblings = &mut self.point_siblings.borrow_mut().items;
+            ControlPoint::separate_siblings(point_ids, points, siblings)?;
+        }
+        self.clear_unshared_feathers()
     }
 }
 

@@ -51,6 +51,7 @@ pub struct SavedShape {
 }
 
 fn is_zero(value: &f32) -> bool { *value == 0.0 }
+fn is_unfeathered(width: &u8) -> bool { *width == 0 }
 
 impl SavedShape {
     /// Everything about the shape other than its zone and vertices
@@ -80,6 +81,10 @@ pub struct SavedPoint {
     /// The point the right handle syncs to. Left out if it syncs to its own point without flipping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) right_sync: Option<SavedSync>,
+
+    /// How far the outgoing curve is feathered into the zone on its other side, in pixels. Left out if it isn't.
+    #[serde(default, skip_serializing_if = "is_unfeathered")]
+    pub(crate) feather: u8,
 }
 
 /// The target of a handle sync, as stored in a workspace file

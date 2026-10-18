@@ -315,4 +315,31 @@ mod tests {
         assert_eq!(objects.save(), before);
         assert_eq!(tool.selection(), &[0, 1, 2, 3]);
     }
+
+    /// Dragging the feather of a shared edge is undone at once
+    #[test]
+    fn feather_drag_is_one_entry() {
+        use super::super::tools::{EditorToolPoint, SpecialAction};
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 20.0);
+        let (branch, _) = objects.create_branching_zone(2).unwrap();
+        objects.create_point(branch, Vec2::new(20.0, 40.0)).unwrap();
+        objects.create_point(branch, Vec2::new(0.0, 40.0)).unwrap();
+        objects.complete_branching_zone(2, branch, 3).unwrap();
+        let mut selected = vec![2, 3];
+        selected.extend(objects.get_siblings(2));
+        selected.extend(objects.get_siblings(3));
+        let mut tool: Box<dyn EditorTool> = EditorToolPoint::select(&selected, state(&objects));
+        let mut history = History::default();
+
+        for (width, continuing) in [(2, false), (5, true), (9, true)] {
+            let action = SpecialAction::PathFeatherSet(width, continuing);
+            run(&mut history, &mut tool, &objects, action.drag_step(), |tool, state| tool.handle_special_action(state, action));
+        }
+        history.close(&objects, tool.as_ref());
+        assert_eq!(history.undo.len(), 1);
+        assert_eq!(objects.max_feather(), 9);
+        history.undo(&objects, &mut tool).unwrap();
+        assert_eq!(objects.max_feather(), 0);
+    }
 }

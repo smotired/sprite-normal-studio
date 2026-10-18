@@ -197,4 +197,15 @@ mod tests {
         assert_eq!(first(3), Vec2::new(0.0, 0.0));
         assert_eq!(first(4), Vec2::new(40.0, 0.0));
     }
+
+    /// Feathered curves keep their width when copied and pasted
+    #[test]
+    fn paste_keeps_feather() {
+        let mut objects = branched();
+        objects.set_feather(&[3], 9).unwrap();
+        let copied = objects.copy_zones(&[0, 1]).unwrap();
+        let pasted = objects.paste_zones(&copied).unwrap();
+        let start = objects.get_zone_info(pasted[0]).unwrap().range().0;
+        assert_eq!(objects.get_point_info(start + 3).unwrap().feather(), 9);
+    }
 }

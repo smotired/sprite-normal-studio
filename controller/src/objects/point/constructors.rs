@@ -8,7 +8,7 @@ impl ControlPoint {
     pub fn from_saved(id: u16, zone_id: u16, saved: &SavedPoint) -> Self {
         let left_sync = saved.left_sync.unwrap_or(SavedSync { point: id, flipped: false });
         let right_sync = saved.right_sync.unwrap_or(SavedSync { point: id, flipped: false });
-        Self {
+        let mut point = Self {
             position: saved.position,
             left_handle: saved.left_handle,
             right_handle: saved.right_handle,
@@ -20,7 +20,9 @@ impl ControlPoint {
             zone_id,
             left_sync_id: left_sync.point,
             right_sync_id: right_sync.point,
-        }
+        };
+        point.set_feather(saved.feather);
+        point
     }
 
     /// Get how this control point is saved to a file, using `file_id` to convert point IDs to the ones in the file.
@@ -36,6 +38,7 @@ impl ControlPoint {
             mode: self.mode(),
             left_sync: saved_sync(self.left_sync_id, left_mode),
             right_sync: saved_sync(self.right_sync_id, right_mode),
+            feather: self.feather(),
         }
     }
 

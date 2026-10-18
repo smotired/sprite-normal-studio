@@ -7,6 +7,12 @@ mod modify;
 
 pub use mode::{ControlPointMode, ControlPointHandleSyncMode};
 
+/// Where the feather width of the outgoing curve starts in a control point's flags. Must match FEATHER_SHIFT in the shaders.
+const FEATHER_SHIFT: u8 = 2;
+
+/// Widest a curve between zones can be feathered, in pixels, which is as much as fits in the flags
+pub const MAX_FEATHER: u8 = u8::MAX >> FEATHER_SHIFT;
+
 type PointsList = Vec<ControlPoint>;
 type SiblingsList = Vec<u16>;
 
@@ -31,7 +37,7 @@ pub struct ControlPoint {
     /// Extra flags for this control point.
     /// 0 - left handle sync mode
     /// 1 - right handle sync mode
-    /// Later: 2 - selected
+    /// 2..8 - feather width of the outgoing curve, in pixels (see FEATHER_SHIFT)
     flags: u8,
 
     /// The zone this control point is a part of.
@@ -69,6 +75,14 @@ impl ControlPoint {
     pub fn right_sync_id(&self) -> u16 { self.right_sync_id }
     pub fn sync_modes(&self) -> (ControlPointHandleSyncMode, ControlPointHandleSyncMode) { ControlPointHandleSyncMode::from_flags(self.flags) }
     pub fn self_syncs_in(&self, point_id: u16, right: bool) -> bool { if right { self.right_sync_id != point_id } else { self.left_sync_id != point_id } }
+    /// How far the outgoing curve is feathered into the zone on its other side, in pixels. 0 if it isn't feathered.
+    pub fn feather(&self) -> u8 { self.flags >> FEATHER_SHIFT }
+
+    /// Set how far the outgoing curve is feathered, up to MAX_FEATHER pixels
+    pub fn set_feather(&mut self, width: u8) {
+        self.flags = (self.flags & ((1 << FEATHER_SHIFT) - 1)) | (width.min(MAX_FEATHER) << FEATHER_SHIFT);
+    }
+
     fn set_sync_modes(&mut self, flags: u8) { self.flags = (self.flags & 0b11111100) | flags; }
     fn set_sync_mode(&mut self, right: bool, mode: ControlPointHandleSyncMode) {
         let (left_mode, right_mode) = self.sync_modes();
@@ -265,5 +279,20 @@ mod tests {
         assert!(ControlPoint::any_syncs_in(0, false, &points, &siblings));
         assert!(ControlPoint::any_syncs_in(1, false, &points, &siblings));
         assert!(!ControlPoint::any_syncs_in(0, true, &points, &siblings));
+    }
+
+    /// The feather width is kept in the flags beside the sync modes, without changing them, and is capped at MAX_FEATHER
+    #[test]
+    fn feather_in_flags() {
+        let mut point = ControlPoint::new_solo(0, 0, Vec2::ZERO);
+        point.set_sync_mode(true, ControlPointHandleSyncMode::Flipped);
+        let modes = point.sync_modes();
+        point.set_feather(12);
+        assert_eq!(point.feather(), 12);
+        assert_eq!(point.sync_modes(), modes);
+        point.set_feather(200);
+        assert_eq!(point.feather(), MAX_FEATHER);
+        point.set_sync_modes(0);
+        assert_eq!(point.feather(), MAX_FEATHER);
     }
 }

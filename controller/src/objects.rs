@@ -16,6 +16,7 @@ mod clipboard;
 mod transform;
 mod warp;
 mod order;
+mod feather;
 
 use studio_math::Vec2;
 use wgpu::{Buffer, Device};
@@ -26,6 +27,7 @@ pub use shapes::RadiusKnobs;
 use shape::hull_distance;
 pub use point::ControlPoint;
 pub use point::ControlPointMode;
+pub use point::MAX_FEATHER;
 use buffers::{VecWithBuffer, ObjectList};
 pub(crate) use buffers::{SELECTION_WIDTH, SELECTION_HEIGHT};
 pub use diff::ObjectDiff;

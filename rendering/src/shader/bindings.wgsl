@@ -293,6 +293,16 @@ struct ControlPoint {
     // Don't care about sibling ID or sync IDs for now.
 }
 
+// Where a curve's feather width starts in its control point's flags. Must match FEATHER_SHIFT in point.rs.
+const FEATHER_SHIFT = 2u;
+
+// Returns true if the curve starting at a point is feathered into the zone on its other side.
+// The flags are the high byte of the first u16.
+fn is_feathered(point_id: u32) -> bool {
+    let flags = (unpack_fst(points[point_id].mode_and_sync_mode_and_zone_id) >> 8u) & 0xFFu;
+    return (flags >> FEATHER_SHIFT) != 0u;
+}
+
 fn get_point(point_id: u32) -> ControlPoint {
     let point = points[point_id];
 

@@ -308,8 +308,21 @@ impl EditorTool for EditorToolPoint {
                 self.stop_dragging();
                 let before = state.objects.bounds_around_points(&self.selected_points)?;
                 let inserted = state.objects.insert_point(zone_id, start_id, 0.5)?;
+                state.objects.inherit_feather(&inserted)?;
                 self.selected_points = vec![inserted[0]];
                 self.stale_in(merge_bounds(before, state.objects.bounds_around_points(&inserted)?))
+            },
+
+            // Every zone's copy of a shared edge gets the same feather, so both sides blend into each other
+            SpecialAction::PathFeatherSet(width, _) => {
+                let groups = state.objects.sibling_groups(&self.selected_points);
+                if groups.len() != 2 { return self.ok(); }
+                let starts = state.objects.shared_segment_starts(&groups[0], &groups[1])?;
+                if starts.len() < 2 { return self.ok(); }
+                let old = starts.iter().map(|&start| state.objects.get_point_info(start).map(|point| point.feather())).collect::<anyhow::Result<Vec<_>>>()?;
+                let reach = old.into_iter().max().unwrap_or(0).max(width);
+                state.objects.set_feather(&starts, width)?;
+                self.stale_in(state.objects.feathered_bounds(&starts, reach)?)
             },
 
             SpecialAction::SelectionMerged => {
@@ -1324,5 +1337,40 @@ mod tests {
         tool.handle_drag_start(state(&objects), Vec2::new(14.0, 14.0), Default::default()).unwrap();
         tool.handle_special_action(state(&objects), SpecialAction::SelectionNudged(Vec2::new(4.0, 4.0), true)).unwrap();
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(14.0, 14.0));
+    }
+
+    /// Feathering a shared edge sets it in both zones and marks the feathered area stale, and splitting it keeps the feather on both halves
+    #[test]
+    fn special_feather() {
+        let mut objects = ObjectBuffers::headless();
+        add_branching_squares(&mut objects);
+        let mut selected = vec![2, 3];
+        selected.extend(objects.get_siblings(2));
+        selected.extend(objects.get_siblings(3));
+        selected.sort();
+        let mut tool = EditorToolPoint::select(&selected, state(&objects));
+
+        let result = tool.handle_special_action(state(&objects), SpecialAction::PathFeatherSet(6, false)).unwrap();
+        assert_eq!(result.normals_stale, Some((Vec2::new(-6.0, -6.0), Vec2::new(26.0, 46.0))));
+        let starts = objects.shared_segment_starts(&objects.sibling_groups(&selected)[0], &objects.sibling_groups(&selected)[1]).unwrap();
+        assert_eq!(starts.len(), 2);
+        for &start in &starts {
+            assert_eq!(objects.get_point_info(start).unwrap().feather(), 6);
+        }
+
+        tool.handle_special_action(state(&objects), SpecialAction::PathSplit).unwrap();
+        let inserted = tool.selection()[0];
+        assert_eq!(objects.get_point_info(inserted).unwrap().feather(), 6);
+    }
+
+    /// An edge only one zone has can't be feathered
+    #[test]
+    fn special_feather_needs_shared_edge() {
+        let mut objects = ObjectBuffers::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool = EditorToolPoint::select(&[1, 2], state(&objects));
+        let result = tool.handle_special_action(state(&objects), SpecialAction::PathFeatherSet(6, false)).unwrap();
+        assert!(result.normals_stale.is_none());
+        assert_eq!(objects.get_point_info(1).unwrap().feather(), 0);
     }
 }

@@ -1,4 +1,4 @@
-use controller::{Action, ControlPointMode, Controller, SpecialAction};
+use controller::{Action, ControlPointMode, Controller, MAX_FEATHER, SpecialAction};
 use eframe::egui;
 
 use super::ToolSidebar;
@@ -35,6 +35,21 @@ impl ToolSidebar for PointSidebar {
             // If a path is selected, it can be split
             if path_selected && ui.add(egui::Button::new("Split path").min_size(button_size)).clicked() {
                 controller.handle_action(Action::Special(SpecialAction::PathSplit));
+            }
+
+            // If the path is an edge two zones share, it can be feathered so they blend into each other across it
+            if let Some(feather) = controller.selected_path_feather() {
+                ui.horizontal(|ui| {
+                    ui.label("Feather");
+                    let mut width = feather;
+                    let response = ui.add(egui::DragValue::new(&mut width).range(0..=MAX_FEATHER).suffix(" px"))
+                        .on_hover_text("How far the zones on either side blend into each other across this edge");
+                    if response.changed() && width != feather {
+                        // Only the first change in a drag starts something new to undo
+                        let continuing_drag = response.dragged() && !response.drag_started();
+                        controller.handle_action(Action::Special(SpecialAction::PathFeatherSet(width, continuing_drag)));
+                    }
+                });
             }
 
             let merge = egui::Button::new("Merge").min_size(button_size);

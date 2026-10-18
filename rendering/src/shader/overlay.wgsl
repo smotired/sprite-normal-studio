@@ -100,6 +100,8 @@ const PATH_HALF_WIDTH = 0.0;                 // Width of the line drawn for cont
 const CONTROL_POINT_HALF_WIDTH = 3.0;        // Width of the square drawn for control points
 const CONTROL_POINT_HANDLE_HALF_WIDTH = 1.0; // Width of the line drawn for handles of control points
 const CONTROL_POINT_HANDLE_RADIUS = 2.0;     // Radius of the circle drawn for handles of control points
+const FEATHERED_PATH_HALF_WIDTH = 2.0;       // Width of the band drawn under feathered paths
+const FEATHERED_PATH_COLOR = vec4<f32>(0.3, 0.8, 1.0, 0.5); // Color of the band drawn under feathered paths
 
 fn overlay_zone_paths(
     color: vec3<f32>,   // Base color below this part of the overlay
@@ -122,6 +124,7 @@ fn overlay_zone_paths(
         let zone = get_zone(i);
         var first_point = get_point(zone.points_start);
         var last_point = get_point(zone.points_start + zone.point_count - 1);
+        var last_id = zone.points_start + zone.point_count - 1;
         var last_color = base_color;
         if (sibling_is_selected(zone.points_start + zone.point_count - 1)) {
             last_color = selected_color;
@@ -136,6 +139,7 @@ fn overlay_zone_paths(
         if (creating) {
             start = 1u;
             last_point = first_point;
+            last_id = zone.points_start;
             last_color = base_color;
             if (sibling_is_selected(zone.points_start)) { last_color = selected_color; }
         }
@@ -163,6 +167,16 @@ fn overlay_zone_paths(
             var mid_color = base_color;
             if (all(last_color == selected_color) && all(new_color == selected_color)) {
                 mid_color = selected_color;
+            }
+
+            // Feathered paths get a wide band under them
+            if (is_feathered(last_id)) {
+                col = draw_bezier(
+                    col, pos,
+                    FEATHERED_PATH_COLOR, FEATHERED_PATH_COLOR, FEATHERED_PATH_COLOR,
+                    last_point.position, right_handle(last_point), left_handle(point), point.position,
+                    FEATHERED_PATH_HALF_WIDTH
+                );
             }
 
             col = draw_bezier(
@@ -197,6 +211,7 @@ fn overlay_zone_paths(
             }
 
             last_point = point;
+            last_id = zone.points_start + j;
             last_color = new_color;
         }
 
