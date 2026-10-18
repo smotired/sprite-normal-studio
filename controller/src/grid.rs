@@ -23,6 +23,7 @@ impl Controller {
     /// Set the size of each sprite, clamped to fit in the spritesheet. (0, 0) means the whole spritesheet is one sprite.
     pub fn set_sprite_size(&mut self, size: (u32, u32)) {
         self.sprite_size = clamp_sprite_size(size, self.sheet_size());
+        self.revision += 1;
     }
 
     /// How far the arrow keys move the selection in a direction, given the modifiers held.

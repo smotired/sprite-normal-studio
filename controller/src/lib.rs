@@ -19,7 +19,7 @@ use crate::interaction::tools::{EditorTool, EditorToolZone};
 use crate::interaction::history::History;
 pub use crate::interaction::viewport::ViewportDataUniform;
 pub use crate::interaction::tools::{EditorToolKind, EditorChange, PastePlacement, SpecialAction, SpecialQuery, SpecialValue, ShapeParamsSummary};
-pub use crate::objects::{ObjectBuffers, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects, ShapeParams, ShapeParamChange, ShapeProfile, ZoneOrderChange};
+pub use crate::objects::{ObjectsHandle, ObjectDiff, BufferStates, ControlPointMode, Bounds, SavedObjects, LoadedObjects, ShapeParams, ShapeParamChange, ShapeProfile, ZoneOrderChange};
 pub use crate::save::SavedScene;
 pub use crate::status::Status;
 pub use crate::grid::GRID_SIZES;
@@ -48,7 +48,7 @@ pub struct Controller {
     overlay_state: interaction::OverlayState,
 
     /// The points, zones, and shapes.
-    objects: objects::ObjectBuffers,
+    objects: objects::ObjectsHandle,
 
     /// The current cursor position in world space.
     cursor_pos: studio_math::Vec2,
@@ -58,6 +58,10 @@ pub struct Controller {
 
     /// Texture the selected tool's selection is packed into for the viewport
     selection: Texture,
+
+    /// The selected points, shape vertices, and points with a selected sibling last packed into the selection texture,
+    /// so it's only written when they change
+    uploaded_selection: Option<(Vec<u16>, Vec<u16>, Vec<u16>)>,
 
     /// What the status bar shows: the result of the latest tool action, or feedback from the app
     status: Status,
@@ -82,12 +86,20 @@ pub struct Controller {
 
     /// A rect in world space to highlight like a selection box, such as the sprite being picked for a frame
     highlight: Option<Bounds>,
+
+    /// If the mouse is dragging with the selected tool. Actions that would change the objects or the tool under the drag
+    /// are ignored until it is released, since the drag works from IDs and snapshots taken when it started.
+    tool_dragging: bool,
+
+    /// Counts changes that might change the objects or the sprite size, so the app only checks for unsaved changes after one.
+    /// Animations aren't counted, since they can be edited in place through animations_mut.
+    revision: u64,
 }
 
 impl Controller {
     /// Set up the controller and all its child objects
     pub fn new(device: &Device) -> Self {
-        let mut objects = ObjectBuffers::new(device);
+        let mut objects = ObjectsHandle::new(device);
         let objects_buffers = objects.get_buffers(device);
     
         // A texture rather than a storage buffer, since only 4 storage buffers can be bound at once
@@ -113,6 +125,7 @@ impl Controller {
             cursor_pos: Default::default(),
             tool: EditorToolZone::init(),
             selection,
+            uploaded_selection: None,
             status: Status::Ok,
             history: History::default(),
             shape_defaults: ShapeParams::default(),
@@ -121,6 +134,8 @@ impl Controller {
             sheet_size: (0, 0),
             animations: Vec::new(),
             highlight: None,
+            tool_dragging: false,
+            revision: 0,
         }
     }
     
@@ -130,6 +145,7 @@ impl Controller {
         // Reset selection, finishing any changes in progress so they can still be undone
         self.history.close(&self.objects, self.tool.as_ref());
         self.tool = EditorToolZone::init();
+        self.tool_dragging = false;
 
         // Regenerate the normal map's output texture
         let object_buffers = self.objects.get_buffers(device);
@@ -173,6 +189,9 @@ impl Controller {
         correct_stale_bounds(stale, self.assigner.size())
     }
 
+    /// Goes up whenever the objects or the sprite size might have changed. Animations aren't counted.
+    pub fn revision(&self) -> u64 { self.revision }
+
     /// Get the texture the selection is packed into for the viewport. See pack_selection in buffers.rs.
     pub fn selection_texture(&self) -> Texture { self.selection.clone() }
 }
@@ -189,8 +208,9 @@ fn correct_stale_bounds(stale: Option<Bounds>, size: Vec2) -> Option<Bounds> {
 }
 
 /// Parse and validate a shader, and check it fits in the device's limits, panicking with its errors. Nothing else checks shaders without a GPU.
-#[cfg(test)]
-pub(crate) fn validate_wgsl(source: &str) {
+/// For tests, here and in other crates with the shader-validation feature.
+#[cfg(any(test, feature = "shader-validation"))]
+pub fn validate_wgsl(source: &str) {
     let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
         .validate(&module)
@@ -200,8 +220,8 @@ pub(crate) fn validate_wgsl(source: &str) {
 
 /// Panic if a shader binds more storage buffers or storage textures than the device allows.
 /// The app asks for wgpu's downlevel limits, so it runs on as many devices as possible.
-#[cfg(test)]
-pub(crate) fn check_binding_limits(module: &naga::Module) {
+#[cfg(any(test, feature = "shader-validation"))]
+fn check_binding_limits(module: &naga::Module) {
     let limits = wgpu::Limits::downlevel_defaults();
     let storage_buffers = module.global_variables.iter()
         .filter(|(_, global)| matches!(global.space, naga::AddressSpace::Storage { .. }))
@@ -220,6 +240,31 @@ mod tests {
     use super::*;
 
     const SIZE: Vec2 = Vec2 { x: 100.0, y: 50.0 };
+
+    /// Updating with objects binds and writes every buffer, which wgpu validates against the shaders even with no GPU
+    #[test]
+    fn update_validates() {
+        let (device, queue) = wgpu::Device::noop(&Default::default());
+        let mut controller = Controller::new(&device);
+        let sprite = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: 64, height: 32, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        controller.set_inputs(&device, &sprite, &sprite);
+
+        // Enough zones to grow the buffers past their first size
+        for i in 0..40 {
+            objects::test_utils::add_zone(&mut controller.objects, &[(i as f32, 0.0), (i as f32 + 5.0, 0.0), (i as f32, 5.0)]);
+        }
+        controller.update(&device, &queue);
+        assert_eq!(controller.objects.zone_count(), 40);
+    }
 
     /// No region stays no region
     #[test]

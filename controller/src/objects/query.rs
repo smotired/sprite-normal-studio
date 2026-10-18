@@ -3,9 +3,9 @@ use studio_math::bezier::bezier_point_at;
 use studio_math::bounds::bounds_correct;
 use studio_math::polygon::point_in_polygon;
 
-use super::{ObjectBuffers, ControlPoint};
+use super::{ObjectsHandle, ControlPoint};
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Get the closest point to the given position within the specified zone.
     /// Returns the ID of the closest control point to the given position within the specified zone, or None if no points exist.
     /// If no zone is specified, returns the closest point across all zones.
@@ -46,7 +46,7 @@ impl ObjectBuffers {
         for i in 0..self.zone_count() {
             // Get the amount of points in this zone
             let (start, count) = self.get_zone_info(i)?.range();
-            if count == 0 { panic!("Zone {} has zero points!", i); } // should never hit. could just continue but i want to catch 0-len zones
+            if count == 0 { continue; } // loading and pasting reject empty zones, but a zone with no path has nothing to find
 
             // Check each point to the previous point on the path
             let mut start_point = self.get_point_info(start + count - 1)?;
@@ -284,7 +284,7 @@ mod tests {
     /// Positions inside a zone's path are found, including inside curved edges
     #[test]
     fn zone_contains() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         assert!(objects.zone_contains(0, Vec2::new(5.0, 5.0)).unwrap());
         assert!(!objects.zone_contains(0, Vec2::new(15.0, 5.0)).unwrap());
@@ -299,7 +299,7 @@ mod tests {
     /// The preferred zone wins where zones overlap, and otherwise the last zone does
     #[test]
     fn zone_at() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(5.0, 5.0), (20.0, 5.0), (20.0, 20.0), (5.0, 20.0)]);
         assert_eq!(objects.zone_at(Vec2::new(7.0, 7.0), None).unwrap(), Some(1));
@@ -370,12 +370,12 @@ mod tests {
     }
 
     use super::super::test_utils::{add_zone, add_square};
-    use crate::objects::ObjectBuffers;
+    use crate::objects::ObjectsHandle;
 
     /// With no zone given, the closest point across every zone is found
     #[test]
     fn closest_point_any_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
@@ -386,7 +386,7 @@ mod tests {
     /// With a zone given, only its points are searched
     #[test]
     fn closest_point_in_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
@@ -397,7 +397,7 @@ mod tests {
     /// Nothing is found if there are no points, or if the zone is missing
     #[test]
     fn closest_point_none() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         assert_eq!(objects.get_closest_point(None, Vec2::ZERO).unwrap(), None);
 
         add_square(&mut objects, 10.0);
@@ -409,7 +409,7 @@ mod tests {
     /// The closest path point is on the nearest edge, and starts at the right point
     #[test]
     fn closest_path_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
 
         let (zone_id, start_id, corrected, t) = objects.get_closest_path_point(Vec2::new(5.0, -1.0), 1.0).unwrap().unwrap();
@@ -427,7 +427,7 @@ mod tests {
     /// The closest path across zones wins
     #[test]
     fn closest_path_point_across_zones() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
@@ -438,7 +438,7 @@ mod tests {
     /// No paths means nothing to find
     #[test]
     fn closest_path_point_none() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         assert!(objects.get_closest_path_point(Vec2::ZERO, 1.0).unwrap().is_none());
     }
 
@@ -447,7 +447,7 @@ mod tests {
     /// A zone with no branched zones is connected to all its points
     #[test]
     fn connected_in_single_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)]);
 
@@ -473,7 +473,7 @@ mod tests {
     /// Zones are connected if they share points, directly or indirectly.
     #[test]
     fn connected_through_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
 
         // Add an initial zone
         add_square(&mut objects, 10.0);
@@ -504,7 +504,7 @@ mod tests {
     /// If include_siblings is false, we should only store the first encountered sibling for each point
     #[test]
     fn connected_through_siblings_without_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
 
         // Add an initial zone
         add_square(&mut objects, 10.0);
@@ -533,7 +533,7 @@ mod tests {
     /// Ensure getting points within a rectangle only includes relevant points, including all siblings
     #[test]
     fn points_in_rect() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
 
         // Add an initial zone
         add_square(&mut objects, 10.0);
@@ -557,7 +557,7 @@ mod tests {
     /// Points can be separated only if one of them has a sibling that isn't listed
     #[test]
     fn can_separate() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         assert!(!objects.can_separate(&[0, 1, 2, 3]));
 

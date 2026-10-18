@@ -153,6 +153,12 @@ mod tests {
     use super::*;
     use super::test_utils::solo_points;
 
+    /// The assignment shader skips zones too far away for any feather to reach, so it must agree on the widest feather
+    #[test]
+    fn max_feather_matches_shader() {
+        assert!(include_str!("../shaders/assignment.wgsl").contains(&format!("const MAX_FEATHER = {MAX_FEATHER}.0;")));
+    }
+
     /// Distance should be measured from the position of the point
     #[test]
     fn distance() {

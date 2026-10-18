@@ -78,8 +78,19 @@ impl StudioApp {
         let Some(path) = file::pick_png(Some(project.sprite.path())) else { return; };
 
         match project.sprite.try_select(path.clone(), &self.render_state) {
-            Ok(_) => self.update_input_textures(),
+            Ok(_) => {
+                self.update_input_textures();
+                self.warn_normal_size();
+            },
             Err(e) => show_load_error(&path, e),
+        }
+    }
+
+    /// Warn if the open project's base normal map isn't the same size as its spritesheet
+    pub(super) fn warn_normal_size(&self) {
+        let Some(project) = self.project() else { return; };
+        if let Some(warning) = file::normal_size_warning(&project.sprite, project.normal.as_ref()) {
+            workspace::show_message(rfd::MessageLevel::Warning, "Warning", &warning);
         }
     }
 
@@ -95,7 +106,10 @@ impl StudioApp {
                 .map(|normal| project.normal = Some(normal)),
         };
         match result {
-            Ok(()) => self.update_input_textures(),
+            Ok(()) => {
+                self.update_input_textures();
+                self.warn_normal_size();
+            },
             Err(e) => show_load_error(&path, e),
         }
     }

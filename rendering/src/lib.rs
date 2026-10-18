@@ -35,8 +35,8 @@ struct RenderControl {
     /// Bind group for sending the zone/shape buffers to the GPU.
     objects_bind_group: BindGroup,
 
-    /// The size of the object buffers
-    object_buffer_sizes: [usize; 5],
+    /// IDs of the object buffers when they were last bound
+    object_buffer_ids: [u64; 5],
 }
 
 /// Primary struct for rendering the viewport.
@@ -95,7 +95,7 @@ impl Renderer {
         );
 
         // Create object bind group
-        let object_buffer_sizes = object_buffers.sizes();
+        let object_buffer_ids = object_buffers.ids();
         let objects_bind_group = create_objects_bind_group(device, &pipeline, selection, object_buffers);
 
         // Set up
@@ -106,7 +106,7 @@ impl Renderer {
             sprite_view,
             normal_view,
             objects_bind_group,
-            object_buffer_sizes,
+            object_buffer_ids,
         };
         let texture = ViewportTexture {
             size,
@@ -144,10 +144,10 @@ impl Renderer {
 
         // Recreate objects bind group if needed
         let object_buffers = controller.object_buffers(device);
-        let object_buffer_sizes = object_buffers.sizes();
-        if object_buffer_sizes != self.control.object_buffer_sizes {
+        let object_buffer_ids = object_buffers.ids();
+        if object_buffer_ids != self.control.object_buffer_ids {
             self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, &controller.selection_texture(), object_buffers);
-            self.control.object_buffer_sizes = object_buffer_sizes;
+            self.control.object_buffer_ids = object_buffer_ids;
         }
 
         // Create a command encoder
@@ -179,9 +179,9 @@ impl Renderer {
         &self.texture.view
     }
 
-    /// Draw a different controller's objects. Always rebinds, since its buffers may be the same size as the old ones.
+    /// Draw a different controller's objects. Always rebinds, since its selection texture isn't tracked by the buffer IDs.
     pub fn set_objects(&mut self, device: &Device, selection: &Texture, object_buffers: BufferStates) {
-        self.control.object_buffer_sizes = object_buffers.sizes();
+        self.control.object_buffer_ids = object_buffers.ids();
         self.control.objects_bind_group = create_objects_bind_group(device, &self.control.pipeline, selection, object_buffers);
     }
 
@@ -298,27 +298,17 @@ mod tests {
     /// The concatenated shader parses, validates, and fits in the device's limits. Nothing else checks it without a GPU.
     #[test]
     fn shader_validates() {
-        validate(&shader_source());
+        controller::validate_wgsl(&shader_source());
     }
 
-    /// Parse and validate a shader, and check it fits in the device's limits, panicking with its errors
-    pub(crate) fn validate(source: &str) {
-        let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
-        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
-            .validate(&module)
-            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
-
-        // The app asks for wgpu's downlevel limits, so it runs on as many devices as possible
-        let limits = wgpu::Limits::downlevel_defaults();
-        let storage_buffers = module.global_variables.iter()
-            .filter(|(_, global)| matches!(global.space, naga::AddressSpace::Storage { .. }))
-            .count();
-        let storage_textures = module.global_variables.iter()
-            .filter(|(_, global)| matches!(module.types[global.ty].inner, naga::TypeInner::Image { class: naga::ImageClass::Storage { .. }, .. }))
-            .count();
-        assert!(storage_buffers <= limits.max_storage_buffers_per_shader_stage as usize,
-            "{storage_buffers} storage buffers, but only {} are allowed", limits.max_storage_buffers_per_shader_stage);
-        assert!(storage_textures <= limits.max_storage_textures_per_shader_stage as usize,
-            "{storage_textures} storage textures, but only {} are allowed", limits.max_storage_textures_per_shader_stage);
+    /// Rendering a controller binds its buffers and the uniform, which wgpu validates against the shader even with no GPU
+    #[test]
+    fn render_validates() {
+        let (device, queue) = wgpu::Device::noop(&Default::default());
+        let mut controller = Controller::new(&device);
+        let mut renderer = Renderer::new(&device, &controller.selection_texture(), controller.object_buffers(&device));
+        controller.update(&device, &queue);
+        renderer.render(&device, &queue, &mut controller, Vec2::new(100.0, 80.0), 1.0);
+        assert_eq!(renderer.size(), Vec2::new(100.0, 80.0));
     }
 }

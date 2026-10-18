@@ -114,6 +114,20 @@ fn paint_cross(ui: &Ui, rect: Rect, response: &Response) {
     ui.painter().line_segment([cross.right_top(), cross.left_bottom()], stroke);
 }
 
+/// A warning if a base normal map isn't the same size as the spritesheet, or None if it is or there isn't one.
+/// The normal map is still used where it overlaps the spritesheet, and is flat everywhere else.
+pub fn normal_size_warning(sprite: &SpriteFileSelection, normal: Option<&SpriteFileSelection>) -> Option<String> {
+    size_mismatch_text(sprite.size(), normal?.size())
+}
+
+/// The text of the warning for a base normal map whose size doesn't match the spritesheet
+fn size_mismatch_text(sprite: (u32, u32), normal: (u32, u32)) -> Option<String> {
+    (sprite != normal).then(|| format!(
+        "The base normal map is {}x{}, but the spritesheet is {}x{}. It's only used where they overlap, and the rest is flat.",
+        normal.0, normal.1, sprite.0, sprite.1,
+    ))
+}
+
 /// Generate a normal map filename by appending _normal to the file name before the PNG
 pub fn generate_normal_map_filename(sprite_path: &Path) -> PathBuf {
     let stem = sprite_path.file_stem().unwrap_or_default().to_string_lossy();
@@ -132,6 +146,13 @@ mod tests {
             PathBuf::from("art").join("hero_normal.png"),
         );
         assert_eq!(generate_normal_map_filename(Path::new("hero.png")), PathBuf::from("hero_normal.png"));
+    }
+
+    /// Only base normal maps that don't match the spritesheet are warned about
+    #[test]
+    fn size_mismatch() {
+        assert_eq!(size_mismatch_text((64, 32), (64, 32)), None);
+        assert!(size_mismatch_text((64, 32), (32, 32)).is_some_and(|text| text.contains("32x32") && text.contains("64x32")));
     }
 
     /// Only the final extension is replaced

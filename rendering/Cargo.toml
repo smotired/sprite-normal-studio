@@ -13,4 +13,6 @@ wgpu = { workspace = true }
 bytemuck = { workspace = true }
 
 [dev-dependencies]
-naga = { version = "30.0.1", features = ["wgsl-in"] }
+# A GPU-less device, so tests can render with a whole Controller
+wgpu = { workspace = true, features = ["noop"] }
+controller = { workspace = true, features = ["shader-validation"] }

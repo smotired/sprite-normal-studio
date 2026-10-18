@@ -1,5 +1,7 @@
 use studio_math::Vec3;
 
+use super::Bounds;
+
 /// A Zone is made up of a list of control points, a list of shapes, and the vertices those shapes are made from.
 /// Each list is a contiguous range, and the ranges of every zone are in zone order.
 /// Must match ZonePacked in assignment.wgsl, generator.wgsl and bindings.wgsl.
@@ -29,6 +31,31 @@ pub struct Zone {
 
     // WGSL rounds the struct up to the 16 byte alignment of the vec3
     _padding: [u32; 2],
+}
+
+/// A zone as it is sent to the GPU, with bounding boxes the shaders use to skip zones far from a pixel.
+/// The bounds are worked out from the object lists whenever they change, so they aren't stored in the zones or the history.
+/// Must match ZonePacked in assignment.wgsl, generator.wgsl and bindings.wgsl.
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ZoneGpu {
+    zone: Zone,
+
+    /// Top left and bottom right corners around the zone's path, including its handles, which the curves never leave
+    pub(super) path_bounds: [f32; 4],
+
+    /// Top left and bottom right corners around everything the zone's shapes reach, or an empty box if it has none
+    pub(super) shapes_bounds: [f32; 4],
+}
+
+/// Corners of a box nothing is inside, for zones with no path or no shapes
+pub(super) const EMPTY_BOUNDS: [f32; 4] = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+
+impl ZoneGpu {
+    pub fn new(zone: Zone, path: Option<Bounds>, shapes: Option<Bounds>) -> Self {
+        let corners = |bounds: Option<Bounds>| bounds.map_or(EMPTY_BOUNDS, |(min, max)| [min.x, min.y, max.x, max.y]);
+        Self { zone, path_bounds: corners(path), shapes_bounds: corners(shapes) }
+    }
 }
 
 /// Add an offset to the start of a range, assuming there is room for the whole range in a list of up to 65536 items
@@ -84,6 +111,11 @@ impl Zone {
         self.add_point_offset(points as i32);
         self.add_shape_offset(shapes as i32);
         self.add_vertex_offset(vertices as i32);
+    }
+
+    /// A copy of this zone with its ranges starting somewhere else, keeping their counts
+    pub fn with_starts(&self, point_start: u16, shape_start: u16, vertex_start: u16) -> Self {
+        Self { point_start, shape_start, vertex_start, ..*self }
     }
 
     /// Get the start and count of this zone's control points
@@ -145,6 +177,14 @@ mod tests {
     #[test]
     fn layout() {
         assert_eq!(std::mem::size_of::<Zone>(), 32);
+    }
+
+    /// The GPU's zone adds two vec4s of bounds after the zone, which is already a multiple of their 16 byte alignment
+    #[test]
+    fn gpu_layout() {
+        assert_eq!(std::mem::size_of::<ZoneGpu>(), 64);
+        let empty = ZoneGpu::new(Zone::new(0, 0, 0, Vec3::FORWARD), None, None);
+        assert_eq!(empty.path_bounds, EMPTY_BOUNDS);
     }
 
     /// A new zone has no points, shapes or vertices, starting at the given indices

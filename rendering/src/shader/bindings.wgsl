@@ -108,8 +108,12 @@ struct Params {
     // Width and height of each sprite the spritesheet is sliced into. Lines between them are drawn if flag 13 is set.
     sprite_size: vec2<f32>,
 
+    // The point whose handles are drawn: the only selected point, or the latest point of the path being created.
+    // NO_OBJECT if there is none. Only used along with flag 05.
+    handles_point: u32,
+
     // Pads the struct to a multiple of 16 bytes
-    _padding_3: vec2<f32>,
+    _padding_3: u32,
 }
 @group(0) @binding(1) var<uniform> params: Params;
 
@@ -190,9 +194,15 @@ struct ZonePacked {
     // Amount of shape vertices in this zone
     vertices_start_and_vertex_count: u32,
 
-    // The struct is rounded up to the 16 byte alignment of the vec3 anyway. Must match Zone in zone.rs.
+    // The struct is rounded up to the 16 byte alignment of the vec3 anyway. Must match ZoneGpu in zone.rs.
     _padding0: u32,
     _padding1: u32,
+
+    // Top left (xy) and bottom right (zw) corners around the zone's path, including its handles
+    path_bounds: vec4<f32>,
+
+    // Top left (xy) and bottom right (zw) corners around everything the zone's shapes reach. Empty (min > max) if it has none.
+    shapes_bounds: vec4<f32>,
 }
 @group(1) @binding(1) var<storage, read> zones: array<ZonePacked>;
 
@@ -217,6 +227,14 @@ struct Zone {
 
     // Amount of shape vertices in this zone
     vertex_count: u32,
+
+    // Top left and bottom right corners around the zone's path, including its handles
+    path_min: vec2<f32>,
+    path_max: vec2<f32>,
+
+    // Top left and bottom right corners around everything the zone's shapes reach. Empty (min > max) if it has none.
+    shapes_min: vec2<f32>,
+    shapes_max: vec2<f32>,
 }
 
 fn get_zone(zone_id: u32) -> Zone {
@@ -229,6 +247,10 @@ fn get_zone(zone_id: u32) -> Zone {
         unpack_snd(zone.shapes_start_and_shape_count),
         unpack_fst(zone.vertices_start_and_vertex_count),
         unpack_snd(zone.vertices_start_and_vertex_count),
+        zone.path_bounds.xy,
+        zone.path_bounds.zw,
+        zone.shapes_bounds.xy,
+        zone.shapes_bounds.zw,
     );
 }
 

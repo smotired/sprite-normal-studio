@@ -859,6 +859,7 @@ version = "0.5.0"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "log",
  "naga",
  "serde",
  "serde_json",
@@ -3615,7 +3616,6 @@ version = "0.5.0"
 dependencies = [
  "bytemuck",
  "controller",
- "naga",
  "studio_math",
  "wgpu",
 ]
@@ -4084,6 +4084,7 @@ dependencies = [
  "egui_extras",
  "env_logger",
  "image",
+ "log",
  "rendering",
  "rfd",
  "serde",

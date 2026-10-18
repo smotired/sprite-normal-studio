@@ -1,7 +1,7 @@
-use super::{ObjectBuffers, ControlPoint, SavedObjects, MAX_OBJECT_ID};
+use super::{ObjectsHandle, ControlPoint, SavedObjects, MAX_OBJECT_ID};
 use super::save::saved_zones;
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Get some zones in the form they are saved to a file, to be pasted later.
     /// Their points stay siblings with each other, but forget their siblings in zones that aren't copied.
     /// Handles that synced to those siblings keep their current values.
@@ -69,8 +69,8 @@ mod tests {
     use super::super::test_utils::add_square;
 
     /// A square with a triangle branching off its left edge, which shares the square's points 0 and 3
-    fn branched() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn branched() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, _) = objects.create_branching_zone(0).unwrap();
         objects.create_point(zone_id, Vec2::new(-10.0, 5.0)).unwrap();
@@ -79,7 +79,7 @@ mod tests {
     }
 
     /// Get the IDs of the siblings of a point in other zones
-    fn sibling_zones(objects: &ObjectBuffers, point_id: u16) -> Vec<u16> {
+    fn sibling_zones(objects: &ObjectsHandle, point_id: u16) -> Vec<u16> {
         objects.get_siblings(point_id).into_iter().map(|id| objects.get_point_info(id).unwrap().zone_id()).collect()
     }
 
@@ -127,10 +127,21 @@ mod tests {
         }
     }
 
+    /// Pasting zones with no points, e.g. from clipboard text edited by hand, is an error and changes nothing
+    #[test]
+    fn paste_empty_zone_errors() {
+        let mut objects = ObjectsHandle::headless();
+        add_square(&mut objects, 10.0);
+        let saved: SavedObjects = serde_json::from_str(r#"{ "zones": [{ "normal": { "x": 0.0, "y": 0.0, "z": 1.0 }, "points": [] }] }"#).unwrap();
+        assert!(objects.paste_zones(&saved).is_err());
+        assert_eq!(objects.object_counts(), (1, 4));
+        assert!(objects.get_closest_path_point(Vec2::new(5.0, 0.0), 1.0).unwrap().is_some());
+    }
+
     /// Pasted zones keep their shape and normal
     #[test]
     fn paste_keeps_normal() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.set_zone_normals(&[0], Vec3::new(0.5, 0.0, 0.5)).unwrap();
         let copied = objects.copy_zones(&[0]).unwrap();
@@ -166,7 +177,7 @@ mod tests {
     /// Copying zones that don't exist is an error
     #[test]
     fn copy_missing_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         assert!(objects.copy_zones(&[1]).is_err());
     }
@@ -174,7 +185,7 @@ mod tests {
     /// Pasting more points than there is room for is an error, and changes nothing
     #[test]
     fn paste_too_many() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut copied = objects.copy_zones(&[0]).unwrap();
         let point = copied.zones[0].points[0].clone();
@@ -187,7 +198,7 @@ mod tests {
     /// Pasted zones go in front of every zone, keeping the order they were in, whatever order they were picked in
     #[test]
     fn paste_keeps_order() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         for x in [0.0, 20.0, 40.0] {
             super::super::test_utils::add_zone(&mut objects, &[(x, 0.0), (x + 10.0, 0.0), (x + 5.0, 10.0)]);
         }

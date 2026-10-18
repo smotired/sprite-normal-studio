@@ -474,7 +474,7 @@ impl EditorToolShape {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ObjectBuffers, InputModifiers as IM};
+    use crate::{ObjectsHandle, InputModifiers as IM};
     use crate::objects::ShapeParams;
     use crate::objects::test_utils::add_square;
 
@@ -482,14 +482,14 @@ mod tests {
     use super::super::test_utils::state;
 
     /// Two 100 pixel squares side by side, with a point and a line in the first and a point in the second
-    fn sample() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn sample() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let second = objects.create_zone().unwrap();
         for pos in [(200.0, 0.0), (300.0, 0.0), (300.0, 100.0), (200.0, 100.0)] {
             objects.create_point(second, Vec2::from(pos)).unwrap();
         }
-        let add = |objects: &mut ObjectBuffers, zone_id: u16, positions: &[(f32, f32)]| {
+        let add = |objects: &mut ObjectsHandle, zone_id: u16, positions: &[(f32, f32)]| {
             let vertex_ids: Vec<u16> = positions.iter().map(|&pos| objects.add_shape_vertex(zone_id, Vec2::from(pos)).unwrap()).collect();
             objects.create_shape(zone_id, &vertex_ids, ShapeParams::default(), 0).unwrap()
         };
@@ -500,7 +500,7 @@ mod tests {
     }
 
     /// The tool, with zone 0 active
-    fn tool(objects: &ObjectBuffers) -> Box<EditorToolShape> {
+    fn tool(objects: &ObjectsHandle) -> Box<EditorToolShape> {
         EditorToolShape::select(&[0], state(objects))
     }
 

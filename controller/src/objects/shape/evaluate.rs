@@ -5,7 +5,7 @@
 use studio_math::{Vec2, Vec3};
 
 use super::{ShapeParams, ShapeProfile, MAX_DOME_SLOPE, dome_cap_t, hull_distance};
-use crate::objects::ObjectBuffers;
+use crate::objects::ObjectsHandle;
 
 /// Get the distance from a position to the edge of a shape's flat core, and the direction away from the core.
 /// Both are zero inside the core.
@@ -124,7 +124,7 @@ pub fn rotate_from_up(normal: Vec3, base: Vec3) -> Vec3 {
     ).normalized()
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Get the normal the generator makes for a zone at a world space position, from its shapes and base normal.
     /// Ignores whether the position is in the zone, and how pixels on the edge are shared with other zones.
     pub fn zone_normal_at(&self, zone_id: u16, pos: Vec2) -> anyhow::Result<Vec3> {
@@ -150,19 +150,19 @@ mod tests {
     const DOME: ShapeParams = ShapeParams { profile: ShapeProfile::Dome, ..CONE };
 
     /// A big square zone to put shapes in
-    fn zone() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn zone() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 200.0);
         objects
     }
 
     /// Add a shape to zone 0 with a new vertex at each position
-    fn add(objects: &mut ObjectBuffers, positions: &[(f32, f32)], params: ShapeParams) -> u16 {
+    fn add(objects: &mut ObjectsHandle, positions: &[(f32, f32)], params: ShapeParams) -> u16 {
         let vertices: Vec<u16> = positions.iter().map(|&pos| objects.add_shape_vertex(0, Vec2::from(pos)).unwrap()).collect();
         objects.create_shape(0, &vertices, params, 0).unwrap()
     }
 
-    fn normal(objects: &ObjectBuffers, x: f32, y: f32) -> Vec3 {
+    fn normal(objects: &ObjectsHandle, x: f32, y: f32) -> Vec3 {
         objects.zone_normal_at(0, Vec2::new(x, y)).unwrap()
     }
 

@@ -1,7 +1,7 @@
 use studio_math::Vec2;
 use studio_math::bounds::bounds_of;
 
-use super::{ObjectBuffers, Bounds, Shape, ShapeVertex, ShapeParams, ShapeParamChange, MAX_OBJECT_ID, hull_distance, merge_bounds};
+use super::{ObjectsHandle, Bounds, Shape, ShapeVertex, ShapeParams, ShapeParamChange, MAX_OBJECT_ID, hull_distance, merge_bounds};
 use super::shape::{radius_handle_frame, KNOB_OFFSET, SHAPE_PENDING};
 
 /// Where the knobs for a group of shapes' radii are, and the line they are dragged along
@@ -27,7 +27,7 @@ pub struct RadiusKnobs {
     pub outer: Vec2,
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Get a clone of a shape by its ID. Returns an error if the shape does not exist.
     pub fn get_shape_info(&self, shape_id: u16) -> anyhow::Result<Shape> {
         if shape_id >= self.shape_count() { anyhow::bail!("Shape {} does not exist!", shape_id); }
@@ -645,7 +645,7 @@ mod tests {
     use super::super::ShapeProfile;
 
     /// Add a vertex at each position to a zone, and a shape made from all of them, returning the shape ID
-    fn add_shape(objects: &mut ObjectBuffers, zone_id: u16, positions: &[(f32, f32)]) -> u16 {
+    fn add_shape(objects: &mut ObjectsHandle, zone_id: u16, positions: &[(f32, f32)]) -> u16 {
         let vertex_ids: Vec<u16> = positions.iter()
             .map(|&position| objects.add_shape_vertex(zone_id, Vec2::from(position)).unwrap())
             .collect();
@@ -653,8 +653,8 @@ mod tests {
     }
 
     /// Two squares, with a point shape and a line shape in the first and a point shape in the second
-    fn sample() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn sample() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         add_shape(&mut objects, 1, &[(25.0, 2.0)]);

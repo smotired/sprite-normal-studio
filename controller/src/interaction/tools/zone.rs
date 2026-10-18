@@ -1,7 +1,7 @@
 use studio_math::Vec2;
 use studio_math::transform::Affine2;
 
-use crate::{Axis, Bounds, InputModifiers, ObjectBuffers, SavedObjects};
+use crate::{Axis, Bounds, InputModifiers, ObjectsHandle, SavedObjects};
 use crate::objects::{merge_bounds, ZonesSnapshot};
 
 use super::{EditorTool, EditorToolKind, ControllerStateInput, PastePlacement, SelectionType, SpecialAction, TransformBox, utils};
@@ -197,7 +197,7 @@ impl EditorTool for EditorToolZone {
             None
         }
     }
-    fn transform_box(&self, objects: &ObjectBuffers) -> Option<TransformBox> {
+    fn transform_box(&self, objects: &ObjectsHandle) -> Option<TransformBox> {
         // While rotating, the box turns with the zones
         if let Some(drag) = &self.transform && drag.handle == TransformHandle::Rotate {
             let (min, max) = drag.bounds;
@@ -677,7 +677,7 @@ fn get_connected_zones(zone_id: u16, state: &ControllerStateInput) -> anyhow::Re
 
 #[cfg(test)]
 mod tests {
-use crate::{ObjectBuffers, InputModifiers as IM};
+use crate::{ObjectsHandle, InputModifiers as IM};
     use crate::objects::test_utils::{add_square, add_zone};
 
     use super::*;
@@ -694,7 +694,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Selecting from points selects every point of the zones they are in
     #[test]
     fn select_from_points() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
@@ -705,7 +705,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Clicking a control point or a path selects the zone, and clicking nothing deselects
     #[test]
     fn click_selects_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
         let mut tool = EditorToolZone::init();
@@ -732,7 +732,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
             );
         };
 
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
 
         // Add one set of connected zones
         add_square(&mut objects, 10.0);
@@ -764,7 +764,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Clicking a control point or a path selects the all connected zones
     #[test]
     fn ctrl_click_selects_only_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
 
         // Add a set of connected zones
         add_square(&mut objects, 10.0);
@@ -797,7 +797,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Clicking with shift adds to selection, clicking with alt removes from selection.
     #[test]
     fn adding_or_removing_selection() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
         let mut tool = EditorToolZone::init();
@@ -841,7 +841,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Test different combinations with multiple modifier keys
     #[test]
     fn multiple_modifier_keys() {
-            let mut objects = ObjectBuffers::headless();
+            let mut objects = ObjectsHandle::headless();
 
         // Add one set of connected zones
         add_square(&mut objects, 10.0);
@@ -881,15 +881,15 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         assert_selected_zones(&tool, &[0]);
 
         // Ctrl+Shift to select a zone on the other graph
-        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(90.0, 1.0), IM::ctrl_shift()).unwrap(); // path
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(90.0, 1.0), IM::shift_ctrl()).unwrap(); // path
         assert_selected_zones(&tool, &[0, 2]);
 
         // Shift+Alt on second connected to toggle the whole first graph on
-        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::alt_shift()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::shift_alt()).unwrap();
         assert_selected_zones(&tool, &[0, 1, 2]);
 
         // Shift+Alt again to toggle the whole first graph off
-        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::alt_shift()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(0.0, 13.0), IM::shift_alt()).unwrap();
         assert_selected_zones(&tool, &[2]);
 
         // Shift to turn the whole first graph back on
@@ -909,7 +909,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
         assert_selected_zones(&tool, &[1, 2]);
 
         // Shift+Ctrl on final zone to select full second graph
-        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(40.0, 100.0), IM::ctrl_shift()).unwrap();
+        tool.handle_click(state_scaled(&objects, 0.25), Vec2::new(40.0, 100.0), IM::shift_ctrl()).unwrap();
         assert_selected_zones(&tool, &[1, 2, 3]);
 
         // Shift+Ctrl+Alt to toggle a zone on the second graph off
@@ -929,13 +929,13 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     #[test]
     fn click_cycles_shared_points() {
         // The shared points and path are away from the corners and edge midpoints of both zones, where clicks would hit the transform box
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (10.0, 0.0), (40.0, 0.0), (40.0, 10.0), (0.0, 10.0)]);
         let (zone_id, _) = objects.create_branching_zone(1).unwrap();
         objects.create_point(zone_id, Vec2::new(0.0, -10.0)).unwrap();
         objects.create_point(zone_id, Vec2::new(30.0, -10.0)).unwrap();
         objects.complete_branching_zone(1, zone_id, 2).unwrap();
-        let state = |objects: &ObjectBuffers| state_scaled(objects, 0.25);
+        let state = |objects: &ObjectsHandle| state_scaled(objects, 0.25);
         let mut tool = EditorToolZone::init();
 
         tool.handle_click(state(&objects), Vec2::new(10.0, 0.0), IM::ctrl()).unwrap();
@@ -965,7 +965,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Dragging a zone moves it by where it was grabbed, and marks the normals stale where it was and where it is now
     #[test]
     fn drag_moves_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::init();
 
@@ -986,7 +986,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Dragging with nothing selected does nothing
     #[test]
     fn drag_nothing() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::init();
 
@@ -999,7 +999,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Dragging on an unselected zone, with another selected, drags the newly selected one instead
     #[test]
     fn drag_with_selected() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
         let mut tool = EditorToolZone::init();
@@ -1026,7 +1026,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Dragging a selected zone doesn't change the selection regardless of modifier keys
     #[test]
     fn drag_selected_doesnt_change_selection() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
         let mut tool = EditorToolZone::init();
@@ -1054,7 +1054,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Dragging the selected zones doesn't apply to each sibling individually, as that would move each shared point multiple times.
     #[test]
     fn drag_moves_siblings_once() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (branch_zone, _) = objects.create_branching_zone(2).unwrap();
         objects.create_point(branch_zone, Vec2::new(10.0, 20.0)).unwrap();
@@ -1083,7 +1083,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Test selecting zones by dragging over selected points
     #[test]
     fn drag_to_select() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (20.0, 10.0)]);
@@ -1137,7 +1137,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Shift constrains dragging to an axis, and ctrl snaps to the grid
     #[test]
     fn drag_modifiers() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::init();
 
@@ -1159,7 +1159,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Box selection is tentative until released, follows modifiers, and can be cancelled
     #[test]
     fn drag_box_modifiers() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (140.0, 0.0), (140.0, 100.0)]);
         let mut tool = EditorToolZone::init();
@@ -1188,7 +1188,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Cancel input should deselect everything
     #[test]
     fn cancel_deselects() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
         let mut tool = EditorToolZone::init();
@@ -1204,7 +1204,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Cancel while dragging zones puts them back and keeps the selection
     #[test]
     fn cancel_drag_restores_position() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::init();
 
@@ -1231,7 +1231,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Cancel while dragging a selection box stops the box and restores the previous selection
     #[test]
     fn cancel_box_restores_selection() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
         let mut tool = EditorToolZone::init();
@@ -1257,7 +1257,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Deleting removes selected zones, and clears the selection
     #[test]
     fn delete_zones() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
         let mut tool = EditorToolZone::init();
@@ -1276,7 +1276,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Deselecting gives back the selected points
     #[test]
     fn deselect_returns_selection() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
         assert_eq!(tool.deselect(state(&objects)), &[0, 1, 2, 3]);
@@ -1285,7 +1285,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Setting the normal sets it for the selected zones
     #[test]
     fn special_normal_set() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         let mut tool = EditorToolZone::select(&[0, 1, 2, 3], state(&objects));
@@ -1299,7 +1299,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Separating splits the selected zones' points from their siblings in other zones
     #[test]
     fn special_separate() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (_, branch_id) = objects.create_branching_zone(1).unwrap();
         let mut tool = EditorToolZone::select(&[branch_id], state(&objects));
@@ -1311,7 +1311,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Flipping mirrors the selected zones around the center of their bounds, leaving other zones alone
     #[test]
     fn special_flip() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(20.0, 0.0), (40.0, 0.0), (40.0, 10.0)]);
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
@@ -1331,7 +1331,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Rotating turns the selected zones a quarter turn around the center of their bounds, and turning back undoes it
     #[test]
     fn special_rotate() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0)]);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
 
@@ -1351,7 +1351,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Flipping and rotating do nothing without a selection
     #[test]
     fn special_transform_unselected() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0)]);
         let mut tool = EditorToolZone::init();
 
@@ -1363,7 +1363,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Selecting all selects every zone, whether or not anything was selected before
     #[test]
     fn select_all() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
@@ -1380,7 +1380,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Pasting adds the zones after the others and selects them, with their center where the placement says
     #[test]
     fn paste_placements() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let copied = objects.copy_zones(&[0]).unwrap();
         let mut tool = EditorToolZone::select(&[0], state(&objects));
@@ -1410,7 +1410,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Pasting stops a drag in progress
     #[test]
     fn paste_abandons_drag() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let copied = objects.copy_zones(&[0]).unwrap();
         let mut tool = EditorToolZone::init();
@@ -1423,7 +1423,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     }
 
     /// Get the position of a point
-    fn position(objects: &ObjectBuffers, point_id: u16) -> Vec2 {
+    fn position(objects: &ObjectsHandle, point_id: u16) -> Vec2 {
         objects.get_point_info(point_id).unwrap().position()
     }
 
@@ -1434,10 +1434,10 @@ use crate::{ObjectBuffers, InputModifiers as IM};
 
     /// Drag the transform box of a selected square from one position to another.
     /// Zoomed in so the square is big enough on screen to have midpoint handles.
-    fn transform_square(start: Vec2, end: Vec2, modifiers: IM) -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn transform_square(start: Vec2, end: Vec2, modifiers: IM) -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
-        let zoomed = |objects: &ObjectBuffers| state_scaled(objects, 0.25);
+        let zoomed = |objects: &ObjectsHandle| state_scaled(objects, 0.25);
         let mut tool = EditorToolZone::select(&[0], zoomed(&objects));
         tool.handle_drag_start(zoomed(&objects), start, modifiers).unwrap();
         let result = tool.handle_dragging_to(zoomed(&objects), end, modifiers).unwrap();
@@ -1449,7 +1449,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Edges too short on screen don't have midpoint handles, so dragging there does what it would without the box
     #[test]
     fn small_box_has_no_midpoints() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 20.0);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
 
@@ -1470,7 +1470,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// The transform box isn't shown or used while dragging out a selection box
     #[test]
     fn no_transform_box_while_box_selecting() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
         assert!(tool.transform_box(&objects).is_some());
@@ -1487,7 +1487,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// The transform box is around the control points of the selected zones, and only exists if zones are selected
     #[test]
     fn transform_box_bounds() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 4.0)]);
 
@@ -1582,7 +1582,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Handles are scaled along with their points
     #[test]
     fn scale_handles() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(crate::ControlPointMode::Broken), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(0.0, 3.0))).unwrap();
         let mut tool = EditorToolZone::select(&[0], state(&objects));
@@ -1598,7 +1598,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Siblings in other zones move along with the transformed points
     #[test]
     fn transform_moves_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (branch_zone, branch_id) = objects.create_branching_zone(1).unwrap();
         objects.create_point(branch_zone, Vec2::new(20.0, 5.0)).unwrap();
@@ -1615,7 +1615,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Dragging just outside a corner rotates around the center, and the box rotates along with it until released
     #[test]
     fn rotate() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
 
@@ -1639,7 +1639,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Ctrl snaps rotation to increments of 5 degrees
     #[test]
     fn rotate_snapped() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
 
@@ -1654,7 +1654,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Transforming takes priority over dragging other zones or a selection box
     #[test]
     fn transform_priority() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(10.0, 5.0), (20.0, 5.0), (20.0, 15.0)]);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
@@ -1677,7 +1677,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Clicking a transform box handle doesn't change the selection, but clicking outside a corner does
     #[test]
     fn click_transform_box() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(17.0, -7.0), (30.0, -7.0), (30.0, -20.0)]);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
@@ -1698,7 +1698,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Cancelling a transform puts everything back and keeps the selection
     #[test]
     fn cancel_transform() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(crate::ControlPointMode::Broken), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(0.0, 3.0))).unwrap();
         let mut tool = EditorToolZone::select(&[0], state(&objects));
@@ -1718,7 +1718,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     }
 
     /// A 10 pixel square with a point shape in it at (3, 4), returning the vertex
-    fn square_with_shape(objects: &mut ObjectBuffers) -> u16 {
+    fn square_with_shape(objects: &mut ObjectsHandle) -> u16 {
         add_square(objects, 10.0);
         let vertex = objects.add_shape_vertex(0, Vec2::new(3.0, 4.0)).unwrap();
         objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
@@ -1728,7 +1728,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Dragging a zone moves its shapes along with it, and cancelling puts them back
     #[test]
     fn drag_moves_shapes() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         let vertex = square_with_shape(&mut objects);
         let mut tool = EditorToolZone::init();
 
@@ -1744,7 +1744,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Pasted zones bring their shapes to where they are placed
     #[test]
     fn paste_moves_shapes() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         square_with_shape(&mut objects);
         let copied = objects.copy_zones(&[0]).unwrap();
         let mut tool = EditorToolZone::select(&[0], state(&objects));
@@ -1757,7 +1757,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Flipping and scaling zones transforms their shapes, scaling radii with the zones
     #[test]
     fn transform_moves_shapes() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         let vertex = square_with_shape(&mut objects);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
 
@@ -1774,7 +1774,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Clearing shapes removes them from the selected zones only
     #[test]
     fn clear_shapes() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         square_with_shape(&mut objects);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         let vertex = objects.add_shape_vertex(1, Vec2::new(28.0, 2.0)).unwrap();
@@ -1790,7 +1790,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Paste centers on the center of the bounding box, not the average of the points
     #[test]
     fn paste_uses_bounds_center() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (9.0, 10.0)]);
         let copied = objects.copy_zones(&[0]).unwrap();
         let mut tool = EditorToolZone::init();
@@ -1802,7 +1802,7 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     /// Nudging moves the selected zones and their shapes by the delta, but not in the middle of a drag
     #[test]
     fn special_nudge() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let vertex = objects.add_shape_vertex(0, Vec2::new(5.0, 5.0)).unwrap();
         objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
@@ -1823,12 +1823,12 @@ use crate::{ObjectBuffers, InputModifiers as IM};
     #[test]
     fn special_reorder() {
         use crate::objects::ZoneOrderChange as Order;
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(50.0, 50.0), (60.0, 50.0), (60.0, 60.0)]);
         add_zone(&mut objects, &[(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)]);
         let mut tool = EditorToolZone::select(&[0], state(&objects));
-        let first_of = |objects: &ObjectBuffers, zone_id: u16| position(objects, objects.get_zone_info(zone_id).unwrap().range().0);
+        let first_of = |objects: &ObjectsHandle, zone_id: u16| position(objects, objects.get_zone_info(zone_id).unwrap().range().0);
 
         // The square hops over the triangle, which doesn't overlap it, to in front of the other square
         let result = tool.handle_special_action(state(&objects), SpecialAction::ZonesReordered(Order::Forward)).unwrap();

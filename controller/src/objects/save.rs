@@ -4,7 +4,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use studio_math::{Vec2, Vec3};
 
-use super::{ObjectBuffers, ControlPoint, ControlPointMode, Shape, ShapeParams, ShapeProfile, ShapeVertex, Zone, MAX_OBJECT_ID};
+use super::{ObjectsHandle, ControlPoint, ControlPointMode, Shape, ShapeParams, ShapeProfile, ShapeVertex, Zone, MAX_OBJECT_ID};
 
 /// Every zone and control point, as stored in a workspace file.
 /// Point IDs are not stored. They are numbered in order across all zones, starting from the first point of the first zone.
@@ -123,14 +123,27 @@ impl SavedObjects {
         let mut points = Vec::with_capacity(point_count);
         let mut shapes = Vec::with_capacity(shape_count);
         let mut shape_vertices = Vec::with_capacity(vertex_count);
+        let mut syncs = vec![];
         for (zone_id, saved_zone) in self.zones.iter().enumerate() {
+            // Every tool assumes a zone has a path, and a zero normal has no direction to light
+            if saved_zone.points.len() < 2 { anyhow::bail!("Zone {} has {} points, but needs at least 2!", zone_id, saved_zone.points.len()); }
+            let normal = saved_zone.normal;
+            if ![normal.x, normal.y, normal.z].iter().all(|value| value.is_finite()) || normal.sq_magnitude() <= 0.0 {
+                anyhow::bail!("Zone {} has a normal that isn't a finite, nonzero vector!", zone_id);
+            }
+
             let mut zone = Zone::new(points.len() as u16, shapes.len() as u16, shape_vertices.len() as u16, saved_zone.normal);
             for saved_point in &saved_zone.points {
                 let point_id = zone.add_point();
+                let vectors = [saved_point.position, saved_point.left_handle, saved_point.right_handle];
+                if !vectors.iter().all(|vector| vector.x.is_finite() && vector.y.is_finite()) {
+                    anyhow::bail!("Point {} has a position or handle that isn't finite!", point_id);
+                }
                 for sync in [saved_point.left_sync, saved_point.right_sync].into_iter().flatten() {
                     if sync.point as usize >= point_count {
                         anyhow::bail!("Point {} syncs a handle to point {}, which does not exist!", point_id, sync.point);
                     }
+                    syncs.push((point_id, sync.point));
                 }
                 points.push(ControlPoint::from_saved(point_id, zone_id as u16, saved_point));
             }
@@ -140,6 +153,17 @@ impl SavedObjects {
                 zone.add_vertex();
                 shape_vertices.push(ShapeVertex::new(position));
             }
+            // A group is one surface, so its shapes must be next to each other. Shapes without a group are each their own.
+            let (mut current, mut finished) = (None, HashSet::new());
+            for saved_shape in &saved_zone.shapes {
+                if saved_shape.group == current { continue; }
+                if let Some(group) = saved_shape.group && finished.contains(&group) {
+                    anyhow::bail!("Zone {} has shape group {} split up by other shapes!", zone_id, group);
+                }
+                finished.extend(current);
+                current = saved_shape.group;
+            }
+
             // Shapes without a group each get one nobody else in the zone has
             let mut next_group = saved_zone.shapes.iter().filter_map(|shape| shape.group).max().map_or(0, |max| max as u32 + 1);
             for (i, saved_shape) in saved_zone.shapes.iter().enumerate() {
@@ -174,13 +198,20 @@ impl SavedObjects {
                 point_siblings[point_id as usize] = group[(i + 1) % group.len()];
             }
         }
-        point_siblings.resize(65536, 0); // match ObjectBuffers::new
+
+        // A handle can only sync to its own point or one of its siblings
+        for (point_id, sync_id) in syncs {
+            if sync_id != point_id && !ControlPoint::get_siblings(point_id, &point_siblings).contains(&sync_id) {
+                anyhow::bail!("Point {} syncs a handle to point {}, which isn't its sibling!", point_id, sync_id);
+            }
+        }
+        point_siblings.resize(65536, 0); // match ObjectsHandle::new
 
         Ok(LoadedObjects { zones, points, point_siblings, shapes, shape_vertices })
     }
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Get every zone, control point and shape in the form they are saved to a file
     pub fn save(&self) -> SavedObjects {
         let zone_ids: Vec<u16> = (0..self.zone_count()).collect();
@@ -286,7 +317,7 @@ mod tests {
     use super::super::test_utils::{add_square, add_zone};
 
     /// Get the raw bytes of every object list, to check two sets of objects are identical
-    fn raw(objects: &ObjectBuffers) -> [Vec<u8>; 5] {
+    fn raw(objects: &ObjectsHandle) -> [Vec<u8>; 5] {
         [
             bytemuck::cast_slice(&objects.zones.borrow().items).to_vec(),
             bytemuck::cast_slice(&objects.points.borrow().items).to_vec(),
@@ -297,10 +328,11 @@ mod tests {
     }
 
     /// Build objects with a branching zone, curved points, a custom normal, and shapes sharing a vertex
-    fn sample() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn sample() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
-        objects.create_branching_zone(1).unwrap();
+        let (branch, _) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(branch, Vec2::new(20.0, 5.0)).unwrap();
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (25.0, 10.0)]);
         objects.set_point_mode(0, ControlPointMode::Continuous).unwrap();
         objects.zones.borrow_mut().items[2].set_normal(Vec3::new(0.5, 0.0, 0.5));
@@ -323,7 +355,7 @@ mod tests {
         let json = serde_json::to_string(&objects.save()).unwrap();
         let saved: SavedObjects = serde_json::from_str(&json).unwrap();
 
-        let loaded = ObjectBuffers::headless();
+        let loaded = ObjectsHandle::headless();
         loaded.load(saved.validate().unwrap());
         assert_eq!(raw(&loaded), raw(&objects));
         assert_eq!(loaded.save(), objects.save());
@@ -342,7 +374,7 @@ mod tests {
     /// Handles that sync to their own point are left out of the file
     #[test]
     fn self_sync_omitted() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let json = serde_json::to_string(&objects.save()).unwrap();
         assert!(!json.contains("sync"));
@@ -356,15 +388,15 @@ mod tests {
         let saved: SavedObjects = serde_json::from_value(serde_json::json!({
             "zones": [
                 { "normal": { "x": 0.0, "y": 0.0, "z": 1.0 }, "points": [point(0.0), point(1.0)] },
-                { "normal": { "x": 0.0, "y": 0.0, "z": 1.0 }, "points": [point(2.0)] },
+                { "normal": { "x": 0.0, "y": 0.0, "z": 1.0 }, "points": [point(2.0), point(3.0)] },
             ],
             "sibling_groups": [[1, 2]],
         })).unwrap();
 
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         objects.load(saved.validate().unwrap());
-        assert_eq!(objects.object_counts(), (2, 3));
-        assert_eq!(objects.get_zone_info(1).unwrap().range(), (2, 1));
+        assert_eq!(objects.object_counts(), (2, 4));
+        assert_eq!(objects.get_zone_info(1).unwrap().range(), (2, 2));
         assert_eq!(objects.get_point_info(2).unwrap().zone_id(), 1);
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(2.0, 0.0));
         assert_eq!(objects.get_siblings(1), vec![2]);
@@ -405,6 +437,52 @@ mod tests {
         assert!(with_groups(3, vec![vec![0, 0]]).validate().is_err());
     }
 
+    /// Zones need at least two points and a usable normal, and points need finite positions and handles
+    #[test]
+    fn invalid_zones_and_points() {
+        assert!(with_groups(2, vec![]).validate().is_ok());
+        assert!(with_groups(1, vec![]).validate().is_err());
+        assert!(with_groups(0, vec![]).validate().is_err());
+
+        for normal in [Vec3::new(0.0, 0.0, 0.0), Vec3::new(f32::NAN, 0.0, 1.0)] {
+            let mut saved = with_groups(3, vec![]);
+            saved.zones[0].normal = normal;
+            assert!(saved.validate().is_err());
+        }
+
+        let mut saved = with_groups(3, vec![]);
+        saved.zones[0].points[1].position.x = f32::NAN;
+        assert!(saved.validate().is_err());
+        let mut saved = with_groups(3, vec![]);
+        saved.zones[0].points[2].right_handle.y = f32::INFINITY;
+        assert!(saved.validate().is_err());
+    }
+
+    /// Handles can sync to their own point or a sibling, but not to any other point
+    #[test]
+    fn sync_must_be_sibling() {
+        let mut saved = with_groups(3, vec![vec![0, 2]]);
+        saved.zones[0].points[0].left_sync = Some(SavedSync { point: 2, flipped: true });
+        assert!(saved.validate().is_ok());
+        saved.zones[0].points[0].left_sync = Some(SavedSync { point: 1, flipped: true });
+        assert!(saved.validate().is_err());
+    }
+
+    /// Shapes in a group must be next to each other in their zone
+    #[test]
+    fn split_shape_group() {
+        let shape = |group: Option<u16>| SavedShape { vertices: vec![0], profile: ShapeProfile::Cone, inner_radius: 0.0, outer_radius: 5.0, steepness: 1.0, blend: 1.0, group };
+        let with_shapes = |groups: &[Option<u16>]| {
+            let mut saved = with_groups(3, vec![]);
+            saved.zones[0].shape_vertices = vec![Vec2::ZERO];
+            saved.zones[0].shapes = groups.iter().map(|&group| shape(group)).collect();
+            saved
+        };
+        assert!(with_shapes(&[Some(0), Some(0), Some(1), None, Some(2)]).validate().is_ok());
+        assert!(with_shapes(&[Some(0), Some(1), Some(0)]).validate().is_err());
+        assert!(with_shapes(&[Some(0), None, Some(0)]).validate().is_err());
+    }
+
     /// Too many points is an error
     #[test]
     fn too_many_points() {
@@ -423,7 +501,7 @@ mod tests {
         assert_eq!(saved.zones[2].shapes[0].vertices, vec![0]);
         assert!(saved.zones[1].shapes.is_empty());
 
-        let loaded = ObjectBuffers::headless();
+        let loaded = ObjectsHandle::headless();
         loaded.load(saved.validate().unwrap());
         assert_eq!(loaded.get_zone_info(2).unwrap().shapes(), (2, 1));
         assert_eq!(loaded.get_shape_info(2).unwrap().zone_id(), 2);
@@ -433,7 +511,7 @@ mod tests {
     /// Zones without shapes leave them out of the file, and files without them load with no shapes
     #[test]
     fn no_shapes_omitted() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let json = serde_json::to_string(&objects.save()).unwrap();
         assert!(!json.contains("shape"));
@@ -462,7 +540,7 @@ mod tests {
         let mut old = saved.clone();
         old.zones[0].shapes[0].group = None;
         old.zones[0].shapes[2].group = None;
-        let loaded = ObjectBuffers::headless();
+        let loaded = ObjectsHandle::headless();
         loaded.load(old.validate().unwrap());
         let groups: Vec<u16> = (0..3).map(|shape_id| loaded.get_shape_info(shape_id).unwrap().group()).collect();
         assert_eq!(groups, vec![1, 0, 2]);

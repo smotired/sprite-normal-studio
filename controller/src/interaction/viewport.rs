@@ -2,7 +2,7 @@ use studio_math::Vec2;
 use studio_math::bounds::bounds_correct;
 use wgpu::{Device, util::DeviceExt};
 
-use crate::{ObjectBuffers, SpecialQuery, SpecialValue};
+use crate::{ObjectsHandle, SpecialQuery, SpecialValue};
 use crate::{interaction::{camera::Camera, light::Light, overlay::OverlayState, tools::{EditorTool, TransformBox}}};
 
 /// Formats data used for the actual rendering process.
@@ -78,12 +78,42 @@ pub struct ViewportDataUniform {
     // Set by the controller, since it isn't part of the overlay state.
     pub sprite_size: Vec2,
 
+    // The point whose handles are drawn: the only selected point, or the latest point of the path being created. NO_OBJECT if there is none.
+    // Worked out here so the shader doesn't have to look through every point to find it.
+    pub handles_point: u32,
+
     // Pads the struct to a multiple of 16 bytes, like the shader expects
-    _padding_3: Vec2,
+    _padding_3: u32,
 }
 
 /// Stands in for a zone or shape ID in the uniform when there is none. IDs only go up to 65535.
 pub const NO_OBJECT: u32 = 0xFFFF_FFFF;
+
+/// The point whose handles the overlay draws, if control points are drawn (overlay flag 5).
+/// While a path is being created (flag 6) it's the path's latest point, or its first point if the path is about to close (flag 7).
+/// Otherwise it's the selected point, if exactly one is selected.
+fn handles_point(objects: &ObjectsHandle, tool: &dyn EditorTool, overlay_flags: u32) -> u32 {
+    let flag = |bit: u32| overlay_flags & (1 << bit) != 0;
+    if !flag(5) { return NO_OBJECT; }
+
+    // The path being created is always the last zone, unless it has already joined another path
+    if flag(6) && let Some(zone_id) = objects.zone_count().checked_sub(1) && let Ok(zone) = objects.get_zone_info(zone_id) {
+        let (start, count) = zone.range();
+        let last = start + count.max(1) - 1;
+        let joined = count > 1 && objects.get_point_info(last).is_ok_and(|point| point.left_sync_id() != last || point.right_sync_id() != last);
+        if count > 0 && !joined {
+            return if flag(7) { start as u32 } else { last as u32 };
+        }
+    }
+
+    let mut selected = tool.selection().to_vec();
+    selected.sort();
+    selected.dedup();
+    match selected[..] {
+        [point_id] if point_id < objects.point_count() => point_id as u32,
+        _ => NO_OBJECT,
+    }
+}
 
 impl ViewportDataUniform {
     pub fn new(
@@ -91,7 +121,7 @@ impl ViewportDataUniform {
         camera: &Camera,
         overlay: &OverlayState,
         cursor: Vec2,
-        objects: &ObjectBuffers,
+        objects: &ObjectsHandle,
         tool: &dyn EditorTool,
         transform_box: Option<TransformBox>,
     ) -> Self {
@@ -146,7 +176,8 @@ impl ViewportDataUniform {
             inner_knob: knobs.map_or(Vec2::ZERO, |knobs| knobs.inner),
             outer_knob: knobs.map_or(Vec2::ZERO, |knobs| knobs.outer),
             sprite_size: Vec2::ZERO,
-            _padding_3: Vec2::ZERO,
+            handles_point: handles_point(objects, tool, overlay_flags),
+            _padding_3: 0,
         }
     }
 
@@ -179,7 +210,7 @@ mod tests {
         camera.apply_scale(1, None);
         let tool = EditorToolZone::init();
         let overlay = OverlayState::default();
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         for size in [10.0, 20.0, 30.0] { add_square(&mut objects, size); }
 
         let uniform = ViewportDataUniform::new(&Light::default(), &camera, &overlay, Vec2::new(5.0, 6.0), &objects, tool.as_ref(), None);
@@ -204,7 +235,7 @@ mod tests {
     fn transform_box() {
         let camera = Camera::default();
         let tool = EditorToolZone::init();
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let transform_box = TransformBox { center: Vec2::new(5.0, 6.0), half_size: Vec2::new(2.0, 3.0), angle: std::f32::consts::FRAC_PI_2 };
 
         let mut overlay = OverlayState::default();
@@ -222,7 +253,7 @@ mod tests {
     /// A whole selected group's radius knobs are passed along in the shape tool
     #[test]
     fn radius_knobs() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let vertex = objects.add_shape_vertex(0, Vec2::new(20.0, 20.0)).unwrap();
         objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
@@ -238,6 +269,26 @@ mod tests {
         let zone_tool = EditorToolZone::init();
         let uniform = ViewportDataUniform::new(&Light::default(), &Camera::default(), &OverlayState::default(), Vec2::ZERO, &objects, zone_tool.as_ref(), None);
         assert_eq!(uniform.overlay_flags & (1 << 12), 0);
+    }
+
+    /// Handles are drawn for the only selected point, or the latest point of a path being created, and only when points are drawn
+    #[test]
+    fn handles_point() {
+        use crate::interaction::tools::{EditorToolPoint, test_utils::state};
+        let mut objects = ObjectsHandle::headless();
+        add_square(&mut objects, 10.0);
+        let points = 1 << 5;
+
+        let one = EditorToolPoint::select(&[2], state(&objects));
+        assert_eq!(super::handles_point(&objects, one.as_ref(), points), 2);
+        assert_eq!(super::handles_point(&objects, one.as_ref(), 0), NO_OBJECT);
+        let several = EditorToolPoint::select(&[1, 2], state(&objects));
+        assert_eq!(super::handles_point(&objects, several.as_ref(), points), NO_OBJECT);
+
+        // Creating a path: its latest point, or its first when it's about to close
+        let creating = points | 1 << 6;
+        assert_eq!(super::handles_point(&objects, several.as_ref(), creating), 3);
+        assert_eq!(super::handles_point(&objects, several.as_ref(), creating | 1 << 7), 0);
     }
 
     /// Bytes should cover the whole struct

@@ -167,7 +167,7 @@ impl StudioApp {
 
         let result = self.save_workspace(index, &path).with_context(|| format!("Could not save {}", path.display()));
         let saved = result.is_ok();
-        show_result(result);
+        show_result(result.map(|()| None));
         if saved {
             self.projects[index].controller.set_feedback(format!("Saved {}", file_name(&path)));
         }
@@ -261,13 +261,19 @@ impl StudioApp {
 
     /// Recheck if the current project has unsaved changes, and update the window title if that changed.
     /// The other projects can't change while their tabs aren't selected.
+    /// Building the workspace file means copying every object, so it's only rebuilt when something it's made from may have changed.
     pub(super) fn update_dirty(&mut self, ctx: &egui::Context) {
+        let Some(project) = self.projects.get(self.current) else { return; };
+        let key = DirtyKey::of(project);
+        if project.dirty_key.as_ref() == Some(&key) { return; }
+
         let dirty = self.has_unsaved_changes(self.current);
-        if let Some(project) = self.project_mut()
-            && project.dirty != dirty
-        {
-            project.dirty = dirty;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+        if let Some(project) = self.project_mut() {
+            project.dirty_key = Some(key);
+            if project.dirty != dirty {
+                project.dirty = dirty;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+            }
         }
     }
 
@@ -312,7 +318,7 @@ impl StudioApp {
     }
 
     /// Save a project to a file and make it the project's workspace file
-    fn save_workspace(&mut self, index: usize, path: &Path) -> anyhow::Result<Option<String>> {
+    fn save_workspace(&mut self, index: usize, path: &Path) -> anyhow::Result<()> {
         let Some(file) = self.workspace_file(index, path) else { anyhow::bail!("There is no open project to save."); };
         let json = serde_json::to_string_pretty(&file)?;
 
@@ -327,9 +333,10 @@ impl StudioApp {
             project.saved = true;
             project.clean = file;
             project.dirty = false;
+            project.dirty_key = None;
         }
         self.recent.mark_used(path);
-        Ok(None)
+        Ok(())
     }
 
     /// Open a workspace file in a new tab. Nothing changes if it can't be opened.
@@ -372,6 +379,7 @@ impl StudioApp {
     pub(super) fn finish_open(&mut self, ctx: &egui::Context, pending: PendingOpen, sprite: SpriteFileSelection, normal: Option<SpriteFileSelection>) -> Option<String> {
         let size = sprite.size();
         let saved_size = pending.file.sprite_size;
+        let normal_warning = file::normal_size_warning(&sprite, normal.as_ref());
 
         // Loading the scene resets the light, then adding the project centers it on the spritesheet.
         // The file as it was read is what's on disk, so images picked somewhere else count as unsaved changes.
@@ -385,16 +393,44 @@ impl StudioApp {
             export_path: pending.export_path,
             clean: pending.file,
             dirty: false,
+            dirty_key: None,
             controller,
             timeline: Default::default(),
         };
         self.add_project(ctx, project);
         self.recent.mark_used(&pending.path);
 
-        (size != saved_size).then(|| format!(
+        let sheet_warning = (size != saved_size).then(|| format!(
             "The spritesheet is {}x{}, but was {}x{} when the workspace was saved. Zones may not line up with it.",
             size.0, size.1, saved_size.0, saved_size.1,
-        ))
+        ));
+        let warnings: Vec<String> = sheet_warning.into_iter().chain(normal_warning).collect();
+        (!warnings.is_empty()).then(|| warnings.join("\n\n"))
+    }
+}
+
+/// Everything the workspace file is built from, cheap enough to compare every frame.
+/// While it stays the same, so does the file, and whether it has unsaved changes.
+#[derive(PartialEq)]
+pub(super) struct DirtyKey {
+    /// Goes up whenever the objects or the sprite size might have changed
+    revision: u64,
+    /// Compared directly, since they're small and can be edited in place
+    animations: Vec<controller::Animation>,
+    sprite: (PathBuf, (u32, u32)),
+    normal: Option<PathBuf>,
+    export: Option<PathBuf>,
+}
+
+impl DirtyKey {
+    fn of(project: &Project) -> Self {
+        Self {
+            revision: project.controller.revision(),
+            animations: project.controller.animations().to_vec(),
+            sprite: (project.sprite.path().to_owned(), project.sprite.size()),
+            normal: project.normal.as_ref().map(|normal| normal.path().to_owned()),
+            export: project.export_path.clone(),
+        }
     }
 }
 

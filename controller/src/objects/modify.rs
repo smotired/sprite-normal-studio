@@ -1,8 +1,8 @@
 use studio_math::{Vec2, Vec3};
 
-use super::{ObjectBuffers, ControlPoint, ControlPointMode, one_per_sibling_ring};
+use super::{ObjectsHandle, ControlPoint, ControlPointMode, one_per_sibling_ring};
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     pub fn update_point(&mut self, point_id: u16, position: Option<Vec2>, mode: Option<ControlPointMode>, left_handle: Option<Vec2>, right_handle: Option<Vec2>) -> anyhow::Result<()> {
         let points = &mut self.points.borrow_mut().items;
         let siblings = &self.point_siblings.borrow().items;
@@ -208,7 +208,7 @@ mod tests {
     /// Position changes should apply to the point
     #[test]
     fn update_point_position() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
 
         objects.update_point(2, Some(Vec2::new(12.0, 13.0)), None, None, None).unwrap();
@@ -219,7 +219,7 @@ mod tests {
     /// Mode and handle changes should apply to the point
     #[test]
     fn update_point_mode_and_handles() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
 
         objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(0.0, 3.0))).unwrap();
@@ -232,7 +232,7 @@ mod tests {
     /// Continuous points keep the opposite handle on the line, with its own length
     #[test]
     fn update_point_continuous_mirrors_handle() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(ControlPointMode::Continuous), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(4.0, 0.0))).unwrap();
 
@@ -250,7 +250,7 @@ mod tests {
     /// Moving a zone moves its first point to the target, and everything else along with it
     #[test]
     fn update_zone_position() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
@@ -267,7 +267,7 @@ mod tests {
     /// Moving a connected zone only moves siblings once
     #[test]
     fn update_connected_zone_positions() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         
         add_square(&mut objects, 10.0);
         let (branching_zone, _) = objects.create_branching_zone(2).unwrap();
@@ -290,7 +290,7 @@ mod tests {
     /// Moving points moves each set of siblings exactly once, even if several of them are listed
     #[test]
     fn move_points_with_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (branching_zone, branch_id) = objects.create_branching_zone(1).unwrap();
         objects.create_point(branching_zone, Vec2::new(20.0, 0.0)).unwrap();
@@ -305,7 +305,7 @@ mod tests {
     /// Deleting a point removes it and shifts later points and zones back
     #[test]
     fn delete_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
@@ -321,7 +321,7 @@ mod tests {
     /// A zone with only two points is deleted entirely when one of its points is
     #[test]
     fn delete_point_deletes_small_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (1.0, 0.0)]);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
@@ -335,7 +335,7 @@ mod tests {
     /// A path still being created is only deleted once its last point is
     #[test]
     fn delete_point_in_wip_path() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (1.0, 0.0)]);
 
         assert!(!objects.delete_point_in_wip_path(1).unwrap());
@@ -347,7 +347,7 @@ mod tests {
     /// Deleting a zone removes its points, and renumbers the zones after it
     #[test]
     fn delete_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
@@ -366,7 +366,7 @@ mod tests {
     /// Deleting a zone should leave the zones it shared points with intact, but unsynced
     #[test]
     fn delete_zone_with_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, _) = objects.create_branching_zone(1).unwrap();
         objects.create_point(zone_id, Vec2::new(20.0, 0.0)).unwrap();
@@ -381,7 +381,7 @@ mod tests {
     /// Zone normals can be set for several zones at once, but not for zones that don't exist
     #[test]
     fn set_zone_normals() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
@@ -394,7 +394,7 @@ mod tests {
     /// Separated points keep their positions but no longer move with their old siblings
     #[test]
     fn separate_points() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, point_id) = objects.create_branching_zone(1).unwrap();
         assert!(objects.can_separate(&[point_id]));
@@ -406,7 +406,7 @@ mod tests {
     }
 
     /// Get a point's handles relative to its position
-    fn handles(objects: &ObjectBuffers, point_id: u16) -> (Vec2, Vec2) {
+    fn handles(objects: &ObjectsHandle, point_id: u16) -> (Vec2, Vec2) {
         let point = objects.get_point_info(point_id).unwrap();
         (point.left_handle() - point.position(), point.right_handle() - point.position())
     }
@@ -416,8 +416,8 @@ mod tests {
     }
 
     /// Make a square with broken handles on point 1, which is at (10, 0) between (0, 0) and (10, 10)
-    fn square_with_handles(left: Vec2, right: Vec2) -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn square_with_handles(left: Vec2, right: Vec2) -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(ControlPointMode::Broken), Some(left), Some(right)).unwrap();
         objects
@@ -469,7 +469,7 @@ mod tests {
     /// A linear point with no handles gets new ones halfway to its neighbors, then lined up
     #[test]
     fn mode_continuous_from_zero_handles() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
 
         objects.set_point_mode(1, ControlPointMode::Continuous).unwrap();
@@ -492,8 +492,8 @@ mod tests {
     }
 
     /// Make two squares where point 5 is a sibling of point 1, with its left handle synced to point 1's left handle
-    fn synced_squares() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn synced_squares() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (10.0, 0.0), (20.0, 10.0)]);
         {

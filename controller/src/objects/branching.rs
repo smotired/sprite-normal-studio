@@ -1,6 +1,6 @@
-use super::{ObjectBuffers, ControlPoint, MAX_OBJECT_ID};
+use super::{ObjectsHandle, ControlPoint, MAX_OBJECT_ID};
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Add a broken control point to some other path, to create a new zone branching from this path.
     /// Returns the ID of the the created zone and point.
     pub fn create_branching_zone(&mut self, sibling_id: u16) -> anyhow::Result<(u16, u16)> {
@@ -134,7 +134,7 @@ mod tests {
     /// A branch starts a new zone with a broken point on top of the sibling
     #[test]
     fn create_branching_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
 
         let (zone_id, point_id) = objects.create_branching_zone(1).unwrap();
@@ -151,7 +151,7 @@ mod tests {
     /// The sibling has to exist
     #[test]
     fn create_branching_zone_missing_sibling() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         assert!(objects.create_branching_zone(4).is_err());
         assert_eq!(objects.zone_count(), 1);
@@ -160,7 +160,7 @@ mod tests {
     /// Joining back to the point we started at makes the first point a free point and creates nothing
     #[test]
     fn complete_branching_zone_at_source() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, point_id) = objects.create_branching_zone(1).unwrap();
         objects.create_point(zone_id, Vec2::new(20.0, 5.0)).unwrap();
@@ -176,7 +176,7 @@ mod tests {
     /// Joining along a shared edge creates one synced point at the join, and doesn't take the long way around
     #[test]
     fn complete_branching_zone_along_edge() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, start_id) = objects.create_branching_zone(0).unwrap();
         objects.create_point(zone_id, Vec2::new(-10.0, 5.0)).unwrap();
@@ -200,7 +200,7 @@ mod tests {
     /// Joining requires the points to exist, and to be connected
     #[test]
     fn complete_branching_zone_errors() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, _) = objects.create_branching_zone(0).unwrap();
         let other_zone = objects.create_zone().unwrap();

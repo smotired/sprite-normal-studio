@@ -512,7 +512,7 @@ fn with_siblings(point_ids: &[u16], state: &ControllerStateInput) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ObjectBuffers, InputModifiers as IM};
+    use crate::{ObjectsHandle, InputModifiers as IM};
     use crate::objects::ControlPointMode;
     use crate::objects::test_utils::{add_square, add_zone};
 
@@ -529,7 +529,7 @@ mod tests {
     /// Add a 20x20 square (zone 0, points 0-3) with a second square branching off its bottom edge (zone 1, points 4-7).
     /// The bottom corners of the first square, (20, 20) and (0, 20), are shared with the second.
     /// The squares are big enough that clicking the middle of a path doesn't click a point.
-    fn add_branching_squares(objects: &mut ObjectBuffers) {
+    fn add_branching_squares(objects: &mut ObjectsHandle) {
         add_square(objects, 20.0);
         let (branch_zone, _) = objects.create_branching_zone(2).unwrap();
         objects.create_point(branch_zone, Vec2::new(20.0, 40.0)).unwrap();
@@ -538,7 +538,7 @@ mod tests {
     }
 
     /// Point 2 (at (20, 20)) and its sibling in zone 1
-    fn shared_point(objects: &ObjectBuffers) -> Vec<u16> {
+    fn shared_point(objects: &ObjectsHandle) -> Vec<u16> {
         let mut points = vec![2];
         points.extend(objects.get_siblings(2));
         points.sort();
@@ -546,7 +546,7 @@ mod tests {
     }
 
     /// The positions of every point, in order
-    fn positions(objects: &ObjectBuffers) -> Vec<Vec2> {
+    fn positions(objects: &ObjectsHandle) -> Vec<Vec2> {
         (0..objects.point_count()).map(|id| objects.get_point_info(id).unwrap().position()).collect()
     }
 
@@ -561,7 +561,7 @@ mod tests {
     /// Selecting keeps the selected points
     #[test]
     fn select_keeps_points() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let tool = EditorToolPoint::select(&[2, 3], state(&objects));
         assert_eq!(tool.selection(), &[2, 3]);
     }
@@ -569,7 +569,7 @@ mod tests {
     /// Clicking a point selects it, a path selects the points at either end, and nothing deselects
     #[test]
     fn click_selects() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPoint::init();
 
@@ -586,7 +586,7 @@ mod tests {
     /// Clicking a path selects the points at either end, including their siblings when the path is shared
     #[test]
     fn click_path_selects_segment() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         let mut tool = EditorToolPoint::init();
 
@@ -610,7 +610,7 @@ mod tests {
     /// Ctrl+clicking a point or a path selects every point connected to it
     #[test]
     fn ctrl_click_selects_connected() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
         let mut tool = EditorToolPoint::init();
@@ -631,7 +631,7 @@ mod tests {
     /// Modifier keys add to, remove from, or toggle the selection
     #[test]
     fn modifier_clicks() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
         let mut tool = EditorToolPoint::init();
@@ -655,9 +655,9 @@ mod tests {
         assert_eq!(tool.selection(), &[8]);
 
         // Shift+Alt toggles them on and off
-        tool.handle_click(state(&objects), Vec2::new(20.0, 20.0), IM::alt_shift()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(20.0, 20.0), IM::shift_alt()).unwrap();
         assert_eq!(sorted(tool.selection()), with(&expected));
-        tool.handle_click(state(&objects), Vec2::new(20.0, 20.0), IM::alt_shift()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(20.0, 20.0), IM::shift_alt()).unwrap();
         assert_eq!(tool.selection(), &[8]);
 
         // Clicking nothing with a modifier keeps the selection
@@ -667,7 +667,7 @@ mod tests {
         assert_eq!(tool.selection(), &[8]);
 
         // Ctrl+Shift adds everything connected
-        tool.handle_click(state(&objects), Vec2::new(0.0, 40.0), IM::ctrl_shift()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 40.0), IM::shift_ctrl()).unwrap();
         assert_eq!(sorted(tool.selection()), &[0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Ctrl+Alt removes everything connected, even if the clicked point isn't selected
@@ -675,7 +675,7 @@ mod tests {
         assert_eq!(sorted(tool.selection()), &[0, 1, 2, 3, 4, 5, 6, 7]);
 
         // Shift+Alt on a single point toggles just that point off
-        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), IM::alt_shift()).unwrap();
+        tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), IM::shift_alt()).unwrap();
         assert_eq!(sorted(tool.selection()), &[1, 2, 3, 4, 5, 6, 7]);
 
         // Shift+Alt+Ctrl toggles everything connected on, since not all of it was selected
@@ -690,7 +690,7 @@ mod tests {
     /// Clicking the handle of the selected point should keep it selected
     #[test]
     fn click_handle_keeps_selection() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(ControlPointMode::Broken), None, Some(Vec2::new(0.0, 30.0))).unwrap();
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
@@ -702,7 +702,7 @@ mod tests {
     /// Clicking a point shared with another zone selects its sibling in the other zone
     #[test]
     fn click_selects_sibling() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (_, branch_id) = objects.create_branching_zone(1).unwrap();
         objects.create_point(1, Vec2::new(20.0, 0.0)).unwrap();
@@ -715,7 +715,7 @@ mod tests {
     /// Clicking a shared point without modifiers cycles through its instances, but with modifiers selects all of them
     #[test]
     fn plain_click_cycles_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         let shared = shared_point(&objects);
 
@@ -738,7 +738,7 @@ mod tests {
     /// Dragging a point moves it, and marks the normals stale
     #[test]
     fn drag_moves_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
 
@@ -761,7 +761,7 @@ mod tests {
     /// Dragging several points keeps them arranged the same way
     #[test]
     fn drag_moves_selection_together() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::select(&[0, 1, 2, 3], state(&objects));
 
@@ -775,7 +775,7 @@ mod tests {
     /// Dragging an unselected shared point selects all of its instances
     #[test]
     fn drag_selects_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         let mut tool = EditorToolPoint::select(&[0], state(&objects));
 
@@ -786,7 +786,7 @@ mod tests {
     /// Dragging a selected path keeps the selection
     #[test]
     fn drag_selected_path_keeps_selection() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPoint::select(&[0, 1, 2], state(&objects));
 
@@ -801,7 +801,7 @@ mod tests {
     /// Dragging a shared point applies the movement once, even though moving one instance moves all of them
     #[test]
     fn drag_moves_siblings_once() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         let shared = shared_point(&objects);
         let mut tool = EditorToolPoint::init();
@@ -843,7 +843,7 @@ mod tests {
     /// Dragging a single selected instance of a shared point keeps just that instance selected, so its handles stay editable
     #[test]
     fn drag_selected_keeps_selection() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (_, branch_id) = objects.create_branching_zone(1).unwrap();
         objects.create_point(1, Vec2::new(20.0, 0.0)).unwrap();
@@ -859,7 +859,7 @@ mod tests {
     /// Dragging a handle of the selected point moves the handle and not the point
     #[test]
     fn drag_moves_handle() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(ControlPointMode::Broken), None, Some(Vec2::new(0.0, 30.0))).unwrap();
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
@@ -880,7 +880,7 @@ mod tests {
     /// Dragging a handle onto its point keeps it at the minimum length, pointing the way it was before
     #[test]
     fn drag_handle_minimum_length() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(-20.0, 0.0)), Some(Vec2::new(0.0, 30.0))).unwrap();
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
@@ -900,7 +900,7 @@ mod tests {
     /// Dragging with nothing selected does nothing
     #[test]
     fn drag_nothing() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
 
@@ -911,7 +911,7 @@ mod tests {
     /// Shift constrains dragging to an axis or diagonal, and ctrl snaps the grabbed point to the grid
     #[test]
     fn drag_modifiers() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
 
@@ -936,7 +936,7 @@ mod tests {
     /// Dragging a box over points selects them once released, and ctrl selects everything connected to them
     #[test]
     fn drag_to_select() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
         let mut tool = EditorToolPoint::init();
@@ -977,7 +977,7 @@ mod tests {
     /// Box selection is tentative until released, follows modifiers, and can be cancelled
     #[test]
     fn drag_box_modifiers() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
         let mut tool = EditorToolPoint::init();
@@ -997,10 +997,10 @@ mod tests {
         assert_eq!(tool.selection(), &[4]);
 
         // Shift+Alt toggles each boxed point on its own
-        tool.handle_drag_start(state(&objects), Vec2::new(30.0, -10.0), IM::alt_shift()).unwrap();
-        tool.handle_dragging_to(state(&objects), Vec2::new(55.0, 5.0), IM::alt_shift()).unwrap();
+        tool.handle_drag_start(state(&objects), Vec2::new(30.0, -10.0), IM::shift_alt()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(55.0, 5.0), IM::shift_alt()).unwrap();
         assert_eq!(tool.selection(), &[5]);
-        tool.handle_drag_released(state(&objects), IM::alt_shift()).unwrap();
+        tool.handle_drag_released(state(&objects), IM::shift_alt()).unwrap();
         assert_eq!(tool.selection(), &[5]);
 
         // Alt removes from the selection once released
@@ -1014,7 +1014,7 @@ mod tests {
     /// Cancel input should deselect everything
     #[test]
     fn cancel_deselects() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
 
@@ -1028,7 +1028,7 @@ mod tests {
     /// Cancel while dragging points puts them back and keeps the selection
     #[test]
     fn cancel_drag_restores_position() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
 
@@ -1054,7 +1054,7 @@ mod tests {
     /// Dragging points warps the shapes in their zones to follow the path, and cancelling puts the shapes back exactly
     #[test]
     fn drag_warps_shapes() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let vertex = objects.add_shape_vertex(0, Vec2::new(8.0, 2.0)).unwrap();
         objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
@@ -1081,7 +1081,7 @@ mod tests {
     /// Changing a point's handle mode curves its zone's path, which warps the shapes
     #[test]
     fn mode_change_warps_shapes() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let vertex = objects.add_shape_vertex(0, Vec2::new(9.0, 5.0)).unwrap();
         objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
@@ -1095,7 +1095,7 @@ mod tests {
     /// Cancel while dragging a handle puts it back and keeps the selection
     #[test]
     fn cancel_handle_drag_restores_handle() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(-5.0, 0.0)), Some(Vec2::new(0.0, 30.0))).unwrap();
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
@@ -1116,7 +1116,7 @@ mod tests {
     /// Deleting removes every selected point, even though IDs shift as they go
     #[test]
     fn delete_points() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.insert_point(0, 0, 0.5).unwrap();
         let mut tool = EditorToolPoint::select(&[1, 2], state(&objects));
@@ -1130,7 +1130,7 @@ mod tests {
     /// Deleting with nothing selected does nothing
     #[test]
     fn delete_nothing() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::init();
         assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale.is_none());
@@ -1138,15 +1138,15 @@ mod tests {
     }
 
     /// Square A (points 0-3), triangle B (points 4-6) and square C (points 7-10)
-    fn add_delete_layout(objects: &mut ObjectBuffers) {
+    fn add_delete_layout(objects: &mut ObjectsHandle) {
         add_square(objects, 10.0);
         add_zone(objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         add_zone(objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0), (40.0, 10.0)]);
     }
 
     /// Delete a selection from a fresh delete layout, and return the objects afterward
-    fn delete_from_layout(selection: &[u16]) -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn delete_from_layout(selection: &[u16]) -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_delete_layout(&mut objects);
         let mut tool = EditorToolPoint::select(selection, state(&objects));
         assert!(tool.handle_delete(state(&objects)).unwrap().normals_stale.is_some());
@@ -1206,7 +1206,7 @@ mod tests {
     /// Deleting every instance of a shared point removes it from each zone, and other shared points stay linked
     #[test]
     fn delete_shared_point_with_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         let mut tool = EditorToolPoint::init();
 
@@ -1228,7 +1228,7 @@ mod tests {
     /// Cycling replaces the selected point with its next sibling
     #[test]
     fn special_cycle_sibling() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (_, branch_id) = objects.create_branching_zone(1).unwrap();
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
@@ -1240,7 +1240,7 @@ mod tests {
     /// Splitting a selected path inserts a point halfway along it and selects only that point
     #[test]
     fn special_split_selects_new_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::select(&[1, 2], state(&objects));
 
@@ -1254,7 +1254,7 @@ mod tests {
     /// Merging selects the merged points
     #[test]
     fn special_merge_selects_merged() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         let mut tool = EditorToolPoint::select(&[1, 4], state(&objects));
@@ -1267,7 +1267,7 @@ mod tests {
     /// The handle mode of a single selected point can be set
     #[test]
     fn special_mode_set() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
 
@@ -1279,7 +1279,7 @@ mod tests {
     /// Toggling switches a single selected point between linear and continuous
     #[test]
     fn special_mode_toggled() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::select(&[1], state(&objects));
 
@@ -1292,7 +1292,7 @@ mod tests {
     /// Mode changes and cycling only apply when exactly one point is selected
     #[test]
     fn special_requires_single_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::select(&[1, 3], state(&objects));
 
@@ -1305,7 +1305,7 @@ mod tests {
     /// Selecting all selects every point, whether or not anything was selected before
     #[test]
     fn select_all() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
@@ -1321,7 +1321,7 @@ mod tests {
     /// Nudging moves the selected points by the delta and warps the shapes in their zones, but not in the middle of a drag
     #[test]
     fn special_nudge() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let vertex = objects.add_shape_vertex(0, Vec2::new(8.0, 8.0)).unwrap();
         objects.create_shape(0, &[vertex], crate::objects::ShapeParams::default(), 0).unwrap();
@@ -1342,7 +1342,7 @@ mod tests {
     /// Feathering a shared edge sets it in both zones and marks the feathered area stale, and splitting it keeps the feather on both halves
     #[test]
     fn special_feather() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_branching_squares(&mut objects);
         let mut selected = vec![2, 3];
         selected.extend(objects.get_siblings(2));
@@ -1366,7 +1366,7 @@ mod tests {
     /// An edge only one zone has can't be feathered
     #[test]
     fn special_feather_needs_shared_edge() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPoint::select(&[1, 2], state(&objects));
         let result = tool.handle_special_action(state(&objects), SpecialAction::PathFeatherSet(6, false)).unwrap();

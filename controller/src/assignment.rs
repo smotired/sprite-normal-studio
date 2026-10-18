@@ -28,8 +28,8 @@ pub struct ZoneAssigner {
     /// Current size of the spritesheet.
     size: Vec2,
 
-    /// Last size of the object buffer, used to know if we need to rebind the buffers.
-    object_buffer_sizes: (usize, usize),
+    /// IDs of the zones and points buffers when they were last bound, used to know if we need to rebind the buffers.
+    object_buffer_ids: (u64, u64),
 }
 
 impl ZoneAssigner {
@@ -49,7 +49,7 @@ impl ZoneAssigner {
         // Create object bind group
         let (zones_buffer, points_buffer) = (object_buffers.zones, object_buffers.points);
         let objects_bind_group = create_objects_bind_group(device, &pipeline, zones_buffer.0, points_buffer.0);
-        let object_buffer_sizes = (zones_buffer.1, points_buffer.1);
+        let object_buffer_ids = (zones_buffer.1, points_buffer.1);
 
         // Create the output texture
         let size = Vec2::new(16.0, 16.0);
@@ -58,7 +58,7 @@ impl ZoneAssigner {
         // Create the uniform buffer
         let uniform_buffer = ZoneAssignerUniform::buffer(device);
 
-        Self { pipeline, output, uniform_buffer, output_bind_group: None, objects_bind_group, size, object_buffer_sizes }
+        Self { pipeline, output, uniform_buffer, output_bind_group: None, objects_bind_group, size, object_buffer_ids }
     }
 
     /// Should be called whenever sprite file selection changes
@@ -86,10 +86,10 @@ impl ZoneAssigner {
 
         // Recreate objects bind group if needed
         let (zones_buffer, points_buffer) = (object_buffers.zones, object_buffers.points);
-        let object_buffer_sizes = (zones_buffer.1, points_buffer.1);
-        if object_buffer_sizes != self.object_buffer_sizes {
+        let object_buffer_ids = (zones_buffer.1, points_buffer.1);
+        if object_buffer_ids != self.object_buffer_ids {
             self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0, points_buffer.0);
-            self.object_buffer_sizes = object_buffer_sizes;
+            self.object_buffer_ids = object_buffer_ids;
         }
     }
 
@@ -101,10 +101,10 @@ impl ZoneAssigner {
 
         // Recreate objects bind group if needed
         let (zones_buffer, points_buffer) = (object_buffers.zones, object_buffers.points);
-        let object_buffer_sizes = (zones_buffer.1, points_buffer.1);
-        if object_buffer_sizes != self.object_buffer_sizes {
+        let object_buffer_ids = (zones_buffer.1, points_buffer.1);
+        if object_buffer_ids != self.object_buffer_ids {
             self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, zones_buffer.0, points_buffer.0);
-            self.object_buffer_sizes = object_buffer_sizes;
+            self.object_buffer_ids = object_buffer_ids;
         }
 
         // Create encoder

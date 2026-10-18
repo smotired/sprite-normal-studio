@@ -128,7 +128,7 @@ mod tests {
     /// The preview shader parses, validates, and fits in the device's limits
     #[test]
     fn shader_validates() {
-        crate::tests::validate(include_str!("shader/preview.wgsl"));
+        controller::validate_wgsl(include_str!("shader/preview.wgsl"));
     }
 
     /// Uniform structs in WGSL are padded to 16 bytes

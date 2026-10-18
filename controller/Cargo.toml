@@ -7,12 +7,22 @@ authors = ["Sam Hill <smotired@gmail.com>"]
 description = "Defines and manages zones and shapes, and generates the normal map."
 
 [dependencies]
+log = "0.4.34"
 studio_math = { workspace = true }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 
+# Checks shaders without a GPU. Only for tests, here and in other crates.
+naga = { version = "30.0.1", features = ["wgsl-in"], optional = true }
+
+[features]
+# Exposes validate_wgsl, so other crates' tests can check their shaders the same way
+shader-validation = ["dep:naga"]
+
 [dev-dependencies]
+# A GPU-less device, so tests can build a whole Controller
+wgpu = { workspace = true, features = ["noop"] }
 serde_json = "1.0.151"
 naga = { version = "30.0.1", features = ["wgsl-in"] }

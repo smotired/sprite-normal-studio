@@ -1,7 +1,7 @@
 use studio_math::Vec2;
 use studio_math::transform::Affine2;
 
-use super::{ObjectBuffers, ControlPoint, ShapeParams};
+use super::{ObjectsHandle, ControlPoint, ShapeParams};
 use super::warp::{ShapeWarp, scale_radii};
 
 /// Copies of the points in some zones and all their siblings, and of the zones' shapes, from before they were transformed.
@@ -20,7 +20,7 @@ pub struct ZonesSnapshot {
     warp: ShapeWarp,
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Take a snapshot of every point and shape in some zones, and every sibling of those points.
     /// Synced handles only follow siblings, so transforming whole sibling rings keeps them in sync.
     pub fn snapshot_zones(&self, zone_ids: &[u16]) -> anyhow::Result<ZonesSnapshot> {
@@ -92,7 +92,7 @@ mod tests {
     /// Transforming moves points and turns their handles, and restoring puts them back
     #[test]
     fn transform_and_restore() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(-2.0, 0.0)), Some(Vec2::new(0.0, 3.0))).unwrap();
@@ -115,7 +115,7 @@ mod tests {
     /// Siblings in other zones are included in the snapshot, so they move along with their zones
     #[test]
     fn snapshot_includes_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (_, branch_id) = objects.create_branching_zone(1).unwrap();
 
@@ -128,7 +128,7 @@ mod tests {
     /// Shapes in transformed zones move with them, and their radii scale with the square root of how much areas scale
     #[test]
     fn transform_shapes() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         let vertex = objects.add_shape_vertex(0, Vec2::new(5.0, 5.0)).unwrap();
@@ -153,7 +153,7 @@ mod tests {
     /// Shapes in zones that share points with the transformed zones warp to follow them, and restoring puts them back
     #[test]
     fn warps_connected_zones() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, _) = objects.create_branching_zone(1).unwrap();
         objects.create_point(zone_id, Vec2::new(20.0, 5.0)).unwrap();
@@ -174,7 +174,7 @@ mod tests {
     /// Snapshots of zones that don't exist are errors
     #[test]
     fn snapshot_missing_zone() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         assert!(objects.snapshot_zones(&[0]).is_err());
     }
 }

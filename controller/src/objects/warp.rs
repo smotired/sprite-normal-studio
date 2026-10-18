@@ -2,7 +2,7 @@ use studio_math::Vec2;
 use studio_math::bezier::bezier_point_at;
 use studio_math::mvc::{interpolate, mean_value_weights};
 
-use super::{ObjectBuffers, ShapeParams};
+use super::{ObjectsHandle, ShapeParams};
 
 /// How many points each curve of a zone's path is sampled at to make its cage.
 /// Fixed, so cages from before and after an edit line up corner for corner as long as the zone has the same points.
@@ -45,7 +45,7 @@ struct GroupWarp {
     anchor: [Vec<f32>; 3],
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Get a zone's cage: points along its path, CAGE_SAMPLES for each curve
     fn zone_cage(&self, zone_id: u16) -> anyhow::Result<Vec<Vec2>> {
         let (start, count) = self.get_zone_info(zone_id)?.range();
@@ -185,8 +185,8 @@ mod tests {
     }
 
     /// A 100 pixel square with a point shape and a line shape in it
-    fn sample() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn sample() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let point = objects.add_shape_vertex(0, Vec2::new(25.0, 25.0)).unwrap();
         objects.create_shape(0, &[point], ShapeParams::default(), 0).unwrap();

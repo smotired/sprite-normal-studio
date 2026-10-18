@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use studio_math::Vec2;
 
-use super::{ObjectBuffers, ControlPoint};
+use super::{ObjectsHandle, ControlPoint};
 
 /// A run of merged points in one zone that collapses into its first point
 struct Collapse {
@@ -17,7 +17,7 @@ struct Collapse {
     right_handle: Vec2,
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Merge points into a single group of siblings at their average position, along with all of their siblings.
     /// Points in the same zone must be next to each other, and they collapse into one point.
     /// Zones where every point is merged are deleted. Returns the IDs of the merged points.
@@ -226,19 +226,19 @@ mod tests {
     use studio_math::Vec2;
 
     use super::ControlPoint;
-    use crate::objects::{ControlPointMode, ObjectBuffers};
+    use crate::objects::{ControlPointMode, ObjectsHandle};
     use crate::objects::test_utils::{add_square, add_zone};
 
     /// Make a square at (0, 0) and another at (20, 0), so points 1 and 4 are at (10, 0) and (20, 0)
-    fn two_squares() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn two_squares() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)]);
         objects
     }
 
     /// Make point b a sibling of point a, at the same position
-    fn make_siblings(objects: &mut ObjectBuffers, a: u16, b: u16) {
+    fn make_siblings(objects: &mut ObjectsHandle, a: u16, b: u16) {
         let position = objects.get_point_info(a).unwrap().position();
         objects.update_point(b, Some(position), None, None, None).unwrap();
         let siblings = &mut objects.point_siblings.borrow_mut().items;
@@ -246,7 +246,7 @@ mod tests {
     }
 
     /// Get a point's handles relative to its position
-    fn handles(objects: &ObjectBuffers, point_id: u16) -> (Vec2, Vec2) {
+    fn handles(objects: &ObjectsHandle, point_id: u16) -> (Vec2, Vec2) {
         let point = objects.get_point_info(point_id).unwrap();
         (point.left_handle() - point.position(), point.right_handle() - point.position())
     }
@@ -325,7 +325,7 @@ mod tests {
     /// Zones where every point is merged are deleted, but their points still count towards the average
     #[test]
     fn merge_whole_zone_deleted_but_averaged() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
@@ -378,7 +378,7 @@ mod tests {
     /// Merged points in zones that wind opposite ways have paths going the same way through the point, so they sync directly
     #[test]
     fn merge_syncs_opposite_winding_synced() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (20.0, 10.0), (30.0, 10.0), (30.0, 0.0)]);
 
@@ -392,7 +392,7 @@ mod tests {
     /// These corners leave the point at right angles, so comparing directions there can't tell them apart.
     #[test]
     fn merge_syncs_corners_by_winding() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(10.0, 20.0), (20.0, 20.0), (20.0, 30.0), (10.0, 30.0)]);
 
@@ -428,7 +428,7 @@ mod tests {
     /// Deleting a point that deletes its whole zone removes the whole zone from the tracked IDs
     #[test]
     fn tracking_whole_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (10.0, 0.0)]);
         add_square(&mut objects, 10.0);
         let mut tracked = vec![1, 3];

@@ -114,11 +114,13 @@ fn overlay_zone_paths(
     let left_handle_color = vec4<f32>(1, 0, 0, 1);
     let right_handle_color = vec4<f32>(1, 1, 0, 1);
 
-    // If only a single point is selected, draw its handles
-    var selected_zone = 65536u;
-    var selected_point = 65536u;
-    var single_point_selected = false;
-    
+    // The CPU works out which point's handles are drawn, so zones far from this pixel can be skipped
+    let selected_point = params.handles_point;
+    let single_point_selected = flag(5) && selected_point < params.point_count;
+
+    // Skip zones whose path, points and lines can't reach this pixel
+    let margin = (CONTROL_POINT_HALF_WIDTH + FEATHER) * params.inv_scale * 1.5;
+
     // Loop through all zones
     for (var i = 0u; i < params.zone_count; i += 1u) {
         let zone = get_zone(i);
@@ -134,6 +136,11 @@ fn overlay_zone_paths(
         let joined = zone.point_count > 1 && (last_point.syncs_left || last_point.syncs_right);
         let creating = flag(6) && !joined && i + 1u == params.zone_count; // the path being created is always the last zone
 
+        // The path being created draws a ghost to the cursor, which can be anywhere
+        if (!creating && !check_bbox(pos, zone.path_min - margin, zone.path_max + margin)) {
+            continue;
+        }
+
         // Check completion flag, and that we haven't joined with some other path
         var start = 0u;
         if (creating) {
@@ -142,14 +149,6 @@ fn overlay_zone_paths(
             last_id = zone.points_start;
             last_color = base_color;
             if (sibling_is_selected(zone.points_start)) { last_color = selected_color; }
-        }
-
-        // While creating, the latest point is the one whose handles are drawn. The loop below skips the first point and would not find it.
-        if (creating && flag(5)) {
-            selected_zone = i;
-            selected_point = zone.points_start + zone.point_count - 1u;
-            if (flag(7)) { selected_point = zone.points_start; }
-            single_point_selected = true;
         }
 
         // Draw the path and control point
@@ -195,19 +194,6 @@ fn overlay_zone_paths(
             // Draw the control point if enabled
             if (flag(5)) {
                 col = draw_box(col, pos, new_color, point.position, CONTROL_POINT_HALF_WIDTH);
-
-                // Determine if this is the only selected point
-                if (!creating && is_selected(zone.points_start + j)) {
-                    if (single_point_selected == false) {
-                        if (selected_point == 65536) {
-                            selected_zone = i;
-                            selected_point = zone.points_start + j;
-                            single_point_selected = true;
-                        }
-                    } else {
-                        single_point_selected = false;
-                    }
-                }
             }
 
             last_point = point;
@@ -247,6 +233,7 @@ fn overlay_zone_paths(
     // If a single point is selected, draw its handles and point on top of everything else
     if (flag(5) && single_point_selected) {
         // Get the zone and its final point
+        let selected_zone = get_point(selected_point).zone_id;
         let zone = get_zone(selected_zone);
         var last_point = get_point(zone.points_start + zone.point_count - 1);
 
@@ -380,7 +367,7 @@ fn fill_shapes(
     var col = color;
     for (var i = 0u; i < params.zone_count; i += 1u) {
         let zone = get_zone(i);
-        if (zone.shape_count == 0u || !is_current_zone(i, zone)) {
+        if (zone.shape_count == 0u || !check_bbox(pos, zone.shapes_min, zone.shapes_max) || !is_current_zone(i, zone)) {
             continue;
         }
 
@@ -416,7 +403,7 @@ fn outline_shapes(
     let margin = FEATHER * params.inv_scale;
     for (var i = 0u; i < params.zone_count; i += 1u) {
         let zone = get_zone(i);
-        if (zone.shape_count == 0u) {
+        if (zone.shape_count == 0u || !check_bbox(pos, zone.shapes_min - margin, zone.shapes_max + margin)) {
             continue;
         }
         let current = is_current_zone(i, zone);

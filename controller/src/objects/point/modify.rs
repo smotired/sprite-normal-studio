@@ -99,6 +99,12 @@ impl ControlPoint {
         self.right_sync_id += point_offset;
     }
 
+    /// Renumber the points this point syncs its handles to, for when every point is renumbered
+    pub(crate) fn remap_sync_ids(&mut self, map: impl Fn(u16) -> u16) {
+        self.left_sync_id = map(self.left_sync_id);
+        self.right_sync_id = map(self.right_sync_id);
+    }
+
     /// Remove a point ID from the point list
     pub fn remove_point(point_id: u16, points: &mut Vec<ControlPoint>, siblings: &mut SiblingsList) -> anyhow::Result<()> {
         if (point_id as usize) >= points.len() { anyhow::bail!("Point {} does not exist!", point_id); }

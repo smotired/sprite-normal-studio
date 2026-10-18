@@ -1,6 +1,6 @@
 use studio_math::{Vec2, bezier::bezier_signed_area};
 
-use super::{ObjectBuffers, ControlPoint};
+use super::{ObjectsHandle, ControlPoint};
 
 /// Defines an item in an exterior path that we will need to create an interior node for.
 pub struct ExteriorPathSegment {
@@ -33,7 +33,7 @@ impl ExteriorPathSegment {
     }
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Determine if two points in different zones are connected
     pub fn check_points_connected(&self, point1: u16, point2: u16) -> anyhow::Result<bool> {
         // Don't use get_connected_points, so that we can exit early if we find the one we want.
@@ -348,7 +348,7 @@ mod tests {
     /// Points in the same zone are always connected
     #[test]
     fn connected_in_same_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         assert!(objects.check_points_connected(0, 2).unwrap());
         assert!(objects.check_points_connected(3, 3).unwrap());
@@ -357,7 +357,7 @@ mod tests {
     /// Zones are only connected if they share points, directly or through other zones
     #[test]
     fn connected_through_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (branch_zone, _) = objects.create_branching_zone(1).unwrap();
         objects.create_point(branch_zone, Vec2::new(20.0, 0.0)).unwrap();
@@ -373,7 +373,7 @@ mod tests {
     /// A counter-clockwise zone has positive area, equal to its size
     #[test]
     fn zone_signed_area() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]);
 
@@ -384,7 +384,7 @@ mod tests {
     /// An open path only sums the curves between its points, so it has less area than when closed
     #[test]
     fn zone_signed_area_open() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(1.0, 0.0), (3.0, 0.0), (3.0, 2.0)]);
 
         assert!((objects.zone_signed_area(0, false).unwrap() - 3.0).abs() < 1e-3);
@@ -394,7 +394,7 @@ mod tests {
     /// Flipping reverses point order, which flips the area, and returns the new start and end
     #[test]
     fn flip_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
@@ -408,7 +408,7 @@ mod tests {
     /// Flipping swaps the handles of each point
     #[test]
     fn flip_zone_swaps_handles() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]);
         objects.update_point(1, None, Some(crate::objects::ControlPointMode::Broken), Some(Vec2::new(-3.0, 0.0)), Some(Vec2::new(0.0, 4.0))).unwrap();
 
@@ -422,7 +422,7 @@ mod tests {
     /// Only the final zone can be flipped
     #[test]
     fn flip_zone_not_last() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
         assert!(objects.flip_zone(0).is_err());

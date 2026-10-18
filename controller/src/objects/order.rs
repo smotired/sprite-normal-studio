@@ -1,5 +1,4 @@
-use super::ObjectBuffers;
-use super::save::saved_zones;
+use super::ObjectsHandle;
 
 /// How to change the order of the selected zones. Zones later in the order are in front.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -17,23 +16,62 @@ pub enum ZoneOrderChange {
     ToBack,
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Put the zones in a new order, listing every zone ID once from back to front.
-    /// Every ID changes, so the objects are rebuilt in the new order the same way they are saved and loaded.
+    /// Each zone's points, shapes and shape vertices move as a block, and every point ID, sync and sibling is renumbered to match.
     pub fn reorder_zones(&mut self, new_order: &[u16]) -> anyhow::Result<()> {
         let mut sorted = new_order.to_vec();
         sorted.sort();
         if sorted != (0..self.zone_count()).collect::<Vec<_>>() { anyhow::bail!("A new zone order must list every zone once!"); }
 
-        let saved = saved_zones(
-            new_order,
-            &self.zones.borrow().items,
-            &self.points.borrow().items,
-            &self.point_siblings.borrow().items,
-            &self.shapes.borrow().items,
-            &self.shape_vertices.borrow().items,
-        );
-        self.load(saved.validate()?);
+        let zones = self.zones.borrow().items.clone();
+        let (new_zones, new_points, new_siblings, new_shapes, new_vertices) = {
+            let points = &self.points.borrow().items;
+            let siblings = &self.point_siblings.borrow().items;
+            let shapes = &self.shapes.borrow().items;
+            let vertices = &self.shape_vertices.borrow().items;
+
+            // Copy each zone's blocks in the new order, noting where each point went
+            let mut new_zones = Vec::with_capacity(zones.len());
+            let (mut new_points, mut new_shapes, mut new_vertices) = (Vec::with_capacity(points.len()), Vec::with_capacity(shapes.len()), Vec::with_capacity(vertices.len()));
+            let mut point_map = vec![0u16; points.len()];
+            for (new_id, &old_id) in new_order.iter().enumerate() {
+                let zone = zones[old_id as usize];
+                let ((point_start, point_count), (shape_start, shape_count), (vertex_start, vertex_count)) = (zone.range(), zone.shapes(), zone.vertices());
+                new_zones.push(zone.with_starts(new_points.len() as u16, new_shapes.len() as u16, new_vertices.len() as u16));
+
+                for old_point in point_start..point_start + point_count {
+                    point_map[old_point as usize] = new_points.len() as u16;
+                    let mut point = points[old_point as usize];
+                    point.set_zone_id(new_id as u16);
+                    new_points.push(point);
+                }
+                new_shapes.extend(shapes[shape_start as usize..(shape_start + shape_count) as usize].iter().map(|&shape| {
+                    let mut shape = shape;
+                    shape.set_zone_id(new_id as u16);
+                    shape
+                }));
+                // Shapes refer to their vertices by their index in the zone, so the vertices move as they are
+                new_vertices.extend_from_slice(&vertices[vertex_start as usize..(vertex_start + vertex_count) as usize]);
+            }
+
+            // Syncs and sibling rings refer to points by ID, so they follow the points to their new IDs
+            let map = |point_id: u16| point_map[point_id as usize];
+            for point in &mut new_points {
+                point.remap_sync_ids(map);
+            }
+            let mut new_siblings = siblings.clone();
+            for (old_id, &sibling) in siblings[..points.len()].iter().enumerate() {
+                new_siblings[map(old_id as u16) as usize] = map(sibling);
+            }
+            (new_zones, new_points, new_siblings, new_shapes, new_vertices)
+        };
+
+        self.zones.borrow_mut().items = new_zones;
+        self.points.borrow_mut().items = new_points;
+        self.point_siblings.borrow_mut().items = new_siblings;
+        self.shapes.borrow_mut().items = new_shapes;
+        self.shape_vertices.borrow_mut().items = new_vertices;
         Ok(())
     }
 
@@ -146,7 +184,7 @@ mod tests {
     /// Zones overlap by their bounding boxes, even where their paths don't, but boxes that only touch don't
     #[test]
     fn zones_overlapping() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)]);
         add_zone(&mut objects, &[(10.0, 0.0), (20.0, 0.0), (20.0, -10.0)]);
@@ -159,7 +197,7 @@ mod tests {
     /// Reordering keeps every zone's points, siblings and shapes, just numbered in the new order
     #[test]
     fn reorder_keeps_objects() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (branch, _) = objects.create_branching_zone(1).unwrap();
         objects.create_point(branch, Vec2::new(20.0, 5.0)).unwrap();
@@ -189,10 +227,43 @@ mod tests {
         assert!(objects.reorder_zones(&[0, 0, 1]).is_err());
     }
 
+    /// Reordering and then putting the zones back gives exactly the objects from before,
+    /// including siblings, handle syncs, shapes, and shapes still being drawn
+    #[test]
+    fn reorder_round_trip() {
+        let mut objects = ObjectsHandle::headless();
+        add_square(&mut objects, 10.0);
+        let (branch, _) = objects.create_branching_zone(1).unwrap();
+        objects.create_point(branch, Vec2::new(20.0, 5.0)).unwrap();
+        objects.set_point_mode(1, crate::ControlPointMode::Continuous).unwrap();
+        assert!(objects.points.borrow().items.iter().enumerate().any(|(id, point)| point.left_sync_id() != id as u16 || point.right_sync_id() != id as u16));
+        let vertex = objects.add_shape_vertex(0, Vec2::new(5.0, 5.0)).unwrap();
+        objects.create_shape(0, &[vertex], ShapeParams::default(), 0).unwrap();
+        add_zone(&mut objects, &[(30.0, 0.0), (40.0, 0.0), (35.0, 10.0)]);
+        let pending = objects.add_shape_vertex(2, Vec2::new(35.0, 3.0)).unwrap();
+        objects.create_shape(2, &[pending], ShapeParams::default(), super::super::shape::SHAPE_PENDING).unwrap();
+
+        let snapshot = |objects: &ObjectsHandle| (
+            objects.zones.borrow().items.iter().map(|zone| (zone.range(), zone.shapes(), zone.vertices())).collect::<Vec<_>>(),
+            bytemuck::cast_slice::<_, u8>(&objects.points.borrow().items).to_vec(),
+            objects.point_siblings.borrow().items.clone(),
+            objects.shapes.borrow().items.clone(),
+            objects.shape_vertices.borrow().items.clone(),
+        );
+        let before = snapshot(&objects);
+
+        // [2, 0, 1] puts old zone 2 first, so [1, 2, 0] puts each zone back
+        objects.reorder_zones(&[2, 0, 1]).unwrap();
+        assert_ne!(snapshot(&objects), before);
+        assert!(objects.get_shape_info(0).unwrap().is_pending());
+        objects.reorder_zones(&[1, 2, 0]).unwrap();
+        assert_eq!(snapshot(&objects), before);
+    }
+
     /// Changing the order finds the new order, or None if nothing would move
     #[test]
     fn changed_order() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(50.0, 50.0), (60.0, 50.0), (60.0, 60.0)]);
         add_zone(&mut objects, &[(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)]);

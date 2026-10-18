@@ -467,14 +467,14 @@ fn shift_id_after_insert(mut point_id: u16, inserted_ids: &[u16]) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ObjectBuffers, InputModifiers as IM};
+    use crate::{ObjectsHandle, InputModifiers as IM};
     use crate::objects::test_utils::{add_square, add_zone};
 
     use super::*;
     use super::super::test_utils::state;
 
     /// Click three points far apart to start a path
-    fn start_triangle(tool: &mut EditorToolPen, objects: &ObjectBuffers) {
+    fn start_triangle(tool: &mut EditorToolPen, objects: &ObjectsHandle) {
         tool.handle_click(state(objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
         tool.handle_click(state(objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
         tool.handle_click(state(objects), Vec2::new(50.0, 50.0), Default::default()).unwrap();
@@ -492,7 +492,7 @@ mod tests {
     /// Clicking empty space starts a new zone, and further clicks add points to it
     #[test]
     fn click_creates_points() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
 
         let result = tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
@@ -511,7 +511,7 @@ mod tests {
     /// Clicking the first point completes the path and moves to the zone tool
     #[test]
     fn click_first_point_completes_path() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         start_triangle(&mut tool, &objects);
 
@@ -528,7 +528,7 @@ mod tests {
     /// Clicking the first point when there is only one point doesn't finish anything
     #[test]
     fn click_first_point_needs_more_points() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
 
@@ -540,7 +540,7 @@ mod tests {
     /// Dragging out a new point makes it continuous and drags its handle
     #[test]
     fn drag_creates_continuous_point() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.handle_drag_start(state(&objects), Vec2::new(10.0, 10.0), Default::default()).unwrap();
         assert_eq!(objects.get_point_info(0).unwrap().mode(), ControlPointMode::Continuous);
@@ -557,7 +557,7 @@ mod tests {
     /// Dragging a later point sets both handles opposite to each other
     #[test]
     fn drag_sets_opposite_handles() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
         tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
@@ -571,7 +571,7 @@ mod tests {
     /// Dragging a handle shorter than the minimum length pushes it out to the minimum
     #[test]
     fn drag_handle_minimum_length() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
         tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
@@ -585,7 +585,7 @@ mod tests {
     /// Dragging off of the first point closes the path, and releasing finishes it
     #[test]
     fn drag_first_point_closes_path() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         start_triangle(&mut tool, &objects);
 
@@ -601,7 +601,7 @@ mod tests {
     /// Releasing a drag on the first point of a path with a single point doesn't finish it
     #[test]
     fn release_needs_more_points() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.handle_drag_start(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
 
@@ -612,7 +612,7 @@ mod tests {
     /// Cancelling throws away the path being created
     #[test]
     fn cancel_deletes_path() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         start_triangle(&mut tool, &objects);
 
@@ -629,7 +629,7 @@ mod tests {
     /// Deselecting throws away an unfinished path
     #[test]
     fn deselect_deletes_path() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         start_triangle(&mut tool, &objects);
 
@@ -640,7 +640,7 @@ mod tests {
     /// Deleting removes the latest point, and the zone with it if it was the only one
     #[test]
     fn delete_latest_point() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         start_triangle(&mut tool, &objects);
 
@@ -657,7 +657,7 @@ mod tests {
     /// Deleting when there is no path does nothing
     #[test]
     fn delete_nothing() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool = EditorToolPen::init();
         tool.handle_delete(state(&objects)).unwrap();
@@ -667,7 +667,7 @@ mod tests {
     /// Clicking an existing path adds a point to it, and moves to the point tool
     #[test]
     fn click_path_inserts_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
@@ -685,7 +685,7 @@ mod tests {
     /// Clicking an existing point starts a zone branching off of it
     #[test]
     fn click_point_branches() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
@@ -698,7 +698,7 @@ mod tests {
     /// Branching off of a point then clicking another one joins the zones together
     #[test]
     fn click_second_point_joins() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
@@ -714,7 +714,7 @@ mod tests {
     /// Shift snaps new points to the grid, but not points joined to or branched off of existing ones
     #[test]
     fn shift_click_snaps_to_grid() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.handle_click(state(&objects), Vec2::new(10.4, 20.6), IM::shift()).unwrap();
         assert_eq!(objects.get_point_info(0).unwrap().position(), Vec2::new(10.0, 21.0));
@@ -722,7 +722,7 @@ mod tests {
         assert_eq!(objects.get_point_info(1).unwrap().position(), Vec2::new(51.0, 0.0));
 
         // Branching off of a point that isn't on the grid starts exactly on that point
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_zone(&mut objects, &[(0.0, 0.0), (100.3, 0.0), (100.0, 100.0)]);
         let mut tool = EditorToolPen::init();
         tool.handle_click(state(&objects), Vec2::new(100.0, 0.0), IM::shift()).unwrap();
@@ -734,7 +734,7 @@ mod tests {
     /// Shift snaps a dragged handle to horizontal, vertical, or diagonal
     #[test]
     fn drag_handle_shift_snaps_direction() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
         tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
@@ -754,7 +754,7 @@ mod tests {
     /// Ctrl snaps the end of a dragged handle to the grid, and takes priority over shift
     #[test]
     fn drag_handle_ctrl_snaps_to_grid() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
         tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(point.right_handle(), Vec2::new(60.0, 4.0));
         assert_eq!(point.left_handle(), Vec2::new(40.0, -4.0));
 
-        tool.handle_dragging_to(state(&objects), Vec2::new(60.4, 3.6), IM::ctrl_shift()).unwrap();
+        tool.handle_dragging_to(state(&objects), Vec2::new(60.4, 3.6), IM::shift_ctrl()).unwrap();
         assert_eq!(objects.get_point_info(1).unwrap().right_handle(), Vec2::new(60.0, 4.0));
     }
 
@@ -772,7 +772,7 @@ mod tests {
     #[test]
     fn alt_release_breaks_point() {
         for (modifiers, mode) in [(IM::alt(), ControlPointMode::Broken), (IM::none(), ControlPointMode::Continuous)] {
-            let objects = ObjectBuffers::headless();
+            let objects = ObjectsHandle::headless();
             let mut tool = EditorToolPen::init();
             tool.handle_click(state(&objects), Vec2::new(0.0, 0.0), Default::default()).unwrap();
             tool.handle_drag_start(state(&objects), Vec2::new(50.0, 0.0), Default::default()).unwrap();
@@ -789,7 +789,7 @@ mod tests {
     /// Releasing a drag with alt doesn't change points synced to the zone we branched off of
     #[test]
     fn alt_release_skips_branch_points() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
@@ -808,7 +808,7 @@ mod tests {
     /// Dragging on a path inserts a point into it and starts a zone branching off of that point
     #[test]
     fn drag_path_starts_branch() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
@@ -837,7 +837,7 @@ mod tests {
     /// Clicking another zone's path while branching inserts a point into it and joins to that point
     #[test]
     fn click_path_joins_branch() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
@@ -864,7 +864,7 @@ mod tests {
     /// Dragging another zone's path while branching inserts a point, joins to it, and drags its free handle
     #[test]
     fn drag_path_joins_branch() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         let mut tool = EditorToolPen::init();
 
@@ -888,7 +888,7 @@ mod tests {
     /// Clicking a path that isn't connected to the zone we branched off of is an error, and doesn't change the path
     #[test]
     fn click_disconnected_path_errors() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         add_zone(&mut objects, &[(200.0, 0.0), (300.0, 0.0), (300.0, 100.0), (200.0, 100.0)]);
         let mut tool = EditorToolPen::init();
@@ -913,8 +913,8 @@ mod tests {
     }
 
     /// Make a square at (0, 0) with a size of 10, whose zone has an upward normal
-    fn up_square() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn up_square() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.set_zone_normals(&[0], Vec3::UP).unwrap();
         objects
@@ -923,7 +923,7 @@ mod tests {
     /// New zones get the normal for new zones
     #[test]
     fn new_zone_gets_pen_normal() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.normal = Vec3::RIGHT;
 
@@ -1020,7 +1020,7 @@ mod tests {
     /// If the pen stays active, finishing a zone keeps the pen tool and gets ready for the next zone
     #[test]
     fn stay_active_keeps_tool() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         tool.stay_active = true;
         start_triangle(&mut tool, &objects);
@@ -1038,7 +1038,7 @@ mod tests {
     /// The flags can be toggled, and the UI can ask about them and the normal
     #[test]
     fn toggles_and_queries() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool = EditorToolPen::init();
         assert_eq!(tool.handle_special_query(SpecialQuery::Normal), Some(SpecialValue::Normal(Vec3::FORWARD)));
         assert_eq!(tool.handle_special_query(SpecialQuery::InheritNormal), Some(SpecialValue::Flag(true)));

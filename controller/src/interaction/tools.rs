@@ -14,7 +14,7 @@ pub(super) use result::ToolResult;
 use result::{EditorToolActionResult, DefaultResults};
 
 use studio_math::{Vec2, Vec3};
-use crate::{Axis, Controller, ControlPointMode, ObjectBuffers, ObjectDiff, Bounds, InputModifiers, SavedObjects, Status};
+use crate::{Axis, Controller, ControlPointMode, ObjectsHandle, ObjectDiff, Bounds, InputModifiers, SavedObjects, Status};
 use crate::objects::{ShapeParams, ShapeParamChange, ShapeProfile, ZoneOrderChange};
 use super::history::{History, DragStep};
 
@@ -44,8 +44,8 @@ pub struct ControllerStateInput {
     // World-space position of the mouse
     pub mouse: Vec2,
     
-    // Mutable reference to the objects list
-    pub objects: ObjectBuffers,
+    // A handle to the objects, shared with the controller, so changes through it change the controller's objects
+    pub objects: ObjectsHandle,
 
     // Inverse camera scale
     pub camera_inv_scale: f32,
@@ -284,7 +284,7 @@ pub trait EditorTool: EditorToolClone {
     fn selection_box(&self) -> Option<(Vec2, Vec2)> { None }
 
     /// Get the box that can be dragged to transform the selection, if this tool has one
-    fn transform_box(&self, _objects: &ObjectBuffers) -> Option<TransformBox> { None }
+    fn transform_box(&self, _objects: &ObjectsHandle) -> Option<TransformBox> { None }
 
     /// If this tool is creating a path, returns whether the latest point is the first point of that path
     /// (i.e. the path is about to be closed). The path being created is always the last zone.
@@ -326,6 +326,8 @@ impl Controller {
 
     /// Select a tool, and perform related side-effects. Changes to the objects are recorded for undo.
     pub fn select_tool(&mut self, tool: EditorToolKind) {
+        if self.tool_dragging { return; }
+        self.revision += 1;
         self.history.close(&self.objects, self.tool.as_ref());
         let (deselect_state, select_state) = (self.create_state(), self.create_state());
         let normals_stale = switch_tool(&mut self.tool, &mut self.history, tool, deselect_state, select_state);
@@ -342,6 +344,7 @@ impl Controller {
         let state = self.create_state();
         let result = run_tool_action(&mut self.tool, state, &mut self.status, step == DragStep::Continue, action);
         let succeeded = result.is_some();
+        if succeeded { self.revision += 1; }
         if let Some((EditorToolActionResult { new_tool, normals_stale }, change)) = result {
             self.history.record(change, normals_stale);
             self.mark_normals_stale(normals_stale);
@@ -367,6 +370,7 @@ impl Controller {
     /// Get the selected zones in a form that can be pasted later. Only the zone tool can copy, and only if zones are selected.
     /// If copying fails, the status shows why.
     pub fn copy_selection(&mut self) -> Option<SavedObjects> {
+        if self.tool_dragging { return None; }
         if self.tool.kind() != EditorToolKind::Zone { return None; }
         let zones = self.selected_zones();
         if zones.is_empty() { return None; }
@@ -383,6 +387,7 @@ impl Controller {
     /// Paste copied zones with the selected tool, which selects them. Changes are recorded for undo.
     /// Returns where the center of the pasted zones ended up, or None if nothing was pasted.
     pub fn paste(&mut self, objects: &SavedObjects, placement: PastePlacement) -> Option<Vec2> {
+        if self.tool_dragging { return None; }
         if !self.run_tool(DragStep::None, |tool, state| tool.handle_paste(state, objects, placement)) { return None; }
         if self.tool.kind() != EditorToolKind::Zone { return None; }
         self.objects.zones_center(&self.selected_zones()).ok().flatten()
@@ -390,6 +395,7 @@ impl Controller {
 
     /// Run an action from the UI that the selected tool handles in its own way, with the same rollback and error handling as other tool actions.
     pub(crate) fn run_special_action(&mut self, action: SpecialAction) {
+        if self.tool_dragging { return; }
         // Shape params with no shapes selected are for new shapes, which the controller keeps so every shape tool uses them
         if let SpecialAction::ShapeParamSet(change, _) = action && self.selected_shapes().is_empty() {
             self.shape_defaults = self.shape_defaults.with(change);
@@ -611,16 +617,16 @@ pub(super) fn run_tool_action(
 pub(super) mod test_utils {
     use studio_math::Vec2;
 
-    use crate::ObjectBuffers;
+    use crate::ObjectsHandle;
     use super::ControllerStateInput;
 
     /// Create the input state for a tool, as if the camera is at 1:1 scale
-    pub(crate) fn state(objects: &ObjectBuffers) -> ControllerStateInput {
+    pub(crate) fn state(objects: &ObjectsHandle) -> ControllerStateInput {
         state_scaled(objects, 1.0)
     }
 
     /// Create the input state for a tool with a specific inverse camera scale
-    pub(super) fn state_scaled(objects: &ObjectBuffers, camera_inv_scale: f32) -> ControllerStateInput {
+    pub(super) fn state_scaled(objects: &ObjectsHandle, camera_inv_scale: f32) -> ControllerStateInput {
         ControllerStateInput { mouse: Vec2::ZERO, objects: objects.clone(), camera_inv_scale, shape_defaults: crate::objects::ShapeParams::default(), grid_size: 1.0 }
     }
 }
@@ -629,7 +635,7 @@ pub(super) mod test_utils {
 mod tests {
     use studio_math::Vec2;
 
-    use crate::ObjectBuffers;
+    use crate::ObjectsHandle;
     use crate::objects::test_utils::add_square;
     use super::*;
     use super::test_utils::{self, state};
@@ -647,7 +653,7 @@ mod tests {
     /// An action that fails partway through restores the objects and tool state
     #[test]
     fn error_restores_state() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
         let mut status = Status::Ok;
@@ -668,7 +674,7 @@ mod tests {
     /// A successful action keeps its changes and clears the status
     #[test]
     fn success_keeps_state() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
         let mut status = Status::Error("Old error".to_owned());
@@ -685,7 +691,7 @@ mod tests {
     /// Continuing a drag only replaces the status if the action fails
     #[test]
     fn continuing_drag_keeps_status() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
 
         let mut status = Status::Error("Old error".to_owned());
@@ -707,7 +713,7 @@ mod tests {
     /// Actions other than continuing a drag always replace the status, including feedback
     #[test]
     fn other_actions_replace_status() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
 
         let mut status = Status::Error("Old error".to_owned());
@@ -740,7 +746,7 @@ mod tests {
     /// Tools ignore special actions and queries they don't support
     #[test]
     fn special_unsupported_is_ignored() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
 
         let result = tool.handle_special_action(state(&objects), SpecialAction::ToggleInherit).unwrap();

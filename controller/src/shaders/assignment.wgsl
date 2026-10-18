@@ -99,9 +99,15 @@ struct ZonePacked {
     // Amount of shape vertices in this zone
     vertices_start_and_vertex_count: u32,
 
-    // The struct is rounded up to the 16 byte alignment of the vec3 anyway. Must match Zone in zone.rs.
+    // The struct is rounded up to the 16 byte alignment of the vec3 anyway. Must match ZoneGpu in zone.rs.
     _padding0: u32,
     _padding1: u32,
+
+    // Top left (xy) and bottom right (zw) corners around the zone's path, including its handles
+    path_bounds: vec4<f32>,
+
+    // Top left (xy) and bottom right (zw) corners around everything the zone's shapes reach. Empty (min > max) if it has none.
+    shapes_bounds: vec4<f32>,
 }
 @group(1) @binding(0) var<storage, read> zones: array<ZonePacked>;
 
@@ -114,6 +120,10 @@ struct Zone {
 
     // Amount of points in this path
     point_count: u32,
+
+    // Top left and bottom right corners around the zone's path
+    path_min: vec2<f32>,
+    path_max: vec2<f32>,
 }
 
 fn get_zone(zone_id: u32) -> Zone {
@@ -122,7 +132,14 @@ fn get_zone(zone_id: u32) -> Zone {
         zone.normal,
         unpack_fst(zone.points_start_and_point_count),
         unpack_snd(zone.points_start_and_point_count),
+        zone.path_bounds.xy,
+        zone.path_bounds.zw,
     );
+}
+
+// Returns true if a box from min to max overlaps the zone's path bounds, grown by a margin on every side
+fn near_zone(zone: Zone, min: vec2<f32>, max: vec2<f32>, margin: f32) -> bool {
+    return all(max >= zone.path_min - margin) && all(min <= zone.path_max + margin);
 }
 
 /***********************************/
@@ -361,8 +378,12 @@ fn assign_pixel(pxl: vec2<u32>) -> Output {
     var owner: array<u32, 16>;
     for (var s = 0u; s < SUBSAMPLES; s += 1u) { owner[s] = NO_ZONE; }
 
+    let pixel_min = vec2<f32>(pxl);
     for (var i = 0u; i < params.zone_count; i += 1u) {
-        let mask = pixel_coverage_mask(pxl, get_zone(i));
+        // Zones whose path doesn't reach the pixel can't cover any of it
+        let zone = get_zone(i);
+        if (!near_zone(zone, pixel_min, pixel_min + 1.0, 0.0)) { continue; }
+        let mask = pixel_coverage_mask(pxl, zone);
         if (mask == 0u) { continue; }
         for (var s = 0u; s < SUBSAMPLES; s += 1u) {
             if ((mask & (1u << s)) != 0u) { owner[s] = i; }
@@ -430,6 +451,9 @@ fn assign_pixel(pxl: vec2<u32>) -> Output {
 const FEATHER_SHIFT = 2u;
 const PI = 3.14159265;
 
+// Widest a curve can be feathered, in pixels, which is as much as fits in the flags. Must match MAX_FEATHER in point.rs.
+const MAX_FEATHER = 63.0;
+
 // How far the curve starting at a point is feathered, in pixels. The flags are the high byte of the first u16.
 fn point_feather(point_id: u32) -> f32 {
     let flags = (unpack_fst(points[point_id].mode_and_sync_mode_and_zone_id) >> 8u) & 0xFFu;
@@ -458,7 +482,7 @@ fn feather_pixel(pxl: vec2<u32>, assigned: Output) -> Output {
     for (var i = 0u; i < params.zone_count; i += 1u) {
         if (i == assigned.zone1_id) { continue; }
         let zone = get_zone(i);
-        if (zone.point_count < 2u) { continue; }
+        if (zone.point_count < 2u || !near_zone(zone, pos, pos, MAX_FEATHER)) { continue; }
 
         for (var j = 0u; j < zone.point_count; j += 1u) {
             let start_id = zone.points_start + j;

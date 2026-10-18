@@ -52,9 +52,15 @@ struct ZonePacked {
     // Amount of shape vertices in this zone
     vertices_start_and_vertex_count: u32,
 
-    // The struct is rounded up to the 16 byte alignment of the vec3 anyway. Must match Zone in zone.rs.
+    // The struct is rounded up to the 16 byte alignment of the vec3 anyway. Must match ZoneGpu in zone.rs.
     _padding0: u32,
     _padding1: u32,
+
+    // Top left (xy) and bottom right (zw) corners around the zone's path, including its handles
+    path_bounds: vec4<f32>,
+
+    // Top left (xy) and bottom right (zw) corners around everything the zone's shapes reach. Empty (min > max) if it has none.
+    shapes_bounds: vec4<f32>,
 }
 @group(1) @binding(0) var<storage, read> zones: array<ZonePacked>;
 

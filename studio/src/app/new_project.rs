@@ -161,7 +161,8 @@ impl StudioApp {
         controller.new_scene();
         controller.set_sprite_size(dialog.sprite_size);
         let clean = build_workspace_file(&sprite, normal.as_ref(), None, controller.save_scene(), &path);
-        self.add_project(ctx, Project { sprite, normal, path, saved: false, export_path: None, clean, dirty: true, controller, timeline: Default::default() });
+        self.add_project(ctx, Project { sprite, normal, path, saved: false, export_path: None, clean, dirty: true, dirty_key: None, controller, timeline: Default::default() });
+        self.warn_normal_size();
 
     }
 }

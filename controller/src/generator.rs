@@ -28,8 +28,8 @@ pub struct Generator {
     /// Current size of the spritesheet.
     size: Vec2,
 
-    /// Last sizes of the zones, shapes and shape vertices buffers, used to know if we need to rebind the buffers.
-    object_buffer_sizes: [usize; 3],
+    /// IDs of the zones, shapes and shape vertices buffers when they were last bound, used to know if we need to rebind the buffers.
+    object_buffer_ids: [u64; 3],
 }
 
 impl Generator {
@@ -47,7 +47,7 @@ impl Generator {
         });
 
         // Create object bind group
-        let object_buffer_sizes = used_sizes(&object_buffers);
+        let object_buffer_ids = used_ids(&object_buffers);
         let objects_bind_group = create_objects_bind_group(device, &pipeline, object_buffers);
 
         // Create the output texture
@@ -57,7 +57,7 @@ impl Generator {
         // Create the uniform buffer
         let uniform_buffer = GeneratorUniform::buffer(device);
 
-        Self { pipeline, output, uniform_buffer, bind_group: None, objects_bind_group, size, object_buffer_sizes }
+        Self { pipeline, output, uniform_buffer, bind_group: None, objects_bind_group, size, object_buffer_ids }
     }
 
     /// Should be called whenever normal map or assignment textures are regenerated
@@ -88,10 +88,10 @@ impl Generator {
         }));
 
         // Recreate objects bind group if needed
-        let object_buffer_sizes = used_sizes(&object_buffers);
-        if object_buffer_sizes != self.object_buffer_sizes {
+        let object_buffer_ids = used_ids(&object_buffers);
+        if object_buffer_ids != self.object_buffer_ids {
             self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, object_buffers);
-            self.object_buffer_sizes = object_buffer_sizes;
+            self.object_buffer_ids = object_buffer_ids;
         }
     }
 
@@ -103,10 +103,10 @@ impl Generator {
         let Some(bind_group) = &self.bind_group else { return };
 
         // Recreate objects bind group if needed
-        let object_buffer_sizes = used_sizes(&object_buffers);
-        if object_buffer_sizes != self.object_buffer_sizes {
+        let object_buffer_ids = used_ids(&object_buffers);
+        if object_buffer_ids != self.object_buffer_ids {
             self.objects_bind_group = create_objects_bind_group(device, &self.pipeline, object_buffers);
-            self.object_buffer_sizes = object_buffer_sizes;
+            self.object_buffer_ids = object_buffer_ids;
         }
 
         // Create encoder
@@ -152,8 +152,8 @@ fn padded_bytes_per_row(width: u32) -> u32 {
     (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
 }
 
-/// Get the sizes of the object buffers the generator uses
-fn used_sizes(object_buffers: &BufferStates) -> [usize; 3] {
+/// Get the IDs of the object buffers the generator uses
+fn used_ids(object_buffers: &BufferStates) -> [u64; 3] {
     [object_buffers.zones.1, object_buffers.shapes.1, object_buffers.shape_vertices.1]
 }
 

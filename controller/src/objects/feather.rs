@@ -1,8 +1,8 @@
 use studio_math::Vec2;
 
-use super::{Bounds, ObjectBuffers};
+use super::{Bounds, ObjectsHandle};
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Find the curve between two groups of siblings in every zone they are next to each other in.
     /// Returns the point that starts the curve in each zone, which may run either way. Shared edges between zones give two or more.
     pub fn shared_segment_starts(&self, group_a: &[u16], group_b: &[u16]) -> anyhow::Result<Vec<u16>> {
@@ -85,8 +85,8 @@ mod tests {
     use super::super::test_utils::add_square;
 
     /// A square with a triangle branching off its left edge, which shares the square's points 0 and 3 as the triangle's 4 and 6
-    fn branched() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn branched() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, _) = objects.create_branching_zone(0).unwrap();
         objects.create_point(zone_id, Vec2::new(-10.0, 5.0)).unwrap();
@@ -129,7 +129,7 @@ mod tests {
     }
 
     /// Feathering a shared edge
-    fn feathered() -> ObjectBuffers {
+    fn feathered() -> ObjectsHandle {
         let mut objects = branched();
         let starts = objects.shared_segment_starts(&[0, 4], &[3, 6]).unwrap();
         assert_eq!(starts.len(), 2);

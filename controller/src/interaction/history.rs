@@ -1,4 +1,4 @@
-use crate::{Controller, ObjectBuffers, ObjectDiff, Bounds, EditorChange, Status};
+use crate::{Controller, ObjectsHandle, ObjectDiff, Bounds, EditorChange, Status};
 use crate::objects::merge_bounds;
 use super::tools::EditorTool;
 
@@ -14,6 +14,9 @@ pub enum DragStep {
     /// Releases a drag, joining the group of changes it started and then closing it.
     Release,
 }
+
+/// Most entries that can be undone. Older ones are forgotten, so a long session doesn't keep growing.
+const MAX_UNDO: usize = 200;
 
 /// One step that can be undone: the changes from one action, or from a whole drag
 struct HistoryEntry {
@@ -54,12 +57,13 @@ impl History {
 
     /// Collapse the open group of changes into one entry on the undo stack, if it changed any objects.
     /// The objects and tool should be as the last change in the group left them.
-    pub fn close(&mut self, objects: &ObjectBuffers, tool: &dyn EditorTool) {
+    pub fn close(&mut self, objects: &ObjectsHandle, tool: &dyn EditorTool) {
         let Some(pending) = self.pending.take() else { return; };
         let diff = ObjectDiff::collapse(pending.diffs, objects);
         if diff.is_empty() { return; }
 
         self.undo.push(HistoryEntry { objects: diff, tool_before: pending.tool_before, tool_after: tool.clone_box(), normals_stale: pending.normals_stale });
+        if self.undo.len() > MAX_UNDO { self.undo.remove(0); }
         self.redo.clear();
     }
 
@@ -80,7 +84,7 @@ impl History {
 
     /// Undo the latest entry, restoring the objects and tool state from before it.
     /// Returns the region where normals might have changed, or None if there was nothing to undo.
-    pub fn undo(&mut self, objects: &ObjectBuffers, tool: &mut Box<dyn EditorTool>) -> Option<Option<Bounds>> {
+    pub fn undo(&mut self, objects: &ObjectsHandle, tool: &mut Box<dyn EditorTool>) -> Option<Option<Bounds>> {
         self.close(objects, tool.as_ref());
         let entry = self.undo.pop()?;
         entry.objects.revert(objects);
@@ -92,7 +96,7 @@ impl History {
 
     /// Redo the latest undone entry, restoring the objects and tool state from after it.
     /// Returns the region where normals might have changed, or None if there was nothing to redo.
-    pub fn redo(&mut self, objects: &ObjectBuffers, tool: &mut Box<dyn EditorTool>) -> Option<Option<Bounds>> {
+    pub fn redo(&mut self, objects: &ObjectsHandle, tool: &mut Box<dyn EditorTool>) -> Option<Option<Bounds>> {
         self.close(objects, tool.as_ref());
         let entry = self.redo.pop()?;
         entry.objects.apply(objects);
@@ -106,7 +110,9 @@ impl History {
 impl Controller {
     /// Undo the latest action or drag
     pub fn undo(&mut self) {
+        if self.tool_dragging { return; }
         if let Some(normals_stale) = self.history.undo(&self.objects, &mut self.tool) {
+            self.revision += 1;
             self.mark_normals_stale(normals_stale);
             self.status = Status::Ok;
         }
@@ -114,7 +120,9 @@ impl Controller {
 
     /// Redo the latest undone action or drag
     pub fn redo(&mut self) {
+        if self.tool_dragging { return; }
         if let Some(normals_stale) = self.history.redo(&self.objects, &mut self.tool) {
+            self.revision += 1;
             self.mark_normals_stale(normals_stale);
             self.status = Status::Ok;
         }
@@ -137,7 +145,7 @@ mod tests {
     use super::super::tools::{EditorToolZone, EditorToolPen, ControllerStateInput, ToolResult, run_tool_action, switch_tool, test_utils::state};
 
     /// Run a tool action and record it like the controller does
-    fn run(history: &mut History, tool: &mut Box<dyn EditorTool>, objects: &ObjectBuffers, step: DragStep, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
+    fn run(history: &mut History, tool: &mut Box<dyn EditorTool>, objects: &ObjectsHandle, step: DragStep, action: impl FnOnce(&mut dyn EditorTool, ControllerStateInput) -> ToolResult) {
         if step == DragStep::None { history.close(objects, tool.as_ref()); }
         if let Some((result, change)) = run_tool_action(tool, state(objects), &mut Status::Ok, step == DragStep::Continue, action) {
             history.record(change, result.normals_stale);
@@ -147,7 +155,7 @@ mod tests {
     }
 
     /// Drag the square's corner at (10, 10) through each position, with the zone tool
-    fn drag(history: &mut History, tool: &mut Box<dyn EditorTool>, objects: &ObjectBuffers, positions: &[Vec2]) {
+    fn drag(history: &mut History, tool: &mut Box<dyn EditorTool>, objects: &ObjectsHandle, positions: &[Vec2]) {
         run(history, tool, objects, DragStep::None, |tool, state| tool.handle_drag_start(state, Vec2::new(10.0, 10.0), InputModifiers::none()));
         for &pos in positions {
             run(history, tool, objects, DragStep::Continue, |tool, state| tool.handle_dragging_to(state, pos, InputModifiers::none()));
@@ -158,7 +166,7 @@ mod tests {
     /// A whole drag is undone at once, restoring the objects and tool state
     #[test]
     fn drag_is_one_entry() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
         let mut history = History::default();
@@ -177,7 +185,7 @@ mod tests {
     /// Redoing restores the objects and tool state from after the entry, and new changes clear what can be redone
     #[test]
     fn redo() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
         let mut history = History::default();
@@ -195,10 +203,30 @@ mod tests {
         assert_eq!(objects.get_point_info(2).unwrap().position(), Vec2::new(20.0, 20.0));
     }
 
+    /// Only the latest MAX_UNDO entries are kept
+    #[test]
+    fn undo_capped() {
+        let mut objects = ObjectsHandle::headless();
+        add_square(&mut objects, 10.0);
+        let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
+        let mut history = History::default();
+
+        // The first 5 entries are forgotten, so undoing everything goes back to after them
+        let mut after_forgotten = Vec2::ZERO;
+        for i in 0..MAX_UNDO + 5 {
+            drag(&mut history, &mut tool, &objects, &[Vec2::new(11.0 + i as f32, 10.0)]);
+            if i == 4 { after_forgotten = objects.get_point_info(2).unwrap().position(); }
+        }
+        assert_eq!(history.undo.len(), MAX_UNDO);
+        while history.undo(&objects, &mut tool).is_some() {}
+        assert_eq!(objects.get_point_info(2).unwrap().position(), after_forgotten);
+        assert_ne!(after_forgotten, Vec2::new(10.0, 10.0));
+    }
+
     /// Undo and redo are only available when there is something to undo or redo
     #[test]
     fn can_undo_redo() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
         let mut history = History::default();
@@ -218,7 +246,7 @@ mod tests {
     /// Actions that only change the selection aren't recorded
     #[test]
     fn selection_not_recorded() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
         let mut history = History::default();
@@ -231,7 +259,7 @@ mod tests {
     /// A drag that ends where it started isn't recorded
     #[test]
     fn drag_back_not_recorded() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::init();
         let mut history = History::default();
@@ -243,7 +271,7 @@ mod tests {
     /// Switching away from the pen while drawing a path deletes it, which can be undone
     #[test]
     fn switching_tool_recorded() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         let mut tool: Box<dyn EditorTool> = EditorToolPen::init();
         let mut history = History::default();
 
@@ -273,7 +301,7 @@ mod tests {
     #[test]
     fn held_nudge_is_one_entry() {
         use super::super::tools::SpecialAction;
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let mut tool: Box<dyn EditorTool> = EditorToolZone::select(&[0], state(&objects));
         let mut history = History::default();
@@ -299,7 +327,7 @@ mod tests {
     fn reorder_undone() {
         use super::super::tools::SpecialAction;
         use crate::objects::ZoneOrderChange;
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         crate::objects::test_utils::add_zone(&mut objects, &[(5.0, 5.0), (15.0, 5.0), (15.0, 15.0)]);
         let before = objects.save();
@@ -320,7 +348,7 @@ mod tests {
     #[test]
     fn feather_drag_is_one_entry() {
         use super::super::tools::{EditorToolPoint, SpecialAction};
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 20.0);
         let (branch, _) = objects.create_branching_zone(2).unwrap();
         objects.create_point(branch, Vec2::new(20.0, 40.0)).unwrap();

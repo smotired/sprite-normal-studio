@@ -1,9 +1,9 @@
 use studio_math::bezier::bezier_point_at;
 use studio_math::{Vec2, Vec3};
 
-use super::{ObjectBuffers, ControlPoint, ControlPointMode, Zone, MAX_OBJECT_ID};
+use super::{ObjectsHandle, ControlPoint, ControlPointMode, Zone, MAX_OBJECT_ID};
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Add a zone to the zones buffer with a random (for now) offset, and return its ID.
     pub fn create_zone(&mut self) -> anyhow::Result<u16> {
         let zone_id = self.zone_count();
@@ -236,7 +236,7 @@ mod tests {
     /// Zones are numbered in order, and start after the existing points
     #[test]
     fn create_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         assert_eq!(objects.create_zone().unwrap(), 0);
         objects.create_point(0, Vec2::ZERO).unwrap();
         objects.create_point(0, Vec2::ONE).unwrap();
@@ -250,7 +250,7 @@ mod tests {
     /// Created points are linear, solo, and added to the end of the zone
     #[test]
     fn create_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         let zone_id = objects.create_zone().unwrap();
         assert_eq!(objects.create_point(zone_id, Vec2::new(1.0, 2.0)).unwrap(), 0);
         assert_eq!(objects.create_point(zone_id, Vec2::new(3.0, 4.0)).unwrap(), 1);
@@ -266,7 +266,7 @@ mod tests {
     /// Points can only be created in the last zone
     #[test]
     fn create_point_in_earlier_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.create_zone().unwrap();
         assert!(objects.create_point(0, Vec2::ZERO).is_err());
@@ -276,7 +276,7 @@ mod tests {
     /// Inserting at the halfway point of a straight edge adds a linear point in the middle
     #[test]
     fn insert_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
 
         let created = objects.insert_point(0, 0, 0.5).unwrap();
@@ -292,7 +292,7 @@ mod tests {
     /// Inserting on the closing edge of a zone adds the point on the end
     #[test]
     fn insert_point_on_closing_edge() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
 
         let created = objects.insert_point(0, 3, 0.5).unwrap();
@@ -303,7 +303,7 @@ mod tests {
     /// Zones after the insertion should move along and keep pointing at their own points
     #[test]
     fn insert_point_shifts_later_zones() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
 
@@ -317,7 +317,7 @@ mod tests {
     /// Inserting into a curved edge splits it into two continuous halves
     #[test]
     fn insert_point_on_curve() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(0, None, Some(ControlPointMode::Broken), None, Some(Vec2::new(0.0, -5.0))).unwrap();
         objects.update_point(1, None, Some(ControlPointMode::Broken), Some(Vec2::new(0.0, -5.0)), None).unwrap();
@@ -337,7 +337,7 @@ mod tests {
     /// Insertion needs an existing zone and a start point inside of it
     #[test]
     fn insert_point_errors() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
@@ -350,7 +350,7 @@ mod tests {
     /// Inserting into a shared edge adds a synced point to every zone that shares it
     #[test]
     fn insert_point_into_shared_edge() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, _) = objects.create_branching_zone(0).unwrap();
         objects.create_point(zone_id, Vec2::new(-10.0, 5.0)).unwrap();

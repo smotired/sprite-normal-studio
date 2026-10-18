@@ -15,6 +15,7 @@ mod welcome;
 mod workspace;
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use controller::Controller;
 use eframe::egui;
@@ -40,8 +41,10 @@ struct Project {
 
     /// What the workspace file holds, or would hold for a project that hasn't been saved yet, to detect unsaved changes
     clean: workspace::WorkspaceFile,
-    /// If saving would change the workspace file, updated every frame while it is the current project
+    /// If saving would change the workspace file, updated while it is the current project
     dirty: bool,
+    /// What the workspace file was built from when `dirty` was last worked out, so it's only rebuilt after a change
+    dirty_key: Option<workspace::DirtyKey>,
 
     /// The project's objects, history, camera and tool
     controller: Controller,
@@ -103,6 +106,10 @@ pub struct StudioApp {
 
     /// The last zones pasted from the clipboard, in any project
     last_paste: Option<clipboard::LastPaste>,
+
+    /// GPU errors reported since the last frame, shown in a dialog instead of closing the app.
+    /// wgpu reports them from its own callbacks, which may be on another thread.
+    gpu_errors: Arc<Mutex<Vec<String>>>,
 }
 
 /// Default initializer for application state
@@ -116,6 +123,7 @@ impl StudioApp {
         let preview_renderer = PreviewRenderer::new(&render_state.device);
         let preview_texture_id = render_state.renderer.write()
             .register_native_texture(&render_state.device, preview_renderer.view(), FilterMode::Nearest);
+        let gpu_errors = report_gpu_errors(&render_state.device);
 
         Self {
             projects: Vec::new(),
@@ -138,6 +146,7 @@ impl StudioApp {
             allow_close: false,
             quitting: None,
             last_paste: None,
+            gpu_errors,
         }
     }
 
@@ -172,6 +181,10 @@ impl StudioApp {
 
     /// Select a project's tab, drawing it in the editor. Its selection and camera are kept.
     fn activate(&mut self, ctx: &egui::Context, index: usize) {
+        // The project being left stops getting the mouse, so a drag in it can't continue
+        if let Some(previous) = self.projects.get_mut(self.current) {
+            previous.controller.end_drag();
+        }
         let Some(project) = self.projects.get_mut(index) else { return; };
         let device = &self.render_state.device;
         self.renderer.set_inputs(device, project.sprite.texture(), project.controller.output());
@@ -244,6 +257,26 @@ impl StudioApp {
     }
 }
 
+/// Collect the device's errors instead of letting wgpu close the app, which it does by default.
+/// Returns the list they are added to.
+fn report_gpu_errors(device: &eframe::wgpu::Device) -> Arc<Mutex<Vec<String>>> {
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    let push = |errors: &Arc<Mutex<Vec<String>>>, message: String| {
+        log::error!("{message}");
+        errors.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(message);
+    };
+
+    let uncaptured = errors.clone();
+    device.on_uncaptured_error(Arc::new(move |error| push(&uncaptured, format!("Something went wrong on the GPU: {error}"))));
+    let lost = errors.clone();
+    device.set_device_lost_callback(move |reason, message| {
+        // The device is destroyed on purpose when the app closes
+        if matches!(reason, eframe::wgpu::DeviceLostReason::Destroyed) { return; }
+        push(&lost, format!("The GPU stopped responding ({reason:?}): {message}. Save your work and restart Sprite Normal Studio."));
+    });
+    errors
+}
+
 /// Root app UI
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -252,6 +285,12 @@ impl eframe::App for StudioApp {
         // The last frame has been drawn, so textures that stopped being used during it can be freed
         for selection in self.retired_selections.drain(..) {
             selection.free(&self.render_state);
+        }
+
+        // Show GPU errors from the last frame
+        let gpu_errors = std::mem::take(&mut *self.gpu_errors.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+        for error in gpu_errors {
+            workspace::show_message(rfd::MessageLevel::Error, "GPU Error", &error);
         }
 
         // Ask about each project with unsaved changes before closing the window. The close is cancelled,

@@ -21,7 +21,7 @@ mod feather;
 use studio_math::Vec2;
 use wgpu::{Buffer, Device};
 
-use zone::Zone;
+use zone::{Zone, ZoneGpu};
 pub use shape::{Shape, ShapeVertex, ShapeParams, ShapeParamChange, ShapeProfile};
 pub use shapes::RadiusKnobs;
 use shape::hull_distance;
@@ -40,29 +40,39 @@ pub use order::ZoneOrderChange;
 const MAX_OBJECT_ID: u16 = 65535;
 const MIN_BUFFER_SIZE: usize = 32;
 
-/// Each object buffer and how many items it can hold.
-/// The caller should keep track of the sizes, and recreate bind groups when the ones it uses change.
+/// Each object buffer and an ID unique to it, which changes whenever the buffer is replaced.
+/// The caller should keep track of the IDs, and recreate bind groups when the ones it uses change.
 #[derive(Clone)]
 pub struct BufferStates {
-    pub zones: (Buffer, usize),
-    pub points: (Buffer, usize),
-    pub point_siblings: (Buffer, usize),
-    pub shapes: (Buffer, usize),
-    pub shape_vertices: (Buffer, usize),
+    pub zones: (Buffer, u64),
+    pub points: (Buffer, u64),
+    pub point_siblings: (Buffer, u64),
+    pub shapes: (Buffer, u64),
+    pub shape_vertices: (Buffer, u64),
 }
 
 impl BufferStates {
-    /// How many items each buffer can hold, in the order they are declared
-    pub fn sizes(&self) -> [usize; 5] {
+    /// The ID of each buffer, in the order they are declared
+    pub fn ids(&self) -> [u64; 5] {
         [self.zones.1, self.points.1, self.point_siblings.1, self.shapes.1, self.shape_vertices.1]
     }
 }
 
-/// Manages the buffers for control points and shapes
+/// A handle to the zones, control points and shapes, and the GPU buffers they are sent to.
+///
+/// Each list is shared behind an `Rc<RefCell>`, so `clone()` makes another handle to the *same* lists, not a copy.
+/// Tools are given a clone and change the objects through it, which is how their changes reach the controller.
+///
+/// Borrowing a list mutably (`borrow_mut`) also has side effects: it marks the list to be written to the GPU,
+/// and while a change is being recorded (`begin_change`), the first write copies the list so the change can be undone.
+/// Use `borrow` to only read a list.
 #[derive(Clone)]
-pub struct ObjectBuffers {
-    /// List of zone paths
+pub struct ObjectsHandle {
+    /// List of zone paths. Only kept on the CPU, since the GPU gets zones_gpu instead.
     zones: ObjectList<Zone>,
+
+    /// The zones as they are sent to the GPU, with their bounds. Rebuilt from the other lists whenever they change.
+    zones_gpu: ObjectList<ZoneGpu>,
 
     /// List of control points
     points: ObjectList<ControlPoint>,
@@ -79,7 +89,7 @@ pub struct ObjectBuffers {
     shape_vertices: ObjectList<ShapeVertex>,
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     pub fn zone_count(&self) -> u16 { self.zones.borrow().items.len() as u16 }
     pub fn point_count(&self) -> u16 { self.points.borrow().items.len() as u16 }
     pub fn shape_count(&self) -> u16 { self.shapes.borrow().items.len() as u16 }
@@ -90,7 +100,8 @@ impl ObjectBuffers {
         siblings_buffer.items.resize(65536, 0);
 
         Self {
-            zones: ObjectList::new(VecWithBuffer::new(device, "Zones Buffer")),
+            zones: ObjectList::new(VecWithBuffer::cpu_only("Zones")),
+            zones_gpu: ObjectList::new(VecWithBuffer::new(device, "Zones Buffer")),
             points: ObjectList::new(VecWithBuffer::new(device, "Control Points Buffer")),
             point_siblings: ObjectList::new(siblings_buffer),
             shapes: ObjectList::new(VecWithBuffer::new(device, "Shapes Buffer")),
@@ -105,7 +116,8 @@ impl ObjectBuffers {
         siblings_buffer.items.resize(65536, 0);
 
         Self {
-            zones: ObjectList::new(VecWithBuffer::headless("Zones Buffer")),
+            zones: ObjectList::new(VecWithBuffer::headless("Zones")),
+            zones_gpu: ObjectList::new(VecWithBuffer::headless("Zones Buffer")),
             points: ObjectList::new(VecWithBuffer::headless("Control Points Buffer")),
             point_siblings: ObjectList::new(siblings_buffer),
             shapes: ObjectList::new(VecWithBuffer::headless("Shapes Buffer")),
@@ -170,10 +182,10 @@ fn one_per_sibling_ring(point_ids: &[u16], siblings: &Vec<u16>) -> Vec<u16> {
 pub(crate) mod test_utils {
     use studio_math::Vec2;
 
-    use super::ObjectBuffers;
+    use super::ObjectsHandle;
 
     /// Create a zone with a linear point at each position, returning the zone ID
-    pub(crate) fn add_zone(objects: &mut ObjectBuffers, positions: &[(f32, f32)]) -> u16 {
+    pub(crate) fn add_zone(objects: &mut ObjectsHandle, positions: &[(f32, f32)]) -> u16 {
         let zone_id = objects.create_zone().unwrap();
         for &position in positions {
             objects.create_point(zone_id, Vec2::from(position)).unwrap();
@@ -182,7 +194,7 @@ pub(crate) mod test_utils {
     }
 
     /// Create a clockwise square zone with corners at (0, 0) and (size, size)
-    pub(crate) fn add_square(objects: &mut ObjectBuffers, size: f32) -> u16 {
+    pub(crate) fn add_square(objects: &mut ObjectsHandle, size: f32) -> u16 {
         add_zone(objects, &[(0.0, 0.0), (size, 0.0), (size, size), (0.0, size)])
     }
 }
@@ -195,7 +207,7 @@ mod tests {
     /// Nothing exists in new objects
     #[test]
     fn empty() {
-        let objects = ObjectBuffers::headless();
+        let objects = ObjectsHandle::headless();
         assert_eq!(objects.object_counts(), (0, 0));
         assert!(objects.get_zone_info(0).is_err());
         assert!(objects.get_point_info(0).is_err());
@@ -205,7 +217,7 @@ mod tests {
     /// Counts and lookups should follow what is created
     #[test]
     fn counts_and_lookups() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0)]);
 
@@ -220,7 +232,7 @@ mod tests {
     /// Points with no siblings are their own sibling
     #[test]
     fn get_sibling() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         assert_eq!(objects.get_sibling(2).unwrap(), 2);
         assert!(objects.get_sibling(4).is_err());
@@ -229,7 +241,7 @@ mod tests {
     /// Siblings can be found by zone
     #[test]
     fn sibling_in_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, point_id) = objects.create_branching_zone(1).unwrap();
 
@@ -241,7 +253,7 @@ mod tests {
     /// The center of zones is the center of the bounding box of their control points
     #[test]
     fn zones_center() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 4.0)]);
         assert_eq!(objects.zones_center(&[0]).unwrap(), Some(Vec2::new(5.0, 5.0)));

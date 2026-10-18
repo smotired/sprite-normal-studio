@@ -22,11 +22,8 @@ impl InputModifiers {
     pub fn ctrl()       -> Self { Self { shift: false, ctrl: true,  alt: false }}
     pub fn alt()        -> Self { Self { shift: false, ctrl: false, alt: true  }}
     pub fn shift_ctrl() -> Self { Self { shift: true,  ctrl: true,  alt: false }}
-    pub fn ctrl_shift() -> Self { Self { shift: true,  ctrl: true,  alt: false }}
     pub fn shift_alt()  -> Self { Self { shift: true,  ctrl: false, alt: true  }}
-    pub fn alt_shift()  -> Self { Self { shift: true,  ctrl: false, alt: true  }}
     pub fn ctrl_alt()   -> Self { Self { shift: false, ctrl: true,  alt: true  }}
-    pub fn alt_ctrl()   -> Self { Self { shift: false, ctrl: true,  alt: true  }}
     pub fn all()        -> Self { Self { shift: true,  ctrl: true,  alt: true  }}
 }
 
@@ -138,6 +135,13 @@ impl Controller {
     /// Color of the light, packed as 0x00BBGGRR
     pub fn light_color(&self) -> u32 { self.light.packed_color() }
 
+    /// Release any drag in progress, as if the mouse was let go. For when the project stops getting the mouse, e.g. its tab is switched away from.
+    pub fn end_drag(&mut self) {
+        if self.overlay_state.dragging_light || self.tool_dragging {
+            self.handle_action(Action::MouseDragReleased(InputModifiers::none()));
+        }
+    }
+
     /// If the lines between sprites are shown in the overlay
     pub fn sprite_grid_on(&self) -> bool { self.overlay_state.sprite_grid_on() }
 
@@ -186,6 +190,7 @@ impl Controller {
 
                     // Check the tool
                     else {
+                        self.tool_dragging = true;
                         self.run_tool(DragStep::None, |tool, state| tool.handle_drag_start(state, pos, modifiers));
                     }
                 }
@@ -197,8 +202,8 @@ impl Controller {
                     self.light.set_pos(new);
                 }
 
-                // Otherwise switch based on tool
-                else if self.overlay_state.overlay_on() {
+                // Otherwise continue the tool's drag, even if the overlay was hidden partway through it
+                else if self.tool_dragging {
                     self.run_tool(DragStep::Continue, |tool, state| tool.handle_dragging_to(state, new, modifiers));
                 }
             },
@@ -208,7 +213,8 @@ impl Controller {
                     self.overlay_state.dragging_light = false;
                 }
 
-                else if self.overlay_state.overlay_on() {
+                else if self.tool_dragging {
+                    self.tool_dragging = false;
                     self.run_tool(DragStep::Release, |tool, state| tool.handle_drag_released(state, modifiers));
                 }
             },
@@ -218,10 +224,12 @@ impl Controller {
             },
 
             Action::Delete => {
+                if self.tool_dragging { return; }
                 self.run_tool(DragStep::None, |tool, state| tool.handle_delete(state));
             },
 
             Action::SelectAll => {
+                if self.tool_dragging { return; }
                 self.run_tool(DragStep::None, |tool, state| tool.handle_select_all(state));
             },
 
@@ -247,9 +255,6 @@ impl Controller {
                 if self.overlay_state.dragging_light {
                     self.light.adjust_height(if up { 100.0 } else { -100.0 });
                 }
-
-                // TODO: maybe move a zone between layers in Zone tool?
-                // Layers are in like phase 6 or something though
             },
 
             Action::OverlayToggled => {
@@ -306,5 +311,79 @@ impl Controller {
 
             Action::None => { },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use studio_math::Vec2;
+
+    use crate::{Action, Controller, EditorToolKind, InputModifiers};
+    use crate::objects::test_utils::{add_square, add_zone};
+
+    /// A controller on a device with no GPU behind it, with a square at (0, 0) to (10, 10) and another zone off to the side.
+    /// The light is moved away so drags never grab it.
+    fn controller() -> Controller {
+        let (device, _) = wgpu::Device::noop(&Default::default());
+        let mut controller = Controller::new(&device);
+        add_square(&mut controller.objects, 10.0);
+        add_zone(&mut controller.objects, &[(50.0, 50.0), (60.0, 50.0), (60.0, 60.0)]);
+        controller.light.set_pos(Vec2::new(-1000.0, -1000.0));
+        controller
+    }
+
+    fn drag_start(controller: &mut Controller, pos: Vec2) { controller.handle_action(Action::MouseDragStarted(pos, InputModifiers::none())); }
+    fn drag_to(controller: &mut Controller, pos: Vec2) { controller.handle_action(Action::MouseDragged(Vec2::ZERO, pos, InputModifiers::none())); }
+    fn release(controller: &mut Controller) { controller.handle_action(Action::MouseDragReleased(InputModifiers::none())); }
+
+    /// Actions that would change the objects or the tool under a drag are ignored until it is released
+    #[test]
+    fn actions_ignored_while_dragging() {
+        let mut controller = controller();
+        let other_zone = controller.objects.save().zones[1].clone();
+
+        drag_start(&mut controller, Vec2::new(10.0, 10.0));
+        drag_to(&mut controller, Vec2::new(15.0, 12.0));
+        for action in [Action::Delete, Action::Undo, Action::SelectAll, Action::ToolSelected(EditorToolKind::Point)] {
+            controller.handle_action(action);
+        }
+        drag_to(&mut controller, Vec2::new(20.0, 20.0));
+        release(&mut controller);
+
+        assert_eq!(controller.objects.zone_count(), 2);
+        assert_eq!(controller.selected_tool(), EditorToolKind::Zone);
+        assert_eq!(controller.objects.get_point_info(2).unwrap().position(), Vec2::new(20.0, 20.0));
+        assert_eq!(controller.objects.save().zones[1], other_zone);
+
+        // Once released, they work again
+        controller.handle_action(Action::Delete);
+        assert_eq!(controller.objects.zone_count(), 1);
+    }
+
+    /// Hiding the overlay partway through a drag still finishes it, so it is one undoable change
+    #[test]
+    fn overlay_hidden_mid_drag() {
+        let mut controller = controller();
+        drag_start(&mut controller, Vec2::new(10.0, 10.0));
+        controller.handle_action(Action::OverlayToggled);
+        drag_to(&mut controller, Vec2::new(20.0, 20.0));
+        release(&mut controller);
+        assert_eq!(controller.objects.get_point_info(2).unwrap().position(), Vec2::new(20.0, 20.0));
+
+        controller.undo();
+        assert_eq!(controller.objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
+        assert!(!controller.can_undo());
+    }
+
+    /// Ending a drag from outside, like switching tabs, releases it
+    #[test]
+    fn end_drag_releases() {
+        let mut controller = controller();
+        drag_start(&mut controller, Vec2::new(10.0, 10.0));
+        drag_to(&mut controller, Vec2::new(20.0, 20.0));
+        controller.end_drag();
+        assert!(!controller.tool_dragging);
+        controller.undo();
+        assert_eq!(controller.objects.get_point_info(2).unwrap().position(), Vec2::new(10.0, 10.0));
     }
 }

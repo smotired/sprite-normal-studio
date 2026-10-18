@@ -34,6 +34,7 @@ impl SpriteFileSelection {
     /// Open an image file and load it into a new texture.
     /// label: The label for the texture itself
     pub fn open(label: &str, path: PathBuf, rs: &RenderState) -> anyhow::Result<Self> {
+        check_size(&path, rs)?;
         let image = image::open(&path)?.to_rgba8();
         Ok(Self::from_image(label, path, rs, &image))
     }
@@ -81,12 +82,24 @@ impl SpriteFileSelection {
     /// On failure, return an Err and leave the selection unmodified.
     pub fn try_select(&mut self, path: PathBuf, rs: &RenderState) -> anyhow::Result<(u32, u32)> {
         // Try to open the image file or return the error
+        check_size(&path, rs)?;
         let image = image::open(&path)?.to_rgba8();
 
         // No failures beyond this point
         self.set_image(path, rs, &image);
         Ok(self.size)
     }
+}
+
+/// Check an image file fits in a texture on this GPU, reading only its header.
+/// Creating a texture that's too big is a GPU error, which would close the app.
+fn check_size(path: &Path, rs: &RenderState) -> anyhow::Result<()> {
+    let (width, height) = image::image_dimensions(path)?;
+    let max = rs.device.limits().max_texture_dimension_2d;
+    if width > max || height > max {
+        anyhow::bail!("The image is {width}x{height}, but this GPU can only use images up to {max}x{max}.");
+    }
+    Ok(())
 }
 
 /// A copy of an image with its color multiplied by its alpha, like egui's Color32

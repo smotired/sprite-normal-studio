@@ -229,21 +229,21 @@ impl EditorToolShapePen {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ObjectBuffers, InputModifiers as IM};
+    use crate::{ObjectsHandle, InputModifiers as IM};
     use crate::objects::test_utils::add_square;
 
     use super::*;
     use super::super::test_utils::state;
 
     /// A 100 pixel square zone, with no shapes
-    fn sample() -> ObjectBuffers {
-        let mut objects = ObjectBuffers::headless();
+    fn sample() -> ObjectsHandle {
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 100.0);
         objects
     }
 
     /// Click each position in turn, returning the result of the last click
-    fn click_all(tool: &mut EditorToolShapePen, objects: &ObjectBuffers, positions: &[(f32, f32)]) -> ToolResult {
+    fn click_all(tool: &mut EditorToolShapePen, objects: &ObjectsHandle, positions: &[(f32, f32)]) -> ToolResult {
         let mut result = tool.ok();
         for &pos in positions {
             result = tool.handle_click(state(objects), Vec2::from(pos), IM::none());
@@ -252,7 +252,7 @@ mod tests {
     }
 
     /// The vertex counts of each shape, and the shapes still being drawn
-    fn shapes(objects: &ObjectBuffers) -> (Vec<usize>, usize) {
+    fn shapes(objects: &ObjectsHandle) -> (Vec<usize>, usize) {
         let ids: Vec<u16> = (0..objects.shape_count()).collect();
         let counts = ids.iter().map(|&id| objects.shape_vertex_ids(id).unwrap().len()).collect();
         let pending = ids.iter().filter(|&&id| objects.get_shape_info(id).unwrap().is_pending()).count();

@@ -114,7 +114,12 @@ impl StudioApp {
         }
 
         project.controller.set_highlight(None);
-        for event in handle_editor_input(&project.controller, ui, response) {
+        let events = handle_editor_input(&project.controller, ui, response);
+
+        // The controller sends changes to the GPU before the editor is drawn, which already happened this frame,
+        // so draw another frame to show them
+        if !events.is_empty() { ui.ctx().request_repaint(); }
+        for event in events {
             project.controller.handle_action(event);
         }
     }
@@ -178,7 +183,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
             Event::Key { .. } if widget_focused => Action::None,
             // Moving the selected zones in front of or behind others. Matched by the physical key, since shift turns [ into { on many layouts.
             Event::Key { physical_key: Some(bracket @ (Key::OpenBracket | Key::CloseBracket)), pressed, repeat, modifiers, .. } => {
-                if pressed && !repeat && !modifiers.ctrl && !modifiers.alt {
+                if pressed && !repeat && !modifiers.command && !modifiers.alt {
                     let change = match (bracket == Key::CloseBracket, modifiers.shift) {
                         (true, false) => ZoneOrderChange::Forward,
                         (false, false) => ZoneOrderChange::Backward,
@@ -206,7 +211,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                     },
                     // Select all with ctrl, otherwise camera movement
                     Key::A => {
-                        if pressed && modifiers.ctrl {
+                        if pressed && modifiers.command {
                             if repeat { Action::None } else { Action::SelectAll }
                         } else if pressed {
                             Action::CameraMove(Axis::Horizontal, -movement(modifiers.shift))
@@ -219,7 +224,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                     },
                     // Duplicate with ctrl, otherwise camera movement
                     Key::D => {
-                        if pressed && modifiers.ctrl {
+                        if pressed && modifiers.command {
                             if repeat { Action::None } else { Action::Duplicate(paste_placement(modifiers.shift, mouse_world)) }
                         } else if pressed {
                             Action::CameraMove(Axis::Horizontal, movement(modifiers.shift))
@@ -266,21 +271,21 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
 
                     // Undo, redo, or point the selected zones straight out
                     Key::Z => {
-                        if pressed && modifiers.ctrl {
+                        if pressed && modifiers.command {
                             if modifiers.shift { Action::Redo } else { Action::Undo }
                         } else if pressed && !repeat && modifiers.shift {
                             Action::Special(SpecialAction::NormalSet(studio_math::Vec3::FORWARD, false))
                         } else { Action::None }
                     },
                     Key::Y => {
-                        if pressed && modifiers.ctrl {
+                        if pressed && modifiers.command {
                             if modifiers.shift { Action::Undo } else { Action::Redo }
                         } else { Action::None }
                     },
 
                     // Regenerate the whole normal map with ctrl, otherwise toggle the lines between sprites
                     Key::G => {
-                        if pressed && !repeat && modifiers.ctrl {
+                        if pressed && !repeat && modifiers.command {
                             Action::RegenerateNormals
                         } else if pressed && !repeat && !modifiers.any() {
                             Action::SpriteGridToggled
@@ -302,14 +307,14 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
 
                     // Toggle the selected point between linear and continuous
                     Key::B => {
-                        if pressed && !repeat && modifiers.ctrl {
+                        if pressed && !repeat && modifiers.command {
                             Action::Special(SpecialAction::PointModeToggled)
                         } else { Action::None }
                     },
 
                     // Merge the selected points
                     Key::M => {
-                        if pressed && !repeat && modifiers.ctrl {
+                        if pressed && !repeat && modifiers.command {
                             Action::Special(SpecialAction::SelectionMerged)
                         } else { Action::None }
                     },
@@ -330,7 +335,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
 
                     // Separate the selected zones or points from their siblings
                     Key::K => {
-                        if pressed && !repeat && modifiers.ctrl {
+                        if pressed && !repeat && modifiers.command {
                             Action::Special(SpecialAction::SelectionSeparated)
                         } else { Action::None }
                     },
@@ -363,7 +368,7 @@ fn handle_app_input<'a>(controller: &Controller, i: &'a mut InputState, viewport
                     // Toggling lighting
                     Key::L => {
                         if pressed && !repeat {
-                            if modifiers.ctrl {
+                            if modifiers.command {
                                 Action::LightingToggled(None) // Toggle both lighting and normal map
                             } else if modifiers.shift {
                                 Action::LightingToggled(Some(false)) // Toggle normal map

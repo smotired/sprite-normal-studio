@@ -1,4 +1,4 @@
-use super::{ObjectBuffers, ControlPoint, Shape, ShapeVertex};
+use super::{ObjectsHandle, ControlPoint, Shape, ShapeVertex};
 use super::zone::Zone;
 
 /// A run of items that changed. Spans before the end of the shorter list have equal old and new lengths,
@@ -85,7 +85,7 @@ impl ObjectDiff {
     }
 
     /// Put the objects back the way they were before the changes
-    pub fn revert(&self, objects: &ObjectBuffers) {
+    pub fn revert(&self, objects: &ObjectsHandle) {
         if let Some(diff) = &self.zones { diff.revert(&mut objects.zones.borrow_mut().items); }
         if let Some(diff) = &self.points { diff.revert(&mut objects.points.borrow_mut().items); }
         if let Some(diff) = &self.point_siblings { diff.revert(&mut objects.point_siblings.borrow_mut().items); }
@@ -94,7 +94,7 @@ impl ObjectDiff {
     }
 
     /// Make the changes to the objects again
-    pub fn apply(&self, objects: &ObjectBuffers) {
+    pub fn apply(&self, objects: &ObjectsHandle) {
         if let Some(diff) = &self.zones { diff.apply(&mut objects.zones.borrow_mut().items); }
         if let Some(diff) = &self.points { diff.apply(&mut objects.points.borrow_mut().items); }
         if let Some(diff) = &self.point_siblings { diff.apply(&mut objects.point_siblings.borrow_mut().items); }
@@ -103,7 +103,7 @@ impl ObjectDiff {
     }
 
     /// Combine diffs that were made one after another into one diff, given the objects as they are after the last of them
-    pub fn collapse(diffs: Vec<ObjectDiff>, objects: &ObjectBuffers) -> ObjectDiff {
+    pub fn collapse(diffs: Vec<ObjectDiff>, objects: &ObjectsHandle) -> ObjectDiff {
         let (mut zones, mut points, mut point_siblings) = (vec![], vec![], vec![]);
         let (mut shapes, mut shape_vertices) = (vec![], vec![]);
         for diff in diffs {
@@ -206,7 +206,7 @@ mod tests {
     /// Moving a point only records the points list, and can be reverted and applied
     #[test]
     fn move_point() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
 
         objects.begin_change();

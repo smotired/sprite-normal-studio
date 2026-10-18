@@ -1,7 +1,7 @@
 use studio_math::Vec2;
 use studio_math::bounds::{bounds_merge, bounds_of};
 
-use super::ObjectBuffers;
+use super::ObjectsHandle;
 
 /// A bounding box, as its top left and bottom right corners
 pub type Bounds = (Vec2, Vec2);
@@ -14,7 +14,7 @@ pub fn merge_bounds(a: Option<Bounds>, b: Option<Bounds>) -> Option<Bounds> {
     }
 }
 
-impl ObjectBuffers {
+impl ObjectsHandle {
     /// Get the bounding box of a zone, which is the bounding box of the control points of all its path segments.
     /// Returns None if the zone has no points.
     pub fn zone_bounds(&self, zone_id: u16) -> anyhow::Result<Option<Bounds>> {
@@ -84,7 +84,7 @@ mod tests {
     /// A zone's bounds cover all its points
     #[test]
     fn zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, -5.0), (30.0, 0.0), (25.0, 8.0)]);
         assert_eq!(objects.zone_bounds(0).unwrap(), Some((Vec2::ZERO, Vec2::new(10.0, 10.0))));
@@ -96,7 +96,7 @@ mod tests {
     /// Handles that stick out of the points are included
     #[test]
     fn zone_with_handles() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         objects.update_point(1, None, Some(crate::ControlPointMode::Broken), None, Some(Vec2::new(5.0, -7.0))).unwrap();
         assert_eq!(objects.zone_bounds(0).unwrap(), Some((Vec2::new(0.0, -7.0), Vec2::new(15.0, 10.0))));
@@ -105,7 +105,7 @@ mod tests {
     /// An empty zone has no bounds
     #[test]
     fn empty_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         let zone_id = objects.create_zone().unwrap();
         assert_eq!(objects.zone_bounds(zone_id).unwrap(), None);
     }
@@ -113,7 +113,7 @@ mod tests {
     /// Bounds around points include the zones of their siblings
     #[test]
     fn around_points_includes_siblings() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         let (zone_id, point_id) = objects.create_branching_zone(1).unwrap();
         objects.create_point(zone_id, Vec2::new(30.0, -10.0)).unwrap();
@@ -126,7 +126,7 @@ mod tests {
     /// Bounds from a zone cover it and every zone after it
     #[test]
     fn from_zone() {
-        let mut objects = ObjectBuffers::headless();
+        let mut objects = ObjectsHandle::headless();
         add_square(&mut objects, 10.0);
         add_zone(&mut objects, &[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]);
         add_zone(&mut objects, &[(40.0, 0.0), (50.0, 0.0), (50.0, 10.0)]);
