@@ -95,6 +95,29 @@ impl TimelineState {
     /// Stop picking a sprite in the workspace
     pub(super) fn cancel_pick(&mut self) { self.picking = false; }
 
+    /// Select the frame before or after the selected one, stopping at the ends, and center the camera on it
+    pub(super) fn step_frame(&mut self, controller: &mut Controller, forward: bool) {
+        let Some(index) = self.selected_animation.filter(|&index| index < controller.animations().len()) else { return; };
+        let count = controller.animations()[index].frames.len();
+        if count == 0 { return; }
+        let current = self.selected_frame.unwrap_or(0);
+        let next = if forward { (current + 1).min(count - 1) } else { current.saturating_sub(1) };
+        select_frame(self, controller, index, Some(next));
+    }
+
+    /// Start or stop playing the selected animation, if it has frames
+    pub(super) fn toggle_play(&mut self, controller: &Controller, now: f64) {
+        let has_frames = self.selected_animation.and_then(|index| controller.animations().get(index)).is_some_and(|animation| !animation.frames.is_empty());
+        if !has_frames && !self.playing { return; }
+        self.playing = !self.playing;
+        self.play_start = now;
+    }
+
+    /// Start or stop picking a sprite in the workspace for the selected frame. Does nothing if no frame is selected to pick for.
+    pub(super) fn toggle_pick(&mut self) {
+        if self.selected_frame.is_some() { self.picking = !self.picking; }
+    }
+
     /// Show the sprite at a world space position in the selected frame, and stop picking.
     /// Positions outside every whole sprite are ignored, and picking continues.
     pub(super) fn pick(&mut self, controller: &mut Controller, pos: Vec2) {
@@ -185,12 +208,15 @@ fn timeline_ui(ui: &mut egui::Ui, state: &mut TimelineState, controller: &mut Co
 
     if state.selected_frame.is_none() { state.picking = false; }
 
+    // The preview is laid out before the frames, so if they change it has to be drawn again to show them
+    let before = (state.selected_animation, state.selected_frame, state.selected_animation.map(|index| controller.animations()[index].frames.clone()));
+
     // Controls along the top, then the preview as a square filling the rest of the height, and the frames beside it
     let now = ui.input(|i| i.time);
     animation_controls(ui, state, controller, now);
     ui.separator();
     let side = ui.available_height().max(MIN_THUMBNAIL_SIZE);
-    ui.horizontal_top(|ui| {
+    let request = ui.horizontal_top(|ui| {
         let request = preview_ui(ui, state, controller, preview_texture, side, now);
         ui.separator();
         // Capped to the preview's height, so the frames can never make the panel taller than it was sized to
@@ -205,7 +231,11 @@ fn timeline_ui(ui: &mut egui::Ui, state: &mut TimelineState, controller: &mut Co
             }
         }));
         request
-    }).inner
+    }).inner;
+
+    let after = (state.selected_animation, state.selected_frame, state.selected_animation.map(|index| controller.animations()[index].frames.clone()));
+    if after != before { ui.ctx().request_repaint(); }
+    request
 }
 
 /// The lit preview of the animation, a square with a draggable light that zooms with the wheel
@@ -296,9 +326,8 @@ fn animation_controls(ui: &mut egui::Ui, state: &mut TimelineState, controller: 
     ui.horizontal(|ui| {
         let can_play = state.selected_animation.is_some_and(|index| !controller.animations()[index].frames.is_empty());
         let label = if state.playing { "Pause" } else { "Play" };
-        if ui.add_enabled(can_play, egui::Button::new(label)).clicked() {
-            state.playing = !state.playing;
-            state.play_start = now;
+        if ui.add_enabled(can_play, egui::Button::new(label)).on_hover_text("Play or pause (Space)").clicked() {
+            state.toggle_play(controller, now);
         }
         ui.separator();
 
@@ -382,50 +411,55 @@ fn frame_strip(ui: &mut egui::Ui, state: &mut TimelineState, controller: &mut Co
     let mut edit = None;
     let playing = state.playing.then(|| controller.animations()[index].frame_at(ui.input(|i| i.time) - state.play_start)).flatten();
 
-    egui::ScrollArea::horizontal().id_salt("frames").show(ui, |ui| {
-        ui.horizontal_top(|ui| {
-            for (frame_index, frame) in frames.iter().enumerate() {
-                ui.vertical(|ui| {
-                    let (rect, response) = ui.allocate_exact_size(egui::vec2(thumbnail, thumbnail), Sense::click());
-                    let selected = state.selected_frame == Some(frame_index);
+    // The wheel scrolls the frames sideways without holding shift, since that's the only way they scroll.
+    // The style only applies inside this scope, so other scroll areas aren't affected.
+    ui.scope(|ui| {
+        ui.style_mut().always_scroll_the_only_direction = true;
+        egui::ScrollArea::horizontal().id_salt("frames").show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                for (frame_index, frame) in frames.iter().enumerate() {
+                    ui.vertical(|ui| {
+                        let (rect, response) = ui.allocate_exact_size(egui::vec2(thumbnail, thumbnail), Sense::click());
+                        let selected = state.selected_frame == Some(frame_index);
 
-                    // The sprite, fit in the thumbnail's square, on the viewport's background
-                    let (min, size) = controller.frame_rect(frame);
-                    let inner = rect.shrink(SELECTED_OUTLINE);
-                    let scale = inner.width() / size.x.max(size.y).max(1.0);
-                    let image_rect = Rect::from_center_size(rect.center(), egui::vec2(size.x * scale, size.y * scale));
-                    let uv = Rect::from_min_size(Pos2::new(min.x / sheet.x, min.y / sheet.y), egui::vec2(size.x / sheet.x, size.y / sheet.y));
-                    let visuals = ui.visuals();
-                    ui.painter().rect_filled(rect, 2.0, THUMBNAIL_BACKGROUND);
-                    ui.painter().image(sprite_texture, image_rect, uv, Color32::WHITE);
+                        // The sprite, fit in the thumbnail's square, on the viewport's background
+                        let (min, size) = controller.frame_rect(frame);
+                        let inner = rect.shrink(SELECTED_OUTLINE);
+                        let scale = inner.width() / size.x.max(size.y).max(1.0);
+                        let image_rect = Rect::from_center_size(rect.center(), egui::vec2(size.x * scale, size.y * scale));
+                        let uv = Rect::from_min_size(Pos2::new(min.x / sheet.x, min.y / sheet.y), egui::vec2(size.x / sheet.x, size.y / sheet.y));
+                        let visuals = ui.visuals();
+                        ui.painter().rect_filled(rect, 2.0, THUMBNAIL_BACKGROUND);
+                        ui.painter().image(sprite_texture, image_rect, uv, Color32::WHITE);
 
-                    // A thick outline on the selected frame, and a thin one on the frame playing
-                    if selected {
-                        let stroke = egui::Stroke::new(SELECTED_OUTLINE, visuals.selection.stroke.color);
-                        ui.painter().rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-                    } else if playing == Some(frame_index) {
-                        ui.painter().rect_stroke(rect, 2.0, visuals.widgets.inactive.fg_stroke, egui::StrokeKind::Inside);
-                    } else if response.hovered() {
-                        ui.painter().rect_stroke(rect, 2.0, visuals.widgets.hovered.bg_stroke, egui::StrokeKind::Inside);
-                    }
-                    let label = egui::RichText::new(format!("{} ×{}", frame_index + 1, frame.hold));
-                    ui.label(if selected { label.strong().color(visuals.selection.stroke.color) } else { label });
+                        // A thick outline on the selected frame, and a thin one on the frame playing
+                        if selected {
+                            let stroke = egui::Stroke::new(SELECTED_OUTLINE, visuals.selection.stroke.color);
+                            ui.painter().rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+                        } else if playing == Some(frame_index) {
+                            ui.painter().rect_stroke(rect, 2.0, visuals.widgets.inactive.fg_stroke, egui::StrokeKind::Inside);
+                        } else if response.hovered() {
+                            ui.painter().rect_stroke(rect, 2.0, visuals.widgets.hovered.bg_stroke, egui::StrokeKind::Inside);
+                        }
+                        let label = egui::RichText::new(format!("{} ×{}", frame_index + 1, frame.hold));
+                        ui.label(if selected { label.strong().color(visuals.selection.stroke.color) } else { label });
 
-                    if response.clicked() {
-                        edit = Some(FrameEdit::Select(frame_index));
-                    }
-                    response.context_menu(|ui| {
-                        if ui.button("Duplicate").clicked() { edit = Some(FrameEdit::Duplicate(frame_index)); }
-                        if ui.button("Remove").clicked() { edit = Some(FrameEdit::Remove(frame_index)); }
-                        if ui.add_enabled(frame_index > 0, egui::Button::new("Move Left")).clicked() { edit = Some(FrameEdit::Move(frame_index, false)); }
-                        if ui.add_enabled(frame_index + 1 < frames.len(), egui::Button::new("Move Right")).clicked() { edit = Some(FrameEdit::Move(frame_index, true)); }
+                        if response.clicked() {
+                            edit = Some(FrameEdit::Select(frame_index));
+                        }
+                        response.context_menu(|ui| {
+                            if ui.button("Duplicate").clicked() { edit = Some(FrameEdit::Duplicate(frame_index)); }
+                            if ui.button("Remove").clicked() { edit = Some(FrameEdit::Remove(frame_index)); }
+                            if ui.add_enabled(frame_index > 0, egui::Button::new("Move Left")).clicked() { edit = Some(FrameEdit::Move(frame_index, false)); }
+                            if ui.add_enabled(frame_index + 1 < frames.len(), egui::Button::new("Move Right")).clicked() { edit = Some(FrameEdit::Move(frame_index, true)); }
+                        });
                     });
-                });
-            }
+                }
 
-            if ui.add_sized([ADD_BUTTON_SIZE, ADD_BUTTON_SIZE], egui::Button::new("+")).on_hover_text("Add the next sprite").clicked() {
-                edit = Some(FrameEdit::Add);
-            }
+                if ui.add_sized([ADD_BUTTON_SIZE, ADD_BUTTON_SIZE], egui::Button::new("+")).on_hover_text("Add the next sprite").clicked() {
+                    edit = Some(FrameEdit::Add);
+                }
+            });
         });
     });
 
@@ -452,10 +486,13 @@ fn frame_strip(ui: &mut egui::Ui, state: &mut TimelineState, controller: &mut Co
             Some(frames.len() - 1)
         },
     };
-    state.selected_frame = selected;
+    select_frame(state, controller, index, selected);
+}
 
-    // Show the selected frame in the viewport
-    if let Some(frame) = selected.map(|selected| controller.animations()[index].frames[selected]) {
+/// Select a frame of an animation, and center the camera on its sprite in the workspace
+fn select_frame(state: &mut TimelineState, controller: &mut Controller, index: usize, frame_index: Option<usize>) {
+    state.selected_frame = frame_index;
+    if let Some(frame) = frame_index.and_then(|frame_index| controller.animations()[index].frames.get(frame_index).copied()) {
         let (min, size) = controller.frame_rect(&frame);
         controller.handle_action(Action::CameraCenter(min + size * 0.5));
     }
@@ -487,7 +524,7 @@ fn selected_frame_controls(ui: &mut egui::Ui, state: &mut TimelineState, control
         // Picking the sprite by clicking it in the workspace
         ui.separator();
         let pick = ui.add(egui::Button::selectable(state.picking, "Pick in Workspace"))
-            .on_hover_text("Click a sprite in the workspace to show it in this frame. Escape cancels.");
+            .on_hover_text("Click a sprite in the workspace to show it in this frame (I). Escape cancels.");
         if pick.clicked() {
             state.picking = !state.picking;
         }

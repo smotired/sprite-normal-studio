@@ -81,6 +81,8 @@ pub struct StudioApp {
 
     /// If the timeline panel is open below the viewport. Closed when the app starts.
     timeline_open: bool,
+    /// Where the timeline panel was drawn this frame, if it's open, so keys can go to it while the mouse is over it
+    timeline_rect: Option<egui::Rect>,
     /// Renderer for the animation preview in the timeline, and its texture ID
     preview_renderer: PreviewRenderer,
     preview_texture_id: egui::TextureId,
@@ -127,6 +129,7 @@ impl StudioApp {
             render_state,
             viewport_texture_id,
             timeline_open: false,
+            timeline_rect: None,
             preview_renderer,
             preview_texture_id,
             pending_preview: None,
@@ -299,9 +302,7 @@ impl StudioApp {
         self.show_sidebar(ui);
         self.show_toolbar(ui);
         self.show_status_bar(ui);
-        if self.timeline_open {
-            self.show_timeline(ui);
-        }
+        self.timeline_rect = self.timeline_open.then(|| self.show_timeline(ui).rect);
 
         // Each panel takes its space from the window, so the space left is exactly where the editor goes,
         // below the menu and tab bars and above the status bar and timeline

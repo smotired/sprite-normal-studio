@@ -41,6 +41,28 @@ impl StudioApp {
             project.timeline.cancel_pick();
             project.controller.set_highlight(None);
         }
+
+        // Space plays and pauses the animation, and with the mouse over the timeline the left and right arrows step through its frames
+        // instead of moving the selection in the workspace
+        if timeline_open && !widget_focused {
+            let now = ui.input(|i| i.time);
+            let over_timeline = ui.input(|i| i.pointer.hover_pos()).zip(self.timeline_rect).is_some_and(|(pos, rect)| rect.contains(pos));
+            let (space, left, right) = ui.input_mut(|i| (
+                i.consume_key(Modifiers::NONE, Key::Space),
+                over_timeline && i.consume_key(Modifiers::NONE, Key::ArrowLeft),
+                over_timeline && i.consume_key(Modifiers::NONE, Key::ArrowRight),
+            ));
+            if space { project.timeline.toggle_play(&project.controller, now); }
+            if left || right { project.timeline.step_frame(&mut project.controller, right); }
+            if space || left || right { ui.ctx().request_repaint(); }
+        }
+
+        // I toggles picking a sprite for the selected frame. The pen tool uses I to toggle inheriting normals instead.
+        let pen = project.controller.selected_tool() == controller::EditorToolKind::Pen;
+        if timeline_open && !pen && !widget_focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::I)) {
+            project.timeline.toggle_pick();
+            if !project.timeline.picking() { project.controller.set_highlight(None); }
+        }
         let controller = &mut project.controller;
         let clipboard_events = ui.input_mut(|i| {
             for event in handle_app_input(controller, i, viewport_rect, widget_focused) {
