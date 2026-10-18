@@ -4,7 +4,7 @@
 
 use studio_math::{Vec2, Vec3};
 
-use super::{ShapeParams, ShapeProfile, MAX_DOME_SLOPE, hull_distance};
+use super::{ShapeParams, ShapeProfile, MAX_DOME_SLOPE, dome_cap_t, hull_distance};
 use crate::objects::ObjectBuffers;
 
 /// Get the distance from a position to the edge of a shape's flat core, and the direction away from the core.
@@ -19,19 +19,28 @@ pub fn core_distance(params: &ShapeParams, vertices: &[Vec2], pos: Vec2) -> (f32
 /// both in world pixels with +y down. The height is 0 past the surface's reach, where it meets the ground.
 pub fn surface_height(params: &ShapeParams, distance: f32, direction: Vec2) -> (f32, Vec2) {
     // Height and slope of the profile, which continue below the ground past the outer radius
-    let (radius, steepness) = (params.outer_radius, params.steepness);
+    let (radius, steepness, blend) = (params.outer_radius, params.steepness, params.blend);
     let t = distance / radius;
+    let cap_t = dome_cap_t();
     let (height, slope) = match params.profile {
-        ShapeProfile::Cone => (steepness * radius * (1.0 - t), -steepness),
-        ShapeProfile::Dome if t < 1.0 => {
-            let root = (1.0 - t * t).sqrt();
-            (steepness * radius * root, -steepness * (t / root).min(MAX_DOME_SLOPE))
+        // Soft shoulder: within a blend width of the core the cone rounds over, so its slope starts at 0 at the core's edge.
+        // Past that it's the straight cone, so its foot and reach don't change.
+        ShapeProfile::Cone => {
+            let (ramp, ramp_slope) = if distance < blend { (0.5 * blend + distance * distance / (2.0 * blend), distance / blend) } else { (distance, 1.0) };
+            (steepness * (radius - ramp), -steepness * ramp_slope)
         },
-        ShapeProfile::Dome => (-steepness * MAX_DOME_SLOPE * (distance - radius), -steepness * MAX_DOME_SLOPE),
+        // A quarter circle until its slope reaches the cap, then a straight line at the capped slope
+        ShapeProfile::Dome if t < cap_t => {
+            let root = (1.0 - t * t).sqrt();
+            (steepness * radius * root, -steepness * t / root)
+        },
+        ShapeProfile::Dome => {
+            let cap_height = steepness * radius * (1.0 - cap_t * cap_t).sqrt();
+            (cap_height - steepness * MAX_DOME_SLOPE * (distance - cap_t * radius), -steepness * MAX_DOME_SLOPE)
+        },
     };
 
     // Soft foot: a smooth maximum with the ground, which is exactly the ground once the height is a blend width below it
-    let blend = params.blend;
     let mix = (0.5 + 0.5 * height / blend).clamp(0.0, 1.0);
     (mix * height + blend * mix * (1.0 - mix), direction * (mix * slope))
 }
@@ -248,6 +257,47 @@ mod tests {
 
         // Halfway out, a hemisphere's normal points straight out from its center
         assert_near(middle, Vec3::new(0.5, 0.0, (0.75f32).sqrt()));
+    }
+
+    /// A cone rounds over at the edge of its core, so its slope starts at 0 there and reaches full steepness a blend width out
+    #[test]
+    fn soft_shoulder() {
+        let params = ShapeParams { inner_radius: 10.0, ..CONE };
+        let slope = |distance: f32| surface_height(&params, distance, Vec2::new(1.0, 0.0)).1.x;
+        assert!(slope(0.0).abs() < 1e-6);
+        assert!(slope(0.01).abs() < 0.01);
+        assert!((slope(params.blend) + 1.0).abs() < 1e-6);
+        assert!((slope(5.0) + 1.0).abs() < 1e-6);
+
+        // The slope changes smoothly through the shoulder, with no step
+        let mut last = slope(0.0);
+        for i in 1..=100 {
+            let next = slope(i as f32 * 0.03);
+            assert!(next <= last + 1e-6 && last - next < 0.02, "jump at {i}: {last} -> {next}");
+            last = next;
+        }
+
+        // The tip of a point cone is rounded too, with no crease across it
+        let mut objects = zone();
+        add(&mut objects, &[(100.0, 100.0)], CONE);
+        assert!(normal(&objects, 100.2, 100.0).x < 0.1);
+        assert!(normal(&objects, 99.8, 100.0).x > -0.1);
+    }
+
+    /// A dome's slope rises smoothly to its cap and stays there, with no step where its circle becomes a straight rim
+    #[test]
+    fn dome_rim_capped() {
+        let slope = |distance: f32| -surface_height(&DOME, distance, Vec2::new(1.0, 0.0)).1.x / DOME.steepness;
+        let cap_distance = dome_cap_t() * DOME.outer_radius;
+        assert!((slope(cap_distance - 1e-3) - MAX_DOME_SLOPE).abs() < 0.01);
+        assert!((slope(cap_distance + 1e-3) - MAX_DOME_SLOPE).abs() < 1e-4);
+        for i in 0..200 {
+            assert!(slope(i as f32 * 0.15) <= MAX_DOME_SLOPE + 1e-4);
+        }
+
+        // The height doesn't jump there either
+        let height = |distance: f32| surface_height(&DOME, distance, Vec2::new(1.0, 0.0)).0;
+        assert!((height(cap_distance - 1e-3) - height(cap_distance + 1e-3)).abs() < 0.01);
     }
 
     /// Where shapes of different heights overlap, the higher one decides the normal

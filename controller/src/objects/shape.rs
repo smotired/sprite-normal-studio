@@ -14,9 +14,12 @@ pub const MIN_STEEPNESS: f32 = 0.01;
 /// Smallest blend width a shape can have, so the weights in the union never divide by zero
 pub const MIN_BLEND: f32 = 0.1;
 
-/// Largest slope of a dome, which would otherwise be vertical at its edge. About 83 degrees.
-/// Must match MAX_DOME_SLOPE in generator.wgsl and helpers.wgsl.
-pub const MAX_DOME_SLOPE: f32 = 8.0;
+/// Largest slope of a dome, which would otherwise be vertical at its edge. About 72 degrees.
+/// Past where the circle reaches this slope, the dome falls in a straight line. Must match MAX_DOME_SLOPE in generator.wgsl.
+pub const MAX_DOME_SLOPE: f32 = 3.0;
+
+/// How far out a dome's circle goes, as a fraction of its outer radius, before it reaches MAX_DOME_SLOPE and falls in a straight line
+pub fn dome_cap_t() -> f32 { MAX_DOME_SLOPE / (1.0 + MAX_DOME_SLOPE * MAX_DOME_SLOPE).sqrt() }
 
 /// How far in screen pixels the inner radius knob sits past the edge of a shape's core, so it can be grabbed even when the inner radius is 0
 pub const KNOB_OFFSET: f32 = 10.0;
@@ -99,13 +102,17 @@ impl ShapeParams {
     }
 
     /// How far from the hull the shape affects normals, past its outer radius by however far its soft edge reaches.
-    /// Must match shape_reach in generator.wgsl and helpers.wgsl.
+    /// Must match shape_reach in generator.wgsl.
     pub fn reach(&self) -> f32 {
-        let end_slope = match self.profile {
-            ShapeProfile::Cone => 1.0,
-            ShapeProfile::Dome => MAX_DOME_SLOPE,
+        // Where the profile meets the ground, then past that until the foot is a blend width below it
+        let (ground, end_slope) = match self.profile {
+            ShapeProfile::Cone => (self.outer_radius, 1.0),
+            ShapeProfile::Dome => {
+                let t = dome_cap_t();
+                (self.outer_radius * (t + (1.0 - t * t).sqrt() / MAX_DOME_SLOPE), MAX_DOME_SLOPE)
+            },
         };
-        self.inner_radius + self.outer_radius + self.blend / (self.steepness * end_slope)
+        self.inner_radius + ground + self.blend / (self.steepness * end_slope)
     }
 }
 
@@ -373,8 +380,9 @@ mod tests {
     fn reach() {
         let cone = ShapeParams { inner_radius: 2.0, outer_radius: 10.0, steepness: 0.5, blend: 2.0, profile: ShapeProfile::Cone };
         assert_eq!(cone.reach(), 16.0);
+        // The dome reaches the ground a little past its outer radius, where its straight rim meets it
         let dome = ShapeParams { profile: ShapeProfile::Dome, ..cone };
-        assert_eq!(dome.reach(), 12.5);
+        assert!((dome.reach() - 13.874).abs() < 1e-3, "{}", dome.reach());
     }
 
     /// Pending flag can be set and cleared

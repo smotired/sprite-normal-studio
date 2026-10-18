@@ -131,7 +131,12 @@ const PROFILE_DOME = 1u;
 const SHAPE_PENDING = 1u;
 
 // Largest slope of a dome, which would otherwise be vertical at its edge. Must match MAX_DOME_SLOPE in shape.rs.
-const MAX_DOME_SLOPE = 8.0;
+const MAX_DOME_SLOPE = 3.0;
+
+// How far out a dome's circle goes, as a fraction of its outer radius, before it reaches MAX_DOME_SLOPE. Must match dome_cap_t in shape.rs.
+fn dome_cap_t() -> f32 {
+    return MAX_DOME_SLOPE / sqrt(1.0 + MAX_DOME_SLOPE * MAX_DOME_SLOPE);
+}
 
 struct Shape {
     // Amount of vertices, from 1 to 3
@@ -180,9 +185,15 @@ fn get_shape(shape_id: u32, vertex_start: u32) -> Shape {
 
 // How far from the hull a shape affects normals. Must match ShapeParams::reach in shape.rs.
 fn shape_reach(shape: Shape) -> f32 {
+    // Where the profile meets the ground, then past that until the foot is a blend width below it
+    var ground = shape.outer_radius;
     var end_slope = 1.0;
-    if (shape.profile == PROFILE_DOME) { end_slope = MAX_DOME_SLOPE; }
-    return shape.inner_radius + shape.outer_radius + shape.blend / (shape.steepness * end_slope);
+    if (shape.profile == PROFILE_DOME) {
+        let t = dome_cap_t();
+        ground = shape.outer_radius * (t + sqrt(1.0 - t * t) / MAX_DOME_SLOPE);
+        end_slope = MAX_DOME_SLOPE;
+    }
+    return shape.inner_radius + ground + shape.blend / (shape.steepness * end_slope);
 }
 
 /***********************************/
@@ -276,22 +287,35 @@ fn surface_height(shape: Shape, core: Distance) -> Height {
     // Height and slope of the profile, which continue below the ground past the outer radius
     let radius = shape.outer_radius;
     let steepness = shape.steepness;
-    let t = core.distance / radius;
-    var height = steepness * radius * (1.0 - t);
-    var slope = -steepness;
+    let blend = shape.blend;
+    let distance = core.distance;
+    let t = distance / radius;
+
+    // Soft shoulder: within a blend width of the core the cone rounds over, so its slope starts at 0 at the core's edge.
+    // Past that it's the straight cone, so its foot and reach don't change.
+    var ramp = distance;
+    var ramp_slope = 1.0;
+    if (distance < blend) {
+        ramp = 0.5 * blend + distance * distance / (2.0 * blend);
+        ramp_slope = distance / blend;
+    }
+    var height = steepness * (radius - ramp);
+    var slope = -steepness * ramp_slope;
+
+    // A dome is a quarter circle until its slope reaches the cap, then a straight line at the capped slope
     if (shape.profile == PROFILE_DOME) {
-        if (t < 1.0) {
+        let cap_t = dome_cap_t();
+        if (t < cap_t) {
             let root = sqrt(1.0 - t * t);
             height = steepness * radius * root;
-            slope = -steepness * min(t / root, MAX_DOME_SLOPE);
+            slope = -steepness * t / root;
         } else {
-            height = -steepness * MAX_DOME_SLOPE * (core.distance - radius);
+            height = steepness * radius * sqrt(1.0 - cap_t * cap_t) - steepness * MAX_DOME_SLOPE * (distance - cap_t * radius);
             slope = -steepness * MAX_DOME_SLOPE;
         }
     }
 
     // Soft foot: a smooth maximum with the ground, which is exactly the ground once the height is a blend width below it
-    let blend = shape.blend;
     let mix = clamp(0.5 + 0.5 * height / blend, 0.0, 1.0);
     return Height(mix * height + blend * mix * (1.0 - mix), core.direction * (mix * slope));
 }
