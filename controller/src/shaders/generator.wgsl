@@ -440,6 +440,15 @@ fn evaluate_zone(
 /*          MAIN FUNCTION          */
 /***********************************/
 
+// The base normal map's normal at a pixel, ignoring alpha, or straight out past its edge
+fn base_normal(pxl: vec2<u32>) -> vec3<f32> {
+    let in_size = textureDimensions(normal);
+    if (pxl.x < in_size.x && pxl.y < in_size.y) {
+        return normalize(textureLoad(normal, pxl, 0).xyz * 2 - 1);
+    }
+    return vec3<f32>(0, 0, 1);
+}
+
 @compute @workgroup_size(16, 16, 1)
 fn main(
     @builtin(global_invocation_id) id: vec3<u32>
@@ -467,15 +476,22 @@ fn main(
     let flags = assignment.a;
     let has_zone1 = (flags & 0x0001) > 0;
     let has_zone2 = (flags & 0x0002) > 0;
+    let zone2_is_base = (flags & 0x0004) > 0;
 
     // If we have a zone 1, evaluate zones
     if (has_zone1) {
         // Get the first one
         norm = evaluate_zone(id.xy, z1);
 
-        // If we have a second zone, lerp between them according to z1_weight
+        // If we have a second zone, lerp between them according to z1_weight.
+        // The second can be the part of the pixel outside every zone, which gets the base normal map.
         if (has_zone2) {
-            let norm2 = evaluate_zone(id.xy, z2);
+            var norm2 = vec3<f32>(0, 0, 1);
+            if (zone2_is_base) {
+                norm2 = base_normal(id.xy);
+            } else {
+                norm2 = evaluate_zone(id.xy, z2);
+            }
 
             // Non-spherical linear interpolation.
             // If this causes noticeable artifacts, swap to slower spherical linear interpolation.
@@ -483,13 +499,9 @@ fn main(
         }
     }
 
-    // Otherwise, use the base normal map color ignoring alpha
+    // Otherwise, use the base normal map
     else {
-        let in_size = textureDimensions(normal);
-        if (id.x < in_size.x && id.y < in_size.y) {
-            norm = textureLoad(normal, id.xy, 0).xyz;
-            norm = normalize(norm * 2 - 1);
-        }
+        norm = base_normal(id.xy);
     }
 
     // Convert to color and write to the output texture

@@ -26,6 +26,9 @@ struct Output {
 
     // If we have a second zone
     has_zone2: bool,
+
+    // If the second "zone" is the part of the pixel outside every zone, which gets the base normal map
+    zone2_is_base: bool,
 }
 
 // Output value packing helper
@@ -38,6 +41,7 @@ fn pack_output(output: Output) -> vec4<u32> {
     var flags = 0u;
     if (output.has_zone1) { flags |= 1u; }
     if (output.has_zone2) { flags |= 2u; }
+    if (output.zone2_is_base) { flags |= 4u; }
 
     return vec4<u32>(output.zone1_id, output.zone2_id, ratio16, flags);
 }
@@ -366,7 +370,7 @@ fn assign_pixel(pxl: vec2<u32>) -> Output {
     }
 
     // Count each owner's subsamples once, at its first subsample, keeping the two with the most. Ties go to the zone in front.
-    var result = Output(0u, 0u, 1.0, 0.0, false, false);
+    var result = Output(0u, 0u, 1.0, 0.0, false, false, false);
     for (var s = 0u; s < SUBSAMPLES; s += 1u) {
         let zone_id = owner[s];
         if (zone_id == NO_ZONE) { continue; }
@@ -397,6 +401,22 @@ fn assign_pixel(pxl: vec2<u32>) -> Output {
             result.zone2_id = zone_id;
             result.coverage2 = coverage;
             result.has_zone2 = true;
+        }
+    }
+
+    // The part of an edge pixel outside every zone gets the base normal map, so zone edges are smooth against it too.
+    // It's behind every zone, so it loses ties. It only matters when it's one of the two largest parts of the pixel.
+    if (result.has_zone1) {
+        var outside = 0u;
+        for (var s = 0u; s < SUBSAMPLES; s += 1u) {
+            if (owner[s] == NO_ZONE) { outside += 1u; }
+        }
+        let coverage = f32(outside) / f32(SUBSAMPLES);
+        if (outside > 0u && (!result.has_zone2 || coverage > result.coverage2)) {
+            result.zone2_id = 0u;
+            result.coverage2 = coverage;
+            result.has_zone2 = true;
+            result.zone2_is_base = true;
         }
     }
     return result;
@@ -478,7 +498,7 @@ fn feather_pixel(pxl: vec2<u32>, assigned: Output) -> Output {
     }
 
     if (partner == NO_ZONE) { return assigned; }
-    return Output(assigned.zone1_id, partner, best_own, 1.0 - best_own, true, true);
+    return Output(assigned.zone1_id, partner, best_own, 1.0 - best_own, true, true, false);
 }
 
 /***********************************/
