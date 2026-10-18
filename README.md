@@ -115,7 +115,7 @@ Basically, other software is to Photoshop what this is to Illustrator.
 ```
 
 ### Phase VI - Extra Features
-*10/17/26 - present*
+*10/17/26 - 10/17/26*
 
 ```
 [x] Slicing the grid into individual sprites, and displaying the grid
